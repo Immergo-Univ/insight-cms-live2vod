@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { now, today } from "@internationalized/date";
 import type { Channel } from "@/types/channel";
 
 export interface ChannelDateRange {
@@ -6,17 +7,16 @@ export interface ChannelDateRange {
   endDate: Date;
 }
 
-export function useChannelDateRange(channel: Channel | null) {
+export function useChannelDateRange(channel: Channel | null, tz: string) {
   const range = useMemo<ChannelDateRange | null>(() => {
     if (!channel) return null;
 
-    const now = new Date();
-    const start = new Date(now);
-    start.setDate(start.getDate() - 3);
-    start.setHours(0, 0, 0, 0);
+    const startCalDate = today(tz).subtract({ days: 3 });
+    const startDate = startCalDate.toDate(tz);
+    const endDate = now(tz).toDate();
 
-    return { startDate: start, endDate: now };
-  }, [channel]);
+    return { startDate, endDate };
+  }, [channel, tz]);
 
   return { range, loading: false, error: null };
 }

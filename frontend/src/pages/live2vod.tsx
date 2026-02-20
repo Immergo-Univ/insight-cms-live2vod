@@ -1,5 +1,4 @@
 import { useState } from "react";
-import { getLocalTimeZone } from "@internationalized/date";
 import { Clock, PlayCircle, Tv01 } from "@untitledui/icons";
 import { useDateFormatter } from "react-aria";
 import type { DateValue, RangeValue } from "react-aria-components";
@@ -10,14 +9,16 @@ import { TimelinePanel } from "@/components/live2vod/timeline/timeline-panel";
 import { VideoPreview } from "@/components/live2vod/video-preview";
 import { useChannelDateRange } from "@/hooks/use-channel-date-range";
 import { useChannels } from "@/hooks/use-channels";
+import { useTimezone } from "@/hooks/use-timezone";
 import type { Channel } from "@/types/channel";
 
 export function Live2VodPage() {
+  const tz = useTimezone();
   const { channels, loading, error } = useChannels();
   const [selectedChannel, setSelectedChannel] = useState<Channel | null>(null);
   const [dateRange, setDateRange] = useState<RangeValue<DateValue> | null>(null);
   const [timeWindow, setTimeWindow] = useState<TimeWindow | null>(null);
-  const { range: availableRange } = useChannelDateRange(selectedChannel);
+  const { range: availableRange } = useChannelDateRange(selectedChannel, tz);
 
   const handleSelectChannel = (channel: Channel) => {
     setSelectedChannel(channel);
@@ -62,6 +63,7 @@ export function Live2VodPage() {
                     availableRange={availableRange}
                     dateRange={dateRange}
                     onDateRangeChange={setDateRange}
+                    tz={tz}
                   />
                 )}
               </div>
@@ -83,6 +85,7 @@ export function Live2VodPage() {
                   streamUrl={selectedChannel.hlsStream}
                   timeWindow={timeWindow}
                   channelTitle={selectedChannel.title}
+                  tz={tz}
                 />
               ) : (
                 <PreviewPlaceholder hasTimeline={!!dateRange} />
@@ -122,18 +125,22 @@ function CalendarPanel({
   availableRange,
   dateRange,
   onDateRangeChange,
+  tz,
 }: {
   availableRange: NonNullable<ReturnType<typeof useChannelDateRange>["range"]>;
   dateRange: RangeValue<DateValue> | null;
   onDateRangeChange: (value: RangeValue<DateValue>) => void;
+  tz: string;
 }) {
   const startLocal = availableRange.startDate.toLocaleString(undefined, {
     month: "short",
     day: "numeric",
+    timeZone: tz,
   });
   const endLocal = availableRange.endDate.toLocaleString(undefined, {
     month: "short",
     day: "numeric",
+    timeZone: tz,
   });
 
   return (
@@ -152,15 +159,14 @@ function CalendarPanel({
       />
 
       {dateRange && (
-        <SelectedRangeInfo dateRange={dateRange} />
+        <SelectedRangeInfo dateRange={dateRange} tz={tz} />
       )}
     </div>
   );
 }
 
-function SelectedRangeInfo({ dateRange }: { dateRange: RangeValue<DateValue> }) {
-  const tz = getLocalTimeZone();
-  const formatter = useDateFormatter({ month: "short", day: "numeric", year: "numeric" });
+function SelectedRangeInfo({ dateRange, tz }: { dateRange: RangeValue<DateValue>; tz: string }) {
+  const formatter = useDateFormatter({ month: "short", day: "numeric", year: "numeric", timeZone: tz });
   const from = formatter.format(dateRange.start.toDate(tz));
   const to = formatter.format(dateRange.end.toDate(tz));
 
@@ -190,10 +196,12 @@ function PreviewPanel({
   streamUrl,
   timeWindow,
   channelTitle,
+  tz,
 }: {
   streamUrl: string;
   timeWindow: TimeWindow;
   channelTitle: string;
+  tz: string;
 }) {
   const fmt = (ts: number) =>
     new Date(ts * 1000).toLocaleString(undefined, {
@@ -201,6 +209,7 @@ function PreviewPanel({
       day: "numeric",
       hour: "2-digit",
       minute: "2-digit",
+      timeZone: tz,
     });
 
   const durationSec = timeWindow.endTime - timeWindow.startTime;

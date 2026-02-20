@@ -5,10 +5,11 @@ const TICK_HEIGHT = PX_PER_MINUTE * MINUTES_PER_TICK;
 interface TimelineRulerProps {
   totalMinutes: number;
   startDate: Date;
+  tz: string;
   onTickClick?: (minuteOffset: number) => void;
 }
 
-export function TimelineRuler({ totalMinutes, startDate, onTickClick }: TimelineRulerProps) {
+export function TimelineRuler({ totalMinutes, startDate, tz, onTickClick }: TimelineRulerProps) {
   const totalTicks = Math.floor(totalMinutes / MINUTES_PER_TICK);
   const totalHeight = totalMinutes * PX_PER_MINUTE;
 
@@ -32,10 +33,8 @@ export function TimelineRuler({ totalMinutes, startDate, onTickClick }: Timeline
         const isHour = minuteOffset % 60 === 0;
         const hourIndex = Math.floor(minuteOffset / 60);
         const displayHour = hourIndex % 24;
-        const dayIndex = Math.floor(hourIndex / 24);
 
-        const labelDate = new Date(startDate);
-        labelDate.setDate(labelDate.getDate() + dayIndex);
+        const labelDate = new Date(startDate.getTime() + Math.floor(hourIndex / 24) * 86_400_000);
 
         const label = `${String(displayHour).padStart(2, "0")}:${String(minuteOffset % 60).padStart(2, "0")}`;
 
@@ -53,7 +52,7 @@ export function TimelineRuler({ totalMinutes, startDate, onTickClick }: Timeline
                 {label}
                 {displayHour === 0 && (
                   <span className="ml-1 font-medium text-secondary">
-                    {labelDate.toLocaleDateString(undefined, { month: "short", day: "numeric" })}
+                    {labelDate.toLocaleDateString(undefined, { month: "short", day: "numeric", timeZone: tz })}
                   </span>
                 )}
               </span>

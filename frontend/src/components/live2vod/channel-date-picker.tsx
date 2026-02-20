@@ -2,7 +2,6 @@ import { useContext } from "react";
 import {
   CalendarDate,
   fromDate,
-  getLocalTimeZone,
   toCalendarDate,
 } from "@internationalized/date";
 import { ChevronLeft, ChevronRight } from "@untitledui/icons";
@@ -19,6 +18,7 @@ import { useDateFormatter } from "react-aria";
 import { Button } from "@/components/base/buttons/button";
 import { CalendarCell } from "@/components/application/date-picker/cell";
 import type { ChannelDateRange } from "@/hooks/use-channel-date-range";
+import { useTimezone } from "@/hooks/use-timezone";
 
 interface ChannelDatePickerProps {
   availableRange: ChannelDateRange;
@@ -26,8 +26,8 @@ interface ChannelDatePickerProps {
   onChange: (value: RangeValue<DateValue>) => void;
 }
 
-function toCalDate(date: Date): CalendarDate {
-  const zoned = fromDate(date, getLocalTimeZone());
+function toCalDate(date: Date, tz: string): CalendarDate {
+  const zoned = fromDate(date, tz);
   return toCalendarDate(zoned);
 }
 
@@ -49,8 +49,9 @@ export function ChannelDatePicker({
   value,
   onChange,
 }: ChannelDatePickerProps) {
-  const minDate = toCalDate(availableRange.startDate);
-  const maxDate = toCalDate(availableRange.endDate);
+  const tz = useTimezone();
+  const minDate = toCalDate(availableRange.startDate, tz);
+  const maxDate = toCalDate(availableRange.endDate, tz);
 
   return (
     <AriaRangeCalendar
@@ -60,6 +61,7 @@ export function ChannelDatePicker({
       value={value}
       onChange={onChange}
       className="flex flex-col gap-2"
+      timeZone={tz}
     >
       <header className="flex items-center justify-between">
         <Button

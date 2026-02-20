@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { DateValue, RangeValue } from "react-aria-components";
-import { getLocalTimeZone } from "@internationalized/date";
+import { now as intlNow } from "@internationalized/date";
 import { TimelineCurrentTime } from "./timeline-current-time";
 import { TimelineRuler, PX_PER_MINUTE, MINUTES_PER_TICK } from "./timeline-ruler";
 import { TimelineSelection } from "./timeline-selection";
+import { useTimezone } from "@/hooks/use-timezone";
 
 export interface TimeWindow {
   startTime: number;
@@ -15,24 +16,18 @@ interface TimelinePanelProps {
   onTimeWindowChange?: (tw: TimeWindow) => void;
 }
 
-function dateValueToDate(dv: DateValue): Date {
-  return dv.toDate(getLocalTimeZone());
-}
-
 export function TimelinePanel({ dateRange, onTimeWindowChange }: TimelinePanelProps) {
+  const tz = useTimezone();
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const startDate = useMemo(() => {
-    const d = dateValueToDate(dateRange.start);
-    d.setHours(0, 0, 0, 0);
-    return d;
-  }, [dateRange.start]);
+    return dateRange.start.toDate(tz);
+  }, [dateRange.start, tz]);
 
   const endDate = useMemo(() => {
-    const d = dateValueToDate(dateRange.end);
-    d.setHours(23, 59, 59, 999);
-    return d;
-  }, [dateRange.end]);
+    const d = dateRange.end.toDate(tz);
+    return new Date(d.getTime() + 24 * 60 * 60 * 1000 - 1);
+  }, [dateRange.end, tz]);
 
   const totalMinutes = useMemo(() => {
     const diffMs = endDate.getTime() - startDate.getTime();
@@ -47,7 +42,8 @@ export function TimelinePanel({ dateRange, onTimeWindowChange }: TimelinePanelPr
   const [selBottom, setSelBottom] = useState(60);
 
   useEffect(() => {
-    const nowMinutes = (Date.now() - startDate.getTime()) / (1000 * 60);
+    const nowMs = intlNow(tz).toDate().getTime();
+    const nowMinutes = (nowMs - startDate.getTime()) / (1000 * 60);
     const snap = (v: number) => Math.round(v / MINUTES_PER_TICK) * MINUTES_PER_TICK;
 
     const bottom = snap(Math.min(nowMinutes, totalMinutes));
@@ -55,7 +51,7 @@ export function TimelinePanel({ dateRange, onTimeWindowChange }: TimelinePanelPr
 
     setSelTop(top);
     setSelBottom(bottom);
-  }, [startDate, totalMinutes]);
+  }, [startDate, totalMinutes, tz]);
 
   useEffect(() => {
     if (!onTimeWindowChange) return;
@@ -98,6 +94,7 @@ export function TimelinePanel({ dateRange, onTimeWindowChange }: TimelinePanelPr
           startDate={startDate}
           topMinutes={selTop}
           bottomMinutes={selBottom}
+          tz={tz}
         />
       </div>
 
@@ -106,6 +103,7 @@ export function TimelinePanel({ dateRange, onTimeWindowChange }: TimelinePanelPr
           <TimelineRuler
             totalMinutes={totalMinutes}
             startDate={startDate}
+            tz={tz}
             onTickClick={handleTickClick}
           />
 
@@ -127,10 +125,12 @@ function SelectionSummary({
   startDate,
   topMinutes,
   bottomMinutes,
+  tz,
 }: {
   startDate: Date;
   topMinutes: number;
   bottomMinutes: number;
+  tz: string;
 }) {
   const from = new Date(startDate.getTime() + topMinutes * 60_000);
   const to = new Date(startDate.getTime() + bottomMinutes * 60_000);
@@ -141,6 +141,7 @@ function SelectionSummary({
       day: "numeric",
       hour: "2-digit",
       minute: "2-digit",
+      timeZone: tz,
     });
 
   const durationMin = bottomMinutes - topMinutes;
