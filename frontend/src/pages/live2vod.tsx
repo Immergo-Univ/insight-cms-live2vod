@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Clock, PlayCircle, Tv01 } from "@untitledui/icons";
+import { ClipJsonButton } from "@/components/live2vod/clip-json-button";
 import { useDateFormatter } from "react-aria";
 import type { DateValue, RangeValue } from "react-aria-components";
 import { ChannelDatePicker } from "@/components/live2vod/channel-date-picker";
@@ -100,6 +101,11 @@ export function Live2VodPage() {
           <EmptyState />
         )}
       </main>
+
+      <ClipJsonButton
+        streamUrl={selectedChannel?.hlsStream ?? null}
+        timeWindow={timeWindow}
+      />
     </div>
   );
 }

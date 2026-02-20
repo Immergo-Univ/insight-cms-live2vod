@@ -74,7 +74,7 @@ export function TimelinePrograms({
         return (
           <div
             key={`${ev.title}-${i}`}
-            className="absolute left-12 right-0 z-10 cursor-pointer overflow-hidden border-l-2 border-brand-solid/60 bg-brand-solid/8 transition-colors hover:bg-brand-solid/15"
+            className="absolute left-12 right-0 z-10 cursor-pointer overflow-hidden border-y border-l-2 border-brand-solid/30 border-l-brand-solid/60 bg-brand-solid/8 transition-colors hover:bg-brand-solid/15"
             style={{ top, height }}
             onClick={handleClick}
             title={ev.title}
