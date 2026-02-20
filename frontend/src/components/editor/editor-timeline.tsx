@@ -121,7 +121,7 @@ export function EditorTimeline({
       </div>
       <div
         ref={scrollRef}
-        className="scrollbar-thin relative h-[100px] overflow-x-auto overflow-y-hidden rounded-lg border border-secondary bg-secondary"
+        className="scrollbar-thin relative h-[100px] overflow-x-auto overflow-y-hidden border border-secondary bg-secondary"
         onWheel={handleWheel}
         style={{ scrollBehavior: "smooth" }}
       >
