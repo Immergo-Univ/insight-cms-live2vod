@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useImperativeHandle, forwardRef } from "react";
-import { VolumeMax, VolumeX } from "@untitledui/icons";
+import { Play, PauseCircle, StopCircle, VolumeMax, VolumeX } from "@untitledui/icons";
 import videojs from "video.js";
 import type Player from "video.js/dist/types/player";
 import "video.js/dist/video-js.css";
+import type { EditorSubClip } from "@/types/editor";
 
 export interface EditorPlayerRef {
   seek: (timeSeconds: number) => void;
@@ -22,11 +23,44 @@ interface EditorPlayerProps {
   onDurationChange?: (durationSeconds: number) => void;
   onPlay?: () => void;
   onPause?: () => void;
+  /** Transport controls shown over the player (same style as Mute). */
+  isPlaying?: boolean;
+  onTransportPlay?: () => void;
+  onTransportPause?: () => void;
+  onTransportStop?: () => void;
+  /** Mark In/Out buttons at bottom center. */
+  currentTimeSeconds?: number;
+  markInTime?: number | null;
+  selectedClip?: EditorSubClip | null;
+  onMarkIn?: (timeSeconds: number) => void;
+  onMarkOut?: (timeSeconds: number) => void;
+  markInOutDisabled?: boolean;
 }
+
+const overlayButtonClass =
+  "flex size-9 cursor-pointer items-center justify-center rounded-md bg-black/60 text-white transition-colors hover:bg-black/80 focus:outline-none focus:ring-2 focus:ring-white/50";
 
 export const EditorPlayer = forwardRef<EditorPlayerRef, EditorPlayerProps>(
   function EditorPlayer(
-    { clipUrl, muted = false, onMutedChange, onTimeUpdate, onDurationChange, onPlay, onPause },
+    {
+      clipUrl,
+      muted = false,
+      onMutedChange,
+      onTimeUpdate,
+      onDurationChange,
+      onPlay,
+      onPause,
+      isPlaying = false,
+      onTransportPlay,
+      onTransportPause,
+      onTransportStop,
+      currentTimeSeconds = 0,
+      markInTime = null,
+      selectedClip = null,
+      onMarkIn,
+      onMarkOut,
+      markInOutDisabled,
+    },
     ref
   ) {
     const containerRef = useRef<HTMLDivElement>(null);
@@ -110,13 +144,80 @@ export const EditorPlayer = forwardRef<EditorPlayerRef, EditorPlayerProps>(
       onMutedChange?.(!muted);
     }, [muted, onMutedChange]);
 
+    const canMarkIn = selectedClip
+      ? currentTimeSeconds < selectedClip.endTime
+      : true;
+    const canMarkOut = selectedClip
+      ? currentTimeSeconds > selectedClip.startTime
+      : markInTime !== null && currentTimeSeconds > markInTime;
+
     return (
       <div className="relative aspect-video w-full max-w-3xl overflow-hidden rounded-lg bg-black">
         <div ref={containerRef} className="video-js-container" />
+        {/* Play / Pause / Stop — bottom-left, same style as Mute */}
+        {(onTransportPlay || onTransportPause || onTransportStop) && (
+          <div className="absolute bottom-2 left-2 flex items-center gap-1">
+            {isPlaying ? (
+              <button
+                type="button"
+                onClick={onTransportPause}
+                className={overlayButtonClass}
+                title="Pause"
+                aria-label="Pause"
+              >
+                <PauseCircle className="size-5" />
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={onTransportPlay}
+                className={overlayButtonClass}
+                title="Play"
+                aria-label="Play"
+              >
+                <Play className="size-5" />
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={onTransportStop}
+              className={overlayButtonClass}
+              title="Stop"
+              aria-label="Stop"
+            >
+              <StopCircle className="size-5" />
+            </button>
+          </div>
+        )}
+        {/* Mark In / Mark Out — bottom center, same style as Play/Stop */}
+        {onMarkIn && onMarkOut && (
+          <div className="absolute bottom-2 left-1/2 flex -translate-x-1/2 items-center gap-1">
+            <button
+              type="button"
+              onClick={() => onMarkIn(currentTimeSeconds)}
+              disabled={markInOutDisabled || !canMarkIn}
+              className="flex cursor-pointer items-center justify-center rounded-md bg-black/60 px-3 py-2 text-sm font-semibold text-white transition-colors hover:bg-black/80 focus:outline-none focus:ring-2 focus:ring-white/50 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-black/60"
+              title="Mark In"
+              aria-label="Mark In"
+            >
+              Mark In
+            </button>
+            <button
+              type="button"
+              onClick={() => onMarkOut(currentTimeSeconds)}
+              disabled={markInOutDisabled || !canMarkOut}
+              className="flex cursor-pointer items-center justify-center rounded-md bg-black/60 px-3 py-2 text-sm font-semibold text-white transition-colors hover:bg-black/80 focus:outline-none focus:ring-2 focus:ring-white/50 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-black/60"
+              title="Mark Out"
+              aria-label="Mark Out"
+            >
+              Mark Out
+            </button>
+          </div>
+        )}
         <button
           type="button"
           onClick={handleMuteToggle}
-          className="absolute bottom-2 right-2 flex size-9 items-center justify-center rounded-md bg-black/60 text-white transition-colors hover:bg-black/80"
+          className={`absolute bottom-2 right-2 ${overlayButtonClass}`}
           title={muted ? "Unmute" : "Mute"}
           aria-label={muted ? "Unmute" : "Mute"}
         >

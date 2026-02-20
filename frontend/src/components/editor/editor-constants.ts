@@ -31,6 +31,9 @@ export const ZOOM_LABELS: string[] = [
 /** Fixed width per thumbnail column in the timeline (px). */
 export const COLUMN_WIDTH_PX = 120;
 
+/** Duration of one frame in seconds (30 fps). Used for arrow-key step. */
+export const FRAME_DURATION_SEC = 1 / 30;
+
 /**
  * Build thumbnail URL for a given time (seconds from clip start).
  */

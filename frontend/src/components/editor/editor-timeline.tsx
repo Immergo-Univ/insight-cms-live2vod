@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Trash01 } from "@untitledui/icons";
+import { ChevronLeft, ChevronRight, Trash01 } from "@untitledui/icons";
 import {
   COLUMN_WIDTH_PX,
   ZOOM_LEVELS_MS,
@@ -26,8 +26,13 @@ interface EditorTimelineProps {
   zoomIndex: number;
   onZoomIndexChange: (index: number) => void;
   onSeek: (timeSeconds: number) => void;
+  /** Called when the track background is clicked (not on a clip). Use to seek and e.g. clear selection. */
+  onTrackClick?: (timeSeconds: number) => void;
   clips?: EditorSubClip[];
+  selectedClipId?: string | null;
+  onSelectClip?: (id: string | null) => void;
   onRemoveClip?: (id: string) => void;
+  onResizeClip?: (id: string, newStartTime?: number, newEndTime?: number) => void;
 }
 
 export function EditorTimeline({
@@ -38,17 +43,42 @@ export function EditorTimeline({
   zoomIndex,
   onZoomIndexChange,
   onSeek,
+  onTrackClick,
   clips = [],
+  selectedClipId = null,
+  onSelectClip,
   onRemoveClip,
+  onResizeClip,
 }: EditorTimelineProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const innerRef = useRef<HTMLDivElement>(null);
   const [hoverClipId, setHoverClipId] = useState<string | null>(null);
+  const [dragging, setDragging] = useState<{
+    clipId: string;
+    edge: "left" | "right";
+    startTime: number;
+    endTime: number;
+  } | null>(null);
 
   const zoomMs = ZOOM_LEVELS_MS[zoomIndex] ?? ZOOM_LEVELS_MS[0];
   const zoomSeconds = zoomMs / 1000;
   const columnCount = Math.max(1, Math.ceil(durationSeconds / zoomSeconds));
   const totalWidth = columnCount * COLUMN_WIDTH_PX;
+
+  const pixelToTime = useCallback(
+    (clientX: number) => {
+      const inner = innerRef.current;
+      if (!inner || durationSeconds <= 0) return 0;
+      const cols = Math.max(1, Math.ceil(durationSeconds / zoomSeconds));
+      const width = cols * COLUMN_WIDTH_PX;
+      const rect = inner.getBoundingClientRect();
+      const x = clientX - rect.left;
+      const fraction = Math.max(0, Math.min(1, width > 0 ? x / width : 0));
+      return fraction * durationSeconds;
+    },
+    [durationSeconds, zoomSeconds]
+  );
+
   const playheadPx =
     durationSeconds > 0
       ? (currentTimeSeconds / durationSeconds) * totalWidth
@@ -63,7 +93,7 @@ export function EditorTimeline({
         if (next !== zoomIndex) onZoomIndexChange(next);
       } else {
         const el = scrollRef.current;
-        if (el) el.scrollLeft += e.deltaY;
+        if (el) el.scrollLeft += e.deltaY * 2;
       }
     },
     [zoomIndex, onZoomIndexChange]
@@ -77,19 +107,57 @@ export function EditorTimeline({
     return () => el.removeEventListener("wheel", handler);
   }, []);
 
+  const scrollStep = 400;
+
+  const handleScrollLeft = useCallback(() => {
+    const el = scrollRef.current;
+    if (el) el.scrollBy({ left: -scrollStep, behavior: "smooth" });
+  }, []);
+
+  const handleScrollRight = useCallback(() => {
+    const el = scrollRef.current;
+    if (el) el.scrollBy({ left: scrollStep, behavior: "smooth" });
+  }, []);
+
+  useEffect(() => {
+    if (!dragging || !onResizeClip) return;
+    const minDuration = 1;
+
+    const onMouseMove = (e: MouseEvent) => {
+      const t = pixelToTime(e.clientX);
+      if (dragging.edge === "left") {
+        const newStart = Math.max(0, Math.min(t, dragging.endTime - minDuration));
+        onResizeClip(dragging.clipId, newStart, undefined);
+      } else {
+        const newEnd = Math.max(dragging.startTime + minDuration, Math.min(durationSeconds, t));
+        onResizeClip(dragging.clipId, undefined, newEnd);
+      }
+    };
+    const onMouseUp = () => setDragging(null);
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseup", onMouseUp);
+    return () => {
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", onMouseUp);
+    };
+  }, [dragging, durationSeconds, onResizeClip, pixelToTime]);
+
   const handleTimelineClick = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
       const target = e.target as HTMLElement;
-      if (target.closest("[data-clip-overlay]")) return;
+      if (target.closest("[data-clip-overlay]") || target.closest("[data-resize-handle]")) return;
       const inner = innerRef.current;
       if (!inner || durationSeconds <= 0) return;
+      const cols = Math.max(1, Math.ceil(durationSeconds / zoomSeconds));
+      const width = cols * COLUMN_WIDTH_PX;
       const rect = inner.getBoundingClientRect();
       const x = e.clientX - rect.left;
-      const fraction = Math.max(0, Math.min(1, x / totalWidth));
+      const fraction = Math.max(0, Math.min(1, width > 0 ? x / width : 0));
       const time = fraction * durationSeconds;
-      onSeek(time);
+      if (onTrackClick) onTrackClick(time);
+      else onSeek(time);
     },
-    [durationSeconds, totalWidth, onSeek]
+    [durationSeconds, zoomSeconds, onSeek, onTrackClick]
   );
 
   if (durationSeconds <= 0) {
@@ -119,53 +187,87 @@ export function EditorTimeline({
           ))}
         </select>
       </div>
-      <div
-        ref={scrollRef}
-        className="scrollbar-thin relative h-[100px] overflow-x-auto overflow-y-hidden border border-secondary bg-secondary"
-        onWheel={handleWheel}
-        style={{ scrollBehavior: "smooth" }}
-      >
-        <div
-          ref={innerRef}
-          className="relative flex h-full cursor-pointer flex-row"
-          style={{ width: totalWidth, minWidth: "100%" }}
-          onClick={handleTimelineClick}
+      <div className="flex items-stretch gap-0">
+        <button
+          type="button"
+          onClick={handleScrollLeft}
+          className="flex shrink-0 items-center justify-center border border-secondary border-r-0 bg-secondary px-2 text-fg-secondary transition-colors hover:bg-tertiary hover:text-fg-primary"
+          aria-label="Scroll timeline left"
         >
-          {Array.from({ length: columnCount }, (_, i) => {
-            const timeSec = i * zoomSeconds;
-            const thumbUrl = buildThumbnailUrl(clipUrl, timeSec, channelId);
-            return (
-              <div
-                key={i}
-                className="flex shrink-0 flex-col"
-                style={{ width: COLUMN_WIDTH_PX }}
-              >
+          <ChevronLeft className="size-5" />
+        </button>
+        <div
+          ref={scrollRef}
+          className="scrollbar-hide relative min-w-0 flex-1 overflow-x-auto overflow-y-hidden border border-secondary bg-secondary"
+          style={{ height: 120, scrollBehavior: "smooth" }}
+          onWheel={handleWheel}
+        >
+          <div
+            ref={innerRef}
+            className="relative flex h-full cursor-pointer flex-row"
+            style={{ width: totalWidth, minWidth: "100%" }}
+            onClick={handleTimelineClick}
+          >
+            {Array.from({ length: columnCount }, (_, i) => {
+              const timeSec = i * zoomSeconds;
+              const thumbUrl = buildThumbnailUrl(clipUrl, timeSec, channelId);
+              return (
                 <div
-                  className="h-14 w-full shrink-0 bg-quaternary"
+                  key={i}
+                  className="flex shrink-0 flex-col"
                   style={{ width: COLUMN_WIDTH_PX }}
                 >
-                  <img
-                    src={thumbUrl}
-                    alt=""
-                    className="size-full object-cover"
-                    loading="lazy"
-                  />
+                  <div
+                    className="min-h-0 flex-1 w-full bg-quaternary"
+                    style={{ width: COLUMN_WIDTH_PX }}
+                  >
+                    <img
+                      src={thumbUrl}
+                      alt=""
+                      className="size-full object-cover"
+                      loading="lazy"
+                    />
+                  </div>
+                  <div className="flex h-6 shrink-0 items-center justify-center text-[10px] text-tertiary">
+                    {formatTime(timeSec)}
+                  </div>
                 </div>
-                <div className="flex h-6 items-center justify-center text-[10px] text-tertiary">
-                  {formatTime(timeSec)}
-                </div>
-              </div>
-            );
-          })}
+              );
+            })}
           {clips.map((c) => {
             const left = (c.startTime / durationSeconds) * totalWidth;
             const width = ((c.endTime - c.startTime) / durationSeconds) * totalWidth;
             const isHover = hoverClipId === c.id;
+            const isSelected = selectedClipId === c.id;
+            const canResize = onResizeClip && width > 8;
+            const handleOverlayClick = () => {
+              if (onSelectClip) {
+                onSelectClip(isSelected ? null : c.id);
+                if (!isSelected) onSeek(c.startTime);
+              }
+            };
             return (
               <div
                 key={c.id}
                 data-clip-overlay
-                className="absolute top-0 bottom-0 z-10 flex items-start justify-center border-x-2 border-brand-solid bg-brand-primary/25 transition-colors hover:bg-brand-primary/45"
+                role={onSelectClip ? "button" : undefined}
+                tabIndex={onSelectClip ? 0 : undefined}
+                onClick={onSelectClip ? handleOverlayClick : undefined}
+                onKeyDown={
+                  onSelectClip
+                    ? (e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          handleOverlayClick();
+                        }
+                      }
+                    : undefined
+                }
+                className={`absolute top-0 bottom-0 z-10 flex items-start justify-center transition-colors ${
+                  isSelected
+                    ? "ring-2 ring-brand-solid bg-blue-500/50"
+                    : "bg-blue-500/30 hover:bg-blue-500/50"
+                }`}
                 style={{
                   left,
                   width: Math.max(width, 4),
@@ -174,6 +276,30 @@ export function EditorTimeline({
                 onMouseEnter={() => setHoverClipId(c.id)}
                 onMouseLeave={() => setHoverClipId(null)}
               >
+                {canResize && (
+                  <>
+                    <div
+                      data-resize-handle
+                      className="absolute left-0 top-0 z-30 h-full w-0.5 cursor-ew-resize bg-blue-600 transition-[width] duration-100 hover:w-1"
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        setDragging({ clipId: c.id, edge: "left", startTime: c.startTime, endTime: c.endTime });
+                      }}
+                      aria-label="Resize sub-clip start"
+                    />
+                    <div
+                      data-resize-handle
+                      className="absolute right-0 top-0 z-30 h-full w-0.5 cursor-ew-resize bg-blue-600 transition-[width] duration-100 hover:w-1"
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        setDragging({ clipId: c.id, edge: "right", startTime: c.startTime, endTime: c.endTime });
+                      }}
+                      aria-label="Resize sub-clip end"
+                    />
+                  </>
+                )}
                 {onRemoveClip && (
                   <button
                     type="button"
@@ -181,7 +307,7 @@ export function EditorTimeline({
                       e.stopPropagation();
                       onRemoveClip(c.id);
                     }}
-                    className={`mt-1 flex size-6 items-center justify-center rounded-full bg-primary/90 text-fg-secondary shadow transition-opacity hover:bg-error-primary hover:text-white ${
+                    className={`mt-1 flex size-6 items-center justify-center rounded-full bg-primary shadow text-fg-secondary ${
                       isHover ? "opacity-100" : "opacity-0"
                     }`}
                     aria-label="Remove sub-clip"
@@ -193,13 +319,34 @@ export function EditorTimeline({
             );
           })}
           <div
-            className="pointer-events-none absolute top-0 bottom-0 z-20 w-0.5 bg-brand-solid"
+            className="pointer-events-none absolute top-0 bottom-0 z-20 flex flex-col items-center"
             style={{
               left: playheadPx,
               transform: "translateX(-50%)",
             }}
-          />
+          >
+            <div
+              className="border-x-[5px] border-t-[6px] border-x-transparent border-t-red-500"
+              style={{ width: 0, height: 0 }}
+              aria-hidden
+            />
+            <div className="w-0.5 flex-1 shrink-0 bg-red-500" />
+            <div
+              className="border-x-[5px] border-b-[6px] border-x-transparent border-b-red-500"
+              style={{ width: 0, height: 0 }}
+              aria-hidden
+            />
+          </div>
+          </div>
         </div>
+        <button
+          type="button"
+          onClick={handleScrollRight}
+          className="flex shrink-0 items-center justify-center border border-secondary border-l-0 bg-secondary px-2 text-fg-secondary transition-colors hover:bg-tertiary hover:text-fg-primary"
+          aria-label="Scroll timeline right"
+        >
+          <ChevronRight className="size-5" />
+        </button>
       </div>
     </div>
   );
