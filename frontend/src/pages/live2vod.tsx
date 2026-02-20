@@ -1,11 +1,13 @@
 import { useState } from "react";
 import { getLocalTimeZone } from "@internationalized/date";
-import { Clock, Tv01 } from "@untitledui/icons";
+import { Clock, PlayCircle, Tv01 } from "@untitledui/icons";
 import { useDateFormatter } from "react-aria";
 import type { DateValue, RangeValue } from "react-aria-components";
 import { ChannelDatePicker } from "@/components/live2vod/channel-date-picker";
 import { ChannelList } from "@/components/live2vod/channel-list";
+import type { TimeWindow } from "@/components/live2vod/timeline/timeline-panel";
 import { TimelinePanel } from "@/components/live2vod/timeline/timeline-panel";
+import { VideoPreview } from "@/components/live2vod/video-preview";
 import { useChannelDateRange } from "@/hooks/use-channel-date-range";
 import { useChannels } from "@/hooks/use-channels";
 import type { Channel } from "@/types/channel";
@@ -14,11 +16,13 @@ export function Live2VodPage() {
   const { channels, loading, error } = useChannels();
   const [selectedChannel, setSelectedChannel] = useState<Channel | null>(null);
   const [dateRange, setDateRange] = useState<RangeValue<DateValue> | null>(null);
+  const [timeWindow, setTimeWindow] = useState<TimeWindow | null>(null);
   const { range: availableRange } = useChannelDateRange(selectedChannel);
 
   const handleSelectChannel = (channel: Channel) => {
     setSelectedChannel(channel);
     setDateRange(null);
+    setTimeWindow(null);
   };
 
   return (
@@ -63,12 +67,25 @@ export function Live2VodPage() {
               </div>
             </div>
 
-            {/* Panel 3: Timeline (takes remaining space) */}
-            <div className="flex flex-1 flex-col">
+            {/* Panel 3: Timeline */}
+            <div className="flex w-80 shrink-0 flex-col border-r border-secondary">
               {dateRange ? (
-                <TimelinePanel dateRange={dateRange} />
+                <TimelinePanel dateRange={dateRange} onTimeWindowChange={setTimeWindow} />
               ) : (
                 <TimelinePlaceholder />
+              )}
+            </div>
+
+            {/* Panel 4: Video preview */}
+            <div className="flex flex-1 flex-col">
+              {timeWindow && selectedChannel ? (
+                <PreviewPanel
+                  streamUrl={selectedChannel.hlsStream}
+                  timeWindow={timeWindow}
+                  channelTitle={selectedChannel.title}
+                />
+              ) : (
+                <PreviewPlaceholder hasTimeline={!!dateRange} />
               )}
             </div>
           </>
@@ -164,6 +181,61 @@ function TimelinePlaceholder() {
       <p className="text-sm font-medium text-primary">Timeline</p>
       <p className="mt-1 text-center text-sm text-tertiary">
         Select a date range to enable the timeline
+      </p>
+    </div>
+  );
+}
+
+function PreviewPanel({
+  streamUrl,
+  timeWindow,
+  channelTitle,
+}: {
+  streamUrl: string;
+  timeWindow: TimeWindow;
+  channelTitle: string;
+}) {
+  const fmt = (ts: number) =>
+    new Date(ts * 1000).toLocaleString(undefined, {
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+
+  const durationSec = timeWindow.endTime - timeWindow.startTime;
+  const hours = Math.floor(durationSec / 3600);
+  const mins = Math.floor((durationSec % 3600) / 60);
+  const durationLabel = hours > 0
+    ? `${hours}h ${mins > 0 ? `${mins}m` : ""}`
+    : `${mins}m`;
+
+  return (
+    <div className="flex h-full flex-col">
+      <div className="border-b border-secondary px-4 py-3">
+        <h2 className="text-sm font-semibold text-primary">Preview</h2>
+        <p className="mt-0.5 text-xs text-tertiary">
+          {channelTitle} — {fmt(timeWindow.startTime)} → {fmt(timeWindow.endTime)} ({durationLabel})
+        </p>
+      </div>
+      <div className="flex flex-1 items-start justify-center overflow-y-auto p-4">
+        <div className="w-full max-w-3xl">
+          <VideoPreview streamUrl={streamUrl} timeWindow={timeWindow} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PreviewPlaceholder({ hasTimeline }: { hasTimeline: boolean }) {
+  return (
+    <div className="flex flex-1 flex-col items-center justify-center p-8">
+      <PlayCircle className="mb-2 size-6 text-fg-quaternary" />
+      <p className="text-sm font-medium text-primary">Preview</p>
+      <p className="mt-1 text-center text-sm text-tertiary">
+        {hasTimeline
+          ? "Adjust the time window to preview the clip"
+          : "Select a date range and time window first"}
       </p>
     </div>
   );

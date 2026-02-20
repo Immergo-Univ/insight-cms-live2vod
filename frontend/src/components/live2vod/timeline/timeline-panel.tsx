@@ -5,15 +5,21 @@ import { TimelineCurrentTime } from "./timeline-current-time";
 import { TimelineRuler, PX_PER_MINUTE, MINUTES_PER_TICK } from "./timeline-ruler";
 import { TimelineSelection } from "./timeline-selection";
 
+export interface TimeWindow {
+  startTime: number;
+  endTime: number;
+}
+
 interface TimelinePanelProps {
   dateRange: RangeValue<DateValue>;
+  onTimeWindowChange?: (tw: TimeWindow) => void;
 }
 
 function dateValueToDate(dv: DateValue): Date {
   return dv.toDate(getLocalTimeZone());
 }
 
-export function TimelinePanel({ dateRange }: TimelinePanelProps) {
+export function TimelinePanel({ dateRange, onTimeWindowChange }: TimelinePanelProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const startDate = useMemo(() => {
@@ -50,6 +56,16 @@ export function TimelinePanel({ dateRange }: TimelinePanelProps) {
     setSelTop(top);
     setSelBottom(bottom);
   }, [startDate, totalMinutes]);
+
+  useEffect(() => {
+    if (!onTimeWindowChange) return;
+    const startMs = startDate.getTime() + selTop * 60_000;
+    const endMs = startDate.getTime() + selBottom * 60_000;
+    onTimeWindowChange({
+      startTime: Math.floor(startMs / 1000),
+      endTime: Math.floor(endMs / 1000),
+    });
+  }, [selTop, selBottom, startDate, onTimeWindowChange]);
 
   const handleSelectionChange = useCallback((top: number, bottom: number) => {
     setSelTop(top);
