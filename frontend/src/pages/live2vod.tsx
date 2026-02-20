@@ -5,6 +5,7 @@ import { useDateFormatter } from "react-aria";
 import type { DateValue, RangeValue } from "react-aria-components";
 import { ChannelDatePicker } from "@/components/live2vod/channel-date-picker";
 import { ChannelList } from "@/components/live2vod/channel-list";
+import { TimelinePanel } from "@/components/live2vod/timeline/timeline-panel";
 import { useChannelDateRange } from "@/hooks/use-channel-date-range";
 import { useChannels } from "@/hooks/use-channels";
 import type { Channel } from "@/types/channel";
@@ -64,7 +65,11 @@ export function Live2VodPage() {
 
             {/* Panel 3: Timeline (takes remaining space) */}
             <div className="flex flex-1 flex-col">
-              <TimelinePlaceholder hasDateRange={!!dateRange} />
+              {dateRange ? (
+                <TimelinePanel dateRange={dateRange} />
+              ) : (
+                <TimelinePlaceholder />
+              )}
             </div>
           </>
         ) : (
@@ -152,15 +157,13 @@ function SelectedRangeInfo({ dateRange }: { dateRange: RangeValue<DateValue> }) 
   );
 }
 
-function TimelinePlaceholder({ hasDateRange }: { hasDateRange: boolean }) {
+function TimelinePlaceholder() {
   return (
     <div className="flex flex-1 flex-col items-center justify-center p-8">
       <Clock className="mb-2 size-6 text-fg-quaternary" />
       <p className="text-sm font-medium text-primary">Timeline</p>
       <p className="mt-1 text-center text-sm text-tertiary">
-        {hasDateRange
-          ? "Date range selected — timeline will appear here"
-          : "Select a date range to enable the timeline"}
+        Select a date range to enable the timeline
       </p>
     </div>
   );
