@@ -20,6 +20,12 @@ export function mapChannelData(channel) {
   const previewHls = channel.hlsMaster || channel.hlsStream;
   const poster = channel.content?.find((c) => c.medium === "image");
 
+  const epgEvents = (channel.epgObject?.events || []).map((ev) => ({
+    title: ev.title || "",
+    start: ev.start || "",
+    end: ev.end || "",
+  }));
+
   return {
     id: channel._id,
     accountId: channel.accountId,
@@ -29,5 +35,6 @@ export function mapChannelData(channel) {
     preview: previewHls || "",
     posterUrl: poster?.downloadUrl || "",
     archive: channel.archive ?? false,
+    epgEvents,
   };
 }

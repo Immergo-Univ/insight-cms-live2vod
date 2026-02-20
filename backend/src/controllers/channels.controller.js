@@ -15,6 +15,12 @@ channelsRouter.get("/", async (req, res) => {
     }
 
     const rawChannels = await fetchChannelsWithArchive({ accountId, tenantId });
+
+    rawChannels.forEach((ch) => {
+      const evCount = ch.epgObject?.events?.length ?? 0;
+      console.log(`[channels] "${ch.title}" — epgObject.events: ${evCount}`);
+    });
+
     const channels = rawChannels.map(mapChannelData);
 
     res.json(channels);

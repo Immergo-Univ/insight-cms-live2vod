@@ -2,9 +2,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { DateValue, RangeValue } from "react-aria-components";
 import { now as intlNow } from "@internationalized/date";
 import { TimelineCurrentTime } from "./timeline-current-time";
+import { TimelinePrograms } from "./timeline-programs";
 import { TimelineRuler, PX_PER_MINUTE, MINUTES_PER_TICK } from "./timeline-ruler";
 import { TimelineSelection } from "./timeline-selection";
 import { useTimezone } from "@/hooks/use-timezone";
+import type { EpgEvent } from "@/types/channel";
 
 export interface TimeWindow {
   startTime: number;
@@ -13,10 +15,11 @@ export interface TimeWindow {
 
 interface TimelinePanelProps {
   dateRange: RangeValue<DateValue>;
+  epgEvents?: EpgEvent[];
   onTimeWindowChange?: (tw: TimeWindow) => void;
 }
 
-export function TimelinePanel({ dateRange, onTimeWindowChange }: TimelinePanelProps) {
+export function TimelinePanel({ dateRange, epgEvents = [], onTimeWindowChange }: TimelinePanelProps) {
   const tz = useTimezone();
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -79,6 +82,11 @@ export function TimelinePanel({ dateRange, onTimeWindowChange }: TimelinePanelPr
     [totalMinutes],
   );
 
+  const handleProgramClick = useCallback((startMin: number, endMin: number) => {
+    setSelTop(startMin);
+    setSelBottom(endMin);
+  }, []);
+
   const totalHeight = totalMinutes * PX_PER_MINUTE;
 
   return (
@@ -105,6 +113,14 @@ export function TimelinePanel({ dateRange, onTimeWindowChange }: TimelinePanelPr
             startDate={startDate}
             tz={tz}
             onTickClick={handleTickClick}
+          />
+
+          <TimelinePrograms
+            events={epgEvents}
+            startDate={startDate}
+            totalMinutes={totalMinutes}
+            tz={tz}
+            onProgramClick={handleProgramClick}
           />
 
           <TimelineCurrentTime startDate={startDate} />

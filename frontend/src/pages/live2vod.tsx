@@ -72,7 +72,11 @@ export function Live2VodPage() {
             {/* Panel 3: Timeline */}
             <div className="flex w-80 shrink-0 flex-col border-r border-secondary">
               {dateRange ? (
-                <TimelinePanel dateRange={dateRange} onTimeWindowChange={setTimeWindow} />
+                <TimelinePanel
+                  dateRange={dateRange}
+                  epgEvents={selectedChannel.epgEvents}
+                  onTimeWindowChange={setTimeWindow}
+                />
               ) : (
                 <TimelinePlaceholder />
               )}

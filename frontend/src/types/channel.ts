@@ -1,3 +1,9 @@
+export interface EpgEvent {
+  title: string;
+  start: string;
+  end: string;
+}
+
 export interface Channel {
   id: string;
   accountId: string;
@@ -7,4 +13,5 @@ export interface Channel {
   preview: string;
   posterUrl: string;
   archive: boolean;
+  epgEvents: EpgEvent[];
 }
