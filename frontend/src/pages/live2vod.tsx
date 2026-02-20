@@ -91,6 +91,7 @@ export function Live2VodPage() {
                   streamUrl={selectedChannel.hlsStream}
                   timeWindow={timeWindow}
                   channelTitle={selectedChannel.title}
+                  channelId={selectedChannel.id}
                   tz={tz}
                 />
               ) : (
@@ -207,11 +208,13 @@ function PreviewPanel({
   streamUrl,
   timeWindow,
   channelTitle,
+  channelId,
   tz,
 }: {
   streamUrl: string;
   timeWindow: TimeWindow;
   channelTitle: string;
+  channelId: string;
   tz: string;
 }) {
   const navigate = useNavigate();
@@ -232,7 +235,7 @@ function PreviewPanel({
     ? `${hours}h ${mins > 0 ? `${mins}m` : ""}`
     : `${mins}m`;
 
-  const handleOpenEditor = () => {
+  const handleOpenEditor = (channelId: string) => {
     const clipUrl = new URL(streamUrl, window.location.origin);
     clipUrl.searchParams.set("startTime", String(timeWindow.startTime));
     clipUrl.searchParams.set("endTime", String(timeWindow.endTime));
@@ -243,9 +246,12 @@ function PreviewPanel({
         startTime: timeWindow.startTime,
         endTime: timeWindow.endTime,
         clipUrl: clipUrl.toString(),
+        channelId,
       },
     });
   };
+
+  const handleOpenEditorClick = () => handleOpenEditor(channelId);
 
   return (
     <div className="flex h-full flex-col">
@@ -259,7 +265,7 @@ function PreviewPanel({
         <div className="flex w-full max-w-3xl flex-col gap-4">
           <VideoPreview streamUrl={streamUrl} timeWindow={timeWindow} />
           <button
-            onClick={handleOpenEditor}
+            onClick={handleOpenEditorClick}
             className="flex cursor-pointer items-center justify-center gap-2 self-end rounded-lg bg-brand-solid px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-solid-hover"
           >
             <Scissors01 className="size-4" />

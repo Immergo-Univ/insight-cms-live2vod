@@ -22,6 +22,25 @@
     scrollbar-width: none; /* Firefox */
 }
 
+/* Very thin (~3px) subtle scrollbar for horizontal timeline */
+.scrollbar-thin {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-fg-quaternary) transparent;
+}
+.scrollbar-thin::-webkit-scrollbar {
+    height: 3px;
+}
+.scrollbar-thin::-webkit-scrollbar-track {
+    background: transparent;
+}
+.scrollbar-thin::-webkit-scrollbar-thumb {
+    background: var(--color-fg-quaternary);
+    border-radius: 3px;
+}
+.scrollbar-thin::-webkit-scrollbar-thumb:hover {
+    background: var(--color-fg-tertiary);
+}
+
 @utility transition-inherit-all {
     transition-property: inherit;
     transition-duration: inherit;
