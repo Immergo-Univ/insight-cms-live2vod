@@ -1,6 +1,7 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter, Route, Routes } from "react-router";
+import { EditorPage } from "@/pages/editor";
 import { Live2VodPage } from "@/pages/live2vod";
 import { NotFound } from "@/pages/not-found";
 import { RouteProvider } from "@/providers/router-provider";
@@ -16,6 +17,7 @@ createRoot(document.getElementById("root")!).render(
                     <RouteProvider>
                         <Routes>
                             <Route path="/" element={<Live2VodPage />} />
+                            <Route path="/editor" element={<EditorPage />} />
                             <Route path="*" element={<NotFound />} />
                         </Routes>
                     </RouteProvider>

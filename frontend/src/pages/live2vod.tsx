@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { Clock, PlayCircle, Tv01 } from "@untitledui/icons";
+import { useNavigate } from "react-router";
+import { Clock, PlayCircle, Scissors01, Tv01 } from "@untitledui/icons";
 import { ClipJsonButton } from "@/components/live2vod/clip-json-button";
 import { useDateFormatter } from "react-aria";
 import type { DateValue, RangeValue } from "react-aria-components";
@@ -213,6 +214,8 @@ function PreviewPanel({
   channelTitle: string;
   tz: string;
 }) {
+  const navigate = useNavigate();
+
   const fmt = (ts: number) =>
     new Date(ts * 1000).toLocaleString(undefined, {
       month: "short",
@@ -229,6 +232,21 @@ function PreviewPanel({
     ? `${hours}h ${mins > 0 ? `${mins}m` : ""}`
     : `${mins}m`;
 
+  const handleOpenEditor = () => {
+    const clipUrl = new URL(streamUrl, window.location.origin);
+    clipUrl.searchParams.set("startTime", String(timeWindow.startTime));
+    clipUrl.searchParams.set("endTime", String(timeWindow.endTime));
+
+    navigate("/editor" + window.location.search, {
+      state: {
+        sourceM3u8: streamUrl,
+        startTime: timeWindow.startTime,
+        endTime: timeWindow.endTime,
+        clipUrl: clipUrl.toString(),
+      },
+    });
+  };
+
   return (
     <div className="flex h-full flex-col">
       <div className="border-b border-secondary px-4 py-3">
@@ -238,8 +256,15 @@ function PreviewPanel({
         </p>
       </div>
       <div className="flex flex-1 items-start justify-center overflow-y-auto p-4">
-        <div className="w-full max-w-3xl">
+        <div className="flex w-full max-w-3xl flex-col gap-4">
           <VideoPreview streamUrl={streamUrl} timeWindow={timeWindow} />
+          <button
+            onClick={handleOpenEditor}
+            className="flex cursor-pointer items-center justify-center gap-2 self-end rounded-lg bg-brand-solid px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-solid-hover"
+          >
+            <Scissors01 className="size-4" />
+            Next
+          </button>
         </div>
       </div>
     </div>

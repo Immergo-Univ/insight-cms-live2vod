@@ -46,7 +46,7 @@ export function ClipJsonButton({ streamUrl, timeWindow }: ClipJsonButtonProps) {
             <span className="text-xs font-semibold text-primary">JSON</span>
             <button
               onClick={() => navigator.clipboard.writeText(json)}
-              className="rounded px-2 py-0.5 text-[10px] font-medium text-brand-secondary hover:bg-secondary"
+              className="cursor-pointer rounded px-2 py-0.5 text-[10px] font-medium text-brand-secondary hover:bg-secondary"
             >
               Copy
             </button>
@@ -59,7 +59,7 @@ export function ClipJsonButton({ streamUrl, timeWindow }: ClipJsonButtonProps) {
 
       <button
         onClick={() => setOpen((v) => !v)}
-        className="flex size-10 items-center justify-center rounded-full border border-secondary bg-primary shadow-lg transition-colors hover:bg-secondary"
+        className="flex size-10 cursor-pointer items-center justify-center rounded-full border border-secondary bg-primary shadow-lg transition-colors hover:bg-secondary"
         title="JSON"
       >
         <File06 className="size-4.5 text-fg-quaternary" />
