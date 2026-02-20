@@ -1,0 +1,186 @@
+---
+alwaysApply: true
+---
+
+
+# Arquitectura
+
+## Directorio /frontend
+Aqui estara todo el frontend 
+
+* React
+* Vite
+* Proxy Vite
+* El frontend buildeado debe ser servido mediante el backend en el endpoint de root /
+* Todos los endpoints del backend excepto el que sirve el frontend buildeado deben tener el sufijo /api/
+
+## Directorio /backend
+
+Aqui estara todo lo relacionado con el backend
+
+* Nodejs
+* Cors (full)
+* FFMEPG
+* OpenCV
+* Whisper
+
+* Separar archivos en controllers, y services
+* Priorizar mantenibilidad
+* Mantener archivos de codigo pequeños, separarlos correctamente, no tener archivos de mas de 100 lineas de codigo.
+
+## Raiz del proyecto
+
+* Dockerfile 
+* No utilizar docker-compose NUNCA
+* readme.md en español y en ingles.
+
+
+# Frontend
+
+Este desarrollo es una vista que estará embebida mediante un iframe en un CMS mas grande. Lo que hace es tomar la data de distintos endpoints de backend y en funcion de eso disponibiliza herramientas. En este caso particular se trata de un frontend en react, utilizando vite, que lo que hace es disponer de canales en vivo.
+Luego estos canales en vivos ouden seleccionarse, 
+
+# Herramienta Live2VOD
+
+* Tomar desde insight mediante un request al backend todos los canales
+Esto estará embebido en un iframe y se pasara el query param accountId por parametro junto con el x-tenant-id
+http://localhost:5173?accountId=6397753fff871971ae6a3c03&tenantId=channel14
+
+* Desarrollar en base a un editor que esta ubicado en otro proyecto, este caso en:
+
+/home/ezequiel/www/insight-cms/src/app/pages/default/live2vods
+
+Este proyecto es llamado "Insight CMS".
+
+1. La idea mantener el mismo layout, donde tenemos un player a la izquierda que sirve de preview, a la derecha una biblioteca de medios que permite enriquecer el video añadiendo otros clips, que pueden ser cortados, imagenes, etc.
+
+2. Como podes ver en ese componente una vez que un canal es seleccionado entonces en base al contenido del m3u8 se obtiene fecha desde y hasta donde hay contenido
+
+3. Una vez que en un calendario de seleccion de intervalos de dias (O en caso de solo seleccionar un solo dia sera desde las 00 a las 23:59 de ese dia) aparecera un timeline vertical con divisiones cada 10 minutos. 
+
+4. Hacer una ventana deslizable con extremos drag and drop para poder seleccionar tiempos, en esta instancia solo habra una ventana seleccionable. Las puntas de la ventana deslizante debenm ser "sticky" a intervalos de 10 minutos en el componente padre que tiene division de tiempo cada 10 minutos.
+
+5. Si antes seleccione 3 dias, entonces el timeline tendra 72 horas. Por ejemplo. Si fueron 2 dias, 48 horas, y asi.
+
+6. Una vez que tengo mi ventana de tiempo seleccionada, puedo darle al boton Siguiente
+
+7. En esta instancia se abre el player de preview con el live creado tomando solo ese rango de fechas, fijate que estrategia esta utilizando el actual componente en Insight CMS y replica la misma estrategia, debe ser 100% compatible con Safari esto, y ese desarrollo lo es.
+
+8. El procesamiento lo hara una API externa, en este caso solo llamar al endpoint del server local /process con el JSON generado del editor
+
+# Backend
+
+Se requieren los siguientes endpoints
+
+* /channels
+Obtiene el listado de los canales.
+
+* /process
+Se envia a procesar el clip seleccionado con sus ediciones.
+Lo que se envia es un JSON con toda la especificación
+
+* /media
+Se obtienen clips ya generados, que pueden ser insertados en el timeline
+
+
+
+# Implementacion
+
+* Comencemos utilizando un accountId:
+
+Lo siguiente te dara una lista de los channels a los que se les puede hacer el live 2 VOD.
+
+https://insight-api-frankly.univtec.com/cms/entity/channels/find?filter=accountId||$eq||6397753fff871971ae6a3c03;fields.archive||$eq||toBool(true)
+
+Recorda pasarle a este endpoint lo siguiente:
+Headers:
+x-tenant-id=channel14
+
+Y token de Bearer Auth: 
+
+Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VybmFtZSI6ImV6ZXF1aWVsLnBhb2xpbGxvQHVuaXZ0ZWMuY29tIiwic3ViIjoiNjFiMjFmZjNmM2I1ZGM2YjAzZGMyNzMzIiwiaWF0IjoxNzcxMDk4MjQ0LCJleHAiOjE3NzE5OTgyNDR9.6nZAB82burrTNQh9u0xCH4O_ILQMORWYfmwtyiDY1xc
+
+Respuesta
+
+```json
+
+{"published":true,"showInEpg":true,"archive":true,"content":[{"guid":"b5ca3646-ad46-4e70-9b15-dd3e074809df","name":"JNN SPORTS.png","downloadUrl":"https://rjr.vod.immergo.tv/rjr/uploaded/b5ca3646-ad46-4e70-9b15-dd3e074809df.png","type":"image","mime_type":"image/png","assetTypes":["Poster H"],"updated":1742494428676,"type_id":"6439e4217ca57380ead343fe","typeName":"Poster H","typeAlias":"Poster H","medium":"image","format":"png"},{"guid":"dd64cd06-e015-4425-ae10-97eae276d4c5","name":"tvjsn_logo.png","downloadUrl":"https://rjr.vod.immergo.tv/rjr/uploaded/dd64cd06-e015-4425-ae10-97eae276d4c5.png","type":"image","mime_type":"image/png","assetTypes":["Poster H"],"updated":1725997554355,"type_id":"6509b6c41f16f65ccd7d065b","typeName":"Poster H","typeAlias":"Poster H","medium":"image","format":"png"}],"isGeoblockEnabled":true,"inputTypeNew":"file","mappingId":"6488641345e7ce487e4a0d99","title":"TVJ Sports Network","hlsMaster":"https://rjrtvjsnlocal-ioriver-cdn.encoders.immergo.tv/master.m3u8","created":1725998194940,"updated":1771476386023,"enableCommerceType":true,"epgObject":{"events":[{"title":"BOYS GIRLS CHAMPS 2025 HIGHLIGHTS-DAY 2","start":"2026-01-01T06:05:00.000Z","end":"2026-01-01T07:00:00.000Z","custom":{"duration":3600,"rating":"G"}}]},"listClassification":["650a45912480570012d1afbe"],"geoblock":["68c81ce22ca9d01f827977e3"],"order":4,"preroll":["67522d5137324400257d1862"],"csvEpg":"https://rjr.vod.immergo.tv/rjr/uploaded/d7a95243-5f4f-4428-aa18-b3fdf0ae5a8f.csv","hlsStream":"https://rjrtvjsnlocal-ioriver-cdn.encoders.immergo.tv/2/streamPlaylist-archive.m3u8","commerceType":"paid","paidType":"subscription","useBackup":false,"subscriptionsCategories":["67f3f7a9e2cac00026262e2e"],"_id":"66e0a472ff152800235e6e75","guid":"c87a510f-0225-4c4b-a997-9892803c7f76","accountId":"6439e41d7ca57380ead343f9","userId":"66e09401b1a6560024781d3c"}
+
+```
+
+Como podes ver para obtener el video necesitaras el atributo hlsStream para extraer el input que necesitaras para el editor.
+Lo sthumbnails los deberas generar a partir del video, utilizando este servicio:
+
+```js
+
+  async getImage(): Promise<void> {
+
+
+    this.columns = this.columns.map((col, index) => {
+
+      var duration = this.player.duration;
+      var zoom = this.columnTime/1000;
+      var time = index * zoom;
+
+      const thumbnailUrl = `https://556gh0y4oh.execute-api.us-east-1.amazonaws.com/dev/genThumbTime?url=${encodeURIComponent(this.modifiedSource)}&time=${time}&channelId=${this.channel.id}`
+
+      return { ...col, thumbnailUrl };
+    })
+
+  }
+
+
+```
+
+
+## Flujo de trabajo en el frontend
+
+* Primero cuando se selecciona un canal, debe presentarse una vista a la derecha en el mismo panel de seleccion de los canales, que debera tener un timeline general (Esta parte es para hacer una seleccion de tramo gruesa)
+
+Para ello, deberas requestear el canal, el M3u8 y obtendras alli cuan hacia atras podes ir. Siempre referencia las horas, a las horas del browser del usuario teniendo en cuenta que en el m3u8 se guardan en UTC 0.
+
+Por ejemplo tendras algo como lo siguiente:
+
+```bash
+
+#EXTM3U
+#EXT-X-VERSION:6
+#EXT-X-TARGETDURATION:6
+#EXT-X-MEDIA-SEQUENCE:1005505
+#EXT-X-INDEPENDENT-SEGMENTS
+
+#EXTINF:6
+1771517418-1005505.ts
+#EXT-X-PROGRAM-DATE-TIME:2026-02-19T17:11:37.454+0000
+#EXTINF:6
+1771517418-1005506.ts
+#EXT-X-PROGRAM-DATE-TIME:2026-02-19T17:11:43.454+0000
+#EXTINF:6
+1771517418-1005507.ts
+#EXT-X-PROGRAM-DATE-TIME:2026-02-19T17:11:49.454+0000
+#EXTINF:6
+1771517418-1005508.ts
+#EXT-X-PROGRAM-DATE-TIME:2026-02-19T17:11:55.454+0000
+#EXTINF:6
+
+
+```
+
+Como podes ver el tag EXT-X-PROGRAM-DATE-TIME tiene una marca que referencia a cada segmento particular durante todo el stream. Los streams que obtendras del atributo del canal hlsStream son realmente extensos, pueden ser mas de 1 semana de video ininterrumpido.
+
+Cualquiera sea el caso, deberas desplegar lo siguiente al seleccionar el canal:
+
+* Obtener el M3u8 y hacer un filtro rapido desde donde y hasta cuando llega el stream, con esto renderizaras un calendario en el que seleccionaras el o los dias (Puede ser un intervalo de mas de un dia)
+
+* Al seleccionar el dia, utilizaras todo el listado del m3u8 obtenido para armar un time picker vertical. No quiero que usesn ninguna libreria externa, desarrollalo todo con las herramientas que react te provee.
+Pero la idea es un timeline vertical donde esten marcadas las horas con precision de 10 minutos, de todos los dias seleccionados. Si selecciono 1 dia, seran 24 horas, si selecciono dos dias seran 48 horas y el timeline sera el doble del largo, con un limite pero scrolleable hacia abajo.
+
+Este timeline debe estar delimitado por lineas en gris cada 10 minutos.
+Aquí debes poder hacer una preseleccion, desde y hasta definiendo una ventana de tiempo cuyos extremos sean drag and dropeables. Esta ventana en este punto es unica.
+
+* Una vez seleccionada esta ventana de tiempo, se pasa de pantalla, y desde la pantalla de seleccion de canales y primer filtro de tiempo, pasamos al segundo que es el timeline. por default esta cargado en el timeline el canal seleccionado. Ademas a la derecha tenemos los paneles de media para añadir mas cosas
+(VODs, Images, Texto)
+
+* Cada 10 segundos, o de acuerdo al nivel de zoom establecido, deberas renderizar el thumbnail correspondiente. Cuando seekeo un tiempo especifico, deberas cargar el player del preview en ese puinto.
+
+* Si bien el live esta cargado de entrada y desplegado en el timeline, debo poder crear multiples ventanas de seleccion, que una vez que envie al procesar se pegaran todas en el orden indicado (Cada ventana de seleccion lleva un numero que es modificable, que es el orden en el que se pegaran, comenzando por 1)
