@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { DateValue, RangeValue } from "react-aria-components";
 import { getLocalTimeZone } from "@internationalized/date";
 import { TimelineCurrentTime } from "./timeline-current-time";
@@ -37,15 +37,19 @@ export function TimelinePanel({ dateRange }: TimelinePanelProps) {
     return Math.ceil(totalMinutes / (24 * 60));
   }, [totalMinutes]);
 
-  const defaultTop = Math.max(0, totalMinutes - 4 * 60);
-  const defaultBottom = Math.min(totalMinutes, defaultTop + 2 * 60);
+  const [selTop, setSelTop] = useState(0);
+  const [selBottom, setSelBottom] = useState(60);
 
-  const [selTop, setSelTop] = useState(() =>
-    Math.round(defaultTop / MINUTES_PER_TICK) * MINUTES_PER_TICK,
-  );
-  const [selBottom, setSelBottom] = useState(() =>
-    Math.round(defaultBottom / MINUTES_PER_TICK) * MINUTES_PER_TICK,
-  );
+  useEffect(() => {
+    const nowMinutes = (Date.now() - startDate.getTime()) / (1000 * 60);
+    const snap = (v: number) => Math.round(v / MINUTES_PER_TICK) * MINUTES_PER_TICK;
+
+    const bottom = snap(Math.min(nowMinutes, totalMinutes));
+    const top = snap(Math.max(0, bottom - 60));
+
+    setSelTop(top);
+    setSelBottom(bottom);
+  }, [startDate, totalMinutes]);
 
   const handleSelectionChange = useCallback((top: number, bottom: number) => {
     setSelTop(top);
