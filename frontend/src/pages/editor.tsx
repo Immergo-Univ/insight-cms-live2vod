@@ -286,7 +286,7 @@ export function EditorPage() {
 
   return (
     <div className="flex h-full flex-col bg-primary">
-      <header className="flex shrink-0 items-center gap-3 border-b border-secondary px-4 py-3">
+      <header className="flex shrink-0 items-center gap-3 border-b border-secondary px-4 py-2">
         <button
           onClick={handleBack}
           className="flex size-8 cursor-pointer items-center justify-center rounded-md transition-colors hover:bg-secondary"
@@ -299,9 +299,9 @@ export function EditorPage() {
 
       <main className="flex min-h-0 flex-1 flex-row overflow-hidden">
         {/* Left column: Player, Timeline, Clipping (only Clipping scrolls vertically) */}
-        <div className="flex min-w-0 flex-1 flex-col min-h-0 gap-4 overflow-hidden p-4">
+        <div className="flex min-w-0 flex-1 flex-col min-h-0 gap-3 overflow-hidden px-4 py-2">
           {/* 1. Video player (~2/3) + Capture & Preview (~1/3) */}
-          <section className="flex shrink-0 gap-4">
+          <section className="flex shrink-0 gap-3">
             <div className="min-w-0 flex-[2]">
               <EditorPlayer
                 ref={playerRef}
@@ -358,7 +358,7 @@ export function EditorPage() {
           </section>
 
           {/* 3. Clipping: title fixed, only the list of rows scrolls. */}
-          <section className="flex min-h-0 flex-1 flex-col gap-3 rounded-lg border border-secondary bg-secondary p-3">
+          <section className="flex min-h-0 flex-1 flex-col gap-2 rounded-lg border border-secondary bg-secondary px-3">
             <div className="flex shrink-0 items-center gap-2">
               <h3 className="text-xs font-semibold uppercase tracking-wide text-tertiary">
                 Clipping
@@ -394,13 +394,13 @@ export function EditorPage() {
         </div>
 
         {/* Right column: Metadata only */}
-        <aside className="flex shrink-0 overflow-y-auto border-l border-secondary py-4 pl-4 pr-4">
+        <aside className="flex shrink-0 overflow-y-auto border-l border-secondary px-4 py-2">
           <EditorRightPanel />
         </aside>
       </main>
 
       {/* Footer: Back (left), Create and Finish (right) */}
-      <footer className="flex shrink-0 items-center justify-between border-t border-secondary px-4 py-3">
+      <footer className="flex shrink-0 items-center justify-between border-t border-secondary px-4 py-2">
         <div className="flex gap-2">
           <button
             type="button"
