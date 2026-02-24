@@ -64,8 +64,8 @@ export const AccountSettingsProvider = ({ children }: AccountSettingsProviderPro
         const settings = await accountSettingsService.getAccountSettings(accountId);
         setAccountSettings(settings);
       } catch (err) {
-        console.error('Error loading account settings:', err);
-        setError(err instanceof Error ? err.message : 'Error al cargar account settings');
+        console.error("Error loading account settings:", err);
+        setError(err instanceof Error ? err.message : "Error al cargar account settings");
       } finally {
         setLoading(false);
       }

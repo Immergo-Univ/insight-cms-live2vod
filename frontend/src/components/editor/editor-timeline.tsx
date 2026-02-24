@@ -63,7 +63,7 @@ export function EditorTimeline({
   const zoomMs = ZOOM_LEVELS_MS[zoomIndex] ?? ZOOM_LEVELS_MS[0];
   const zoomSeconds = zoomMs / 1000;
   const columnCount = Math.max(1, Math.ceil(durationSeconds / zoomSeconds));
-  const totalWidth = columnCount * COLUMN_WIDTH_PX;
+  const totalWidthPx = columnCount * COLUMN_WIDTH_PX;
 
   const pixelToTime = useCallback(
     (clientX: number) => {
@@ -81,31 +81,25 @@ export function EditorTimeline({
 
   const playheadPx =
     durationSeconds > 0
-      ? (currentTimeSeconds / durationSeconds) * totalWidth
+      ? (currentTimeSeconds / durationSeconds) * totalWidthPx
       : 0;
 
-  const handleWheel = useCallback(
-    (e: React.WheelEvent<HTMLDivElement>) => {
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const handler = (e: WheelEvent) => {
       e.preventDefault();
       if (e.ctrlKey || e.metaKey) {
         const delta = e.deltaY > 0 ? 1 : -1;
         const next = Math.max(0, Math.min(ZOOM_LEVELS_MS.length - 1, zoomIndex + delta));
         if (next !== zoomIndex) onZoomIndexChange(next);
       } else {
-        const el = scrollRef.current;
-        if (el) el.scrollLeft += e.deltaY * 2;
+        el.scrollLeft += e.deltaY * 2;
       }
-    },
-    [zoomIndex, onZoomIndexChange]
-  );
-
-  useEffect(() => {
-    const el = scrollRef.current;
-    if (!el) return;
-    const handler = (e: WheelEvent) => e.preventDefault();
+    };
     el.addEventListener("wheel", handler, { passive: false });
     return () => el.removeEventListener("wheel", handler);
-  }, []);
+  }, [zoomIndex, onZoomIndexChange]);
 
   const scrollStep = 400;
 
@@ -122,9 +116,27 @@ export function EditorTimeline({
   useEffect(() => {
     if (!dragging || !onResizeClip) return;
     const minDuration = 1;
+    const stickyPx = 10;
 
     const onMouseMove = (e: MouseEvent) => {
-      const t = pixelToTime(e.clientX);
+      const inner = innerRef.current;
+      const rect = inner?.getBoundingClientRect();
+      const mouseX = rect ? e.clientX - rect.left : null;
+      const playheadPx =
+        durationSeconds > 0 ? (currentTimeSeconds / durationSeconds) * totalWidthPx : 0;
+
+      const isNearPlayhead = mouseX !== null && Math.abs(mouseX - playheadPx) <= stickyPx;
+      const stickyTime = currentTimeSeconds;
+
+      let t = pixelToTime(e.clientX);
+      if (isNearPlayhead) {
+        if (
+          (dragging.edge === "left" && stickyTime < dragging.endTime - minDuration) ||
+          (dragging.edge === "right" && stickyTime > dragging.startTime + minDuration)
+        ) {
+          t = stickyTime;
+        }
+      }
       if (dragging.edge === "left") {
         const newStart = Math.max(0, Math.min(t, dragging.endTime - minDuration));
         onResizeClip(dragging.clipId, newStart, undefined);
@@ -140,7 +152,7 @@ export function EditorTimeline({
       window.removeEventListener("mousemove", onMouseMove);
       window.removeEventListener("mouseup", onMouseUp);
     };
-  }, [dragging, durationSeconds, onResizeClip, pixelToTime]);
+  }, [dragging, durationSeconds, currentTimeSeconds, totalWidthPx, onResizeClip, pixelToTime]);
 
   const handleTimelineClick = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
@@ -200,12 +212,11 @@ export function EditorTimeline({
           ref={scrollRef}
           className="scrollbar-hide relative min-w-0 flex-1 overflow-x-auto overflow-y-hidden border border-secondary bg-secondary"
           style={{ height: 120, scrollBehavior: "smooth" }}
-          onWheel={handleWheel}
         >
           <div
             ref={innerRef}
             className="relative flex h-full cursor-pointer flex-row"
-            style={{ width: totalWidth, minWidth: "100%" }}
+            style={{ width: totalWidthPx, minWidth: "100%" }}
             onClick={handleTimelineClick}
           >
             {Array.from({ length: columnCount }, (_, i) => {
@@ -235,8 +246,8 @@ export function EditorTimeline({
               );
             })}
           {clips.map((c) => {
-            const left = (c.startTime / durationSeconds) * totalWidth;
-            const width = ((c.endTime - c.startTime) / durationSeconds) * totalWidth;
+            const left = (c.startTime / durationSeconds) * totalWidthPx;
+            const width = ((c.endTime - c.startTime) / durationSeconds) * totalWidthPx;
             const isHover = hoverClipId === c.id;
             const isSelected = selectedClipId === c.id;
             const canResize = onResizeClip && width > 8;
@@ -307,7 +318,7 @@ export function EditorTimeline({
                       e.stopPropagation();
                       onRemoveClip(c.id);
                     }}
-                    className={`mt-1 flex size-6 items-center justify-center rounded-full bg-primary shadow text-fg-secondary ${
+                    className={`mt-1 flex size-6 cursor-pointer items-center justify-center rounded-full bg-primary text-fg-secondary shadow ${
                       isHover ? "opacity-100" : "opacity-0"
                     }`}
                     aria-label="Remove sub-clip"

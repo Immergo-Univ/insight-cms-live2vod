@@ -91,7 +91,12 @@ export function EditorPage() {
     const seg = sortedClips[playingSequenceIndex];
     if (!seg) return;
     const endThreshold = seg.endTime - 0.05;
-    if (currentTime < endThreshold) return;
+    const playerTime = playerRef.current?.getCurrentTime();
+    const effectiveTime =
+      typeof playerTime === "number" && !Number.isNaN(playerTime) && Math.abs(playerTime - currentTime) <= 0.25
+        ? playerTime
+        : currentTime;
+    if (effectiveTime < endThreshold) return;
     const nextIndex = playingSequenceIndex + 1;
     if (nextIndex >= sortedClips.length) {
       playerRef.current?.pause();
@@ -99,7 +104,10 @@ export function EditorPage() {
       return;
     }
     setPlayingSequenceIndex(nextIndex);
-    playerRef.current?.seek(sortedClips[nextIndex].startTime);
+    const nextStartTime = sortedClips[nextIndex].startTime;
+    playerRef.current?.seek(nextStartTime);
+    setCurrentTime(nextStartTime);
+    playerRef.current?.play();
   }, [isPlaying, playingSequenceIndex, currentTime, sortedClips]);
 
   const handlePlay = useCallback(() => {
@@ -142,6 +150,7 @@ export function EditorPage() {
     setPlayUntilTime(null);
     setPlayingSequenceIndex(0);
     playerRef.current?.seek(sortedClips[0].startTime);
+    setCurrentTime(sortedClips[0].startTime);
     playerRef.current?.play();
   }, [sortedClips]);
 

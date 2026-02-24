@@ -150,10 +150,16 @@ export const EditorPlayer = forwardRef<EditorPlayerRef, EditorPlayerProps>(
     const canMarkOut = selectedClip
       ? currentTimeSeconds > selectedClip.startTime
       : markInTime !== null && currentTimeSeconds > markInTime;
+    const isMarkInRangeSelectionActive = !selectedClip && markInTime !== null;
 
     return (
       <div className="relative aspect-video w-full max-w-3xl overflow-hidden rounded-lg bg-black">
         <div ref={containerRef} className="video-js-container" />
+        {isMarkInRangeSelectionActive && (
+          <div className="pointer-events-none absolute top-2 left-1/2 -translate-x-1/2 rounded-md bg-black/60 px-3 py-1.5 text-xs font-semibold text-white shadow">
+            Select the time until Mark Out
+          </div>
+        )}
         {/* Play / Pause / Stop — bottom-left, same style as Mute */}
         {(onTransportPlay || onTransportPause || onTransportStop) && (
           <div className="absolute bottom-2 left-2 flex items-center gap-1">
@@ -196,7 +202,9 @@ export const EditorPlayer = forwardRef<EditorPlayerRef, EditorPlayerProps>(
               type="button"
               onClick={() => onMarkIn(currentTimeSeconds)}
               disabled={markInOutDisabled || !canMarkIn}
-              className="flex cursor-pointer items-center justify-center rounded-md bg-black/60 px-3 py-2 text-sm font-semibold text-white transition-colors hover:bg-black/80 focus:outline-none focus:ring-2 focus:ring-white/50 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-black/60"
+              className={`flex cursor-pointer items-center justify-center rounded-md bg-black/60 px-3 py-2 text-sm font-semibold text-white transition-colors hover:bg-black/80 focus:outline-none focus:ring-2 focus:ring-white/50 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-black/60 border-[3px] ${
+                isMarkInRangeSelectionActive ? "border-blue-500" : "border-transparent"
+              }`}
               title="Mark In"
               aria-label="Mark In"
             >

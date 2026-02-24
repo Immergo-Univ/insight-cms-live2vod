@@ -89,15 +89,17 @@ class AccountSettingsService {
     try {
       const accountIdToUse = accountId || httpClient.getAccountId();
       const bffClient = httpClient.getBffClient();
-      
-      // Llamar al BFF que hace passthrough a la API
+
       const url = `/multiscreen/account-settings?accountId=${accountIdToUse}`;
       const response = await bffClient.get<AccountSettings>(url);
-      
-      // El BFF devuelve directamente el objeto accountSettings
+
       return response.data || null;
-    } catch (error) {
-      console.error('Error in getAccountSettings:', error);
+    } catch (error: unknown) {
+      const status = (error as { response?: { status?: number } })?.response?.status;
+      if (status === 404) {
+        return null;
+      }
+      console.error("Error in getAccountSettings:", error);
       const message = httpClient.getErrorMessage(error);
       throw new Error(`Error al obtener account settings: ${message}`);
     }
