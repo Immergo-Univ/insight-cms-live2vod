@@ -37,6 +37,10 @@ TrainingOutput train(const std::string& source,
                      bool captureDebugRois,
                      const std::function<void(int current, int totalOrNeg1)>& onSample = {});
 
+cv::Mat roiHist512Hsv(const cv::Mat& bgrFrame,
+                      int cornerIndex,
+                      double roiWidthPct);
+
 double distanceToLogo(const cv::Mat& bgrFrame,
                       int cornerIndex,
                       double roiWidthPct,

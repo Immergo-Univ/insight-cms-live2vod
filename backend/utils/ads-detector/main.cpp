@@ -107,6 +107,42 @@ static void ensureParentDirExists(const fs::path& filePath) {
   }
 }
 
+static bool readFrameAt(cv::VideoCapture& cap, double tSec, cv::Mat& outFrame) {
+  cap.set(cv::CAP_PROP_POS_MSEC, tSec * 1000.0);
+  if (!cap.read(outFrame)) return false;
+  return !outFrame.empty();
+}
+
+static std::vector<double> buildSecondGrid(double startSec, double endSec) {
+  std::vector<double> times;
+  if (!(endSec >= startSec)) return times;
+  const int from = std::max(0, static_cast<int>(std::ceil(startSec)));
+  const int to = std::max(from, static_cast<int>(std::floor(endSec)));
+  times.reserve(static_cast<size_t>((to - from) + 1));
+  for (int t = from; t <= to; t++) times.push_back(static_cast<double>(t));
+  return times;
+}
+
+static double knnAvgDistToSeedHists(const cv::Mat& histRow,
+                                    const cv::Mat& allHists,
+                                    const std::vector<int>& seeds,
+                                    int k) {
+  if (histRow.empty() || allHists.empty() || seeds.empty()) return 0.0;
+  std::vector<double> d;
+  d.reserve(seeds.size());
+  for (int s : seeds) {
+    if (s < 0 || s >= allHists.rows) continue;
+    d.push_back(cv::compareHist(histRow, allHists.row(s), cv::HISTCMP_BHATTACHARYYA));
+  }
+  if (d.empty()) return 0.0;
+  const int kk = std::max(1, std::min(k, static_cast<int>(d.size())));
+  std::nth_element(d.begin(), d.begin() + (kk - 1), d.end());
+  std::partial_sort(d.begin(), d.begin() + kk, d.end());
+  double sum = 0.0;
+  for (int i = 0; i < kk; i++) sum += d[static_cast<size_t>(i)];
+  return sum / static_cast<double>(kk);
+}
+
 static std::vector<cv::Point2f> pcaPoints(const logo_detector::TrainingOutput& training) {
   std::vector<cv::Point2f> pts;
   if (training.pca2d.empty() || training.pca2d.cols < 2) return pts;
@@ -1065,6 +1101,91 @@ int main(int argc, char** argv) {
         progress(args,
                  "Ad detectado: " + formatSec(adStart) + " (" + formatHms(adStart) + ") -> " +
                      formatSec(adEnd) + " (" + formatHms(adEnd) + ")");
+      }
+    }
+
+    // Second pass refinement: for each detected AD window, resample at 1fps in +/-30s
+    // and refine start/end to 1-second precision.
+    if (!ads.empty()) {
+      progress(args, "Refinando ads detectados (+/-30s, 1 frame por segundo)");
+      cv::VideoCapture refineCap(args.m3u8);
+      if (!refineCap.isOpened()) throw std::runtime_error("could not open m3u8 for refinement");
+      refineCap.set(cv::CAP_PROP_BUFFERSIZE, 1);
+
+      const double pad = 30.0;
+      const std::vector<int> seeds = training.model.logoSampleIndices;
+      const int knnK = std::max(1, std::min(args.knnK, std::max(1, static_cast<int>(seeds.size()) - 1)));
+
+      for (size_t ai = 0; ai < ads.size(); ai++) {
+        const double coarseStart = ads[ai].startSec;
+        const double coarseEnd = ads[ai].endSec;
+        const double winStart = std::max(0.0, coarseStart - pad);
+        const double winEnd = std::min(totalDurationSec, coarseEnd + pad);
+        const auto times = buildSecondGrid(winStart, winEnd);
+        if (times.size() < 2) continue;
+
+        progress(args,
+                 "Refine AD " + std::to_string(ai + 1) + "/" + std::to_string(ads.size()) + ": " +
+                     formatSec(coarseStart) + " (" + formatHms(coarseStart) + ") -> " +
+                     formatSec(coarseEnd) + " (" + formatHms(coarseEnd) + ")" +
+                     " (window " + formatHms(winStart) + " -> " + formatHms(winEnd) + ")");
+
+        std::vector<char> noLogo;
+        noLogo.reserve(times.size());
+
+        cv::Mat frame;
+        for (double t : times) {
+          bool hasLogoNow = true;
+          if (readFrameAt(refineCap, t, frame)) {
+            const cv::Mat h = logo_detector::roiHist512Hsv(frame, args.cornerIndex, args.roiWidthPct);
+            if (args.outlier && args.outlierMode == "knn") {
+              const double score = knnAvgDistToSeedHists(h, training.sampleHists, seeds, knnK);
+              hasLogoNow = (score <= usedKnnThreshold);
+            } else {
+              const double dist = cv::compareHist(h, training.model.meanHist, cv::HISTCMP_BHATTACHARYYA);
+              hasLogoNow = (dist <= training.model.threshold);
+            }
+          }
+          noLogo.push_back(hasLogoNow ? 0 : 1);
+        }
+
+        // Find the no-logo run that best overlaps the coarse interval.
+        double bestOverlap = 0.0;
+        int bestA = -1, bestB = -1;
+        int i = 0;
+        while (i < static_cast<int>(noLogo.size())) {
+          while (i < static_cast<int>(noLogo.size()) && noLogo[static_cast<size_t>(i)] == 0) i++;
+          if (i >= static_cast<int>(noLogo.size())) break;
+          const int a = i;
+          while (i < static_cast<int>(noLogo.size()) && noLogo[static_cast<size_t>(i)] != 0) i++;
+          const int b = i - 1;
+
+          const double runStart = times[static_cast<size_t>(a)];
+          const double runEndExclusive =
+              (b + 1 < static_cast<int>(times.size())) ? times[static_cast<size_t>(b + 1)] : (times[static_cast<size_t>(b)] + 1.0);
+          const double overlap = std::max(0.0, std::min(runEndExclusive, coarseEnd) - std::max(runStart, coarseStart));
+          if (overlap > bestOverlap) {
+            bestOverlap = overlap;
+            bestA = a;
+            bestB = b;
+          }
+        }
+
+        if (bestA >= 0 && bestB >= bestA && bestOverlap > 0.0) {
+          const double refinedStart = times[static_cast<size_t>(bestA)];
+          const double refinedEnd =
+              (bestB + 1 < static_cast<int>(times.size())) ? times[static_cast<size_t>(bestB + 1)] : (times[static_cast<size_t>(bestB)] + 1.0);
+
+          if ((refinedEnd - refinedStart) >= args.minAdSec) {
+            ads[ai].startSec = refinedStart;
+            ads[ai].endSec = refinedEnd;
+            ads[ai].startPdt = offsetToProgramDateTime(segments, segEpochMs, refinedStart);
+            ads[ai].endPdt = offsetToProgramDateTime(segments, segEpochMs, refinedEnd);
+            progress(args,
+                     "Refinado: " + formatSec(refinedStart) + " (" + formatHms(refinedStart) + ") -> " +
+                         formatSec(refinedEnd) + " (" + formatHms(refinedEnd) + ")");
+          }
+        }
       }
     }
 

@@ -121,6 +121,13 @@ double quantile(std::vector<double> v, double q) {
 
 namespace logo_detector {
 
+cv::Mat roiHist512Hsv(const cv::Mat& bgrFrame,
+                      int cornerIndex,
+                      double roiWidthPct) {
+  const auto rect = cornerRect(bgrFrame, cornerIndex, roiWidthPct);
+  return hist512Hsv(bgrFrame(rect));
+}
+
 double distanceToLogo(const cv::Mat& bgrFrame,
                       int cornerIndex,
                       double roiWidthPct,
