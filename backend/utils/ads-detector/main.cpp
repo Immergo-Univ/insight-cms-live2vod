@@ -18,6 +18,9 @@
 #include <iostream>
 #include <optional>
 #include <sstream>
+#include <thread>
+#include <atomic>
+#include <mutex>
 #include <unordered_map>
 #include <unordered_set>
 #include <stdexcept>
@@ -113,34 +116,217 @@ static bool readFrameAt(cv::VideoCapture& cap, double tSec, cv::Mat& outFrame) {
   return !outFrame.empty();
 }
 
-static std::vector<double> buildSecondGrid(double startSec, double endSec) {
-  std::vector<double> times;
-  if (!(endSec >= startSec)) return times;
-  const int from = std::max(0, static_cast<int>(std::ceil(startSec)));
-  const int to = std::max(from, static_cast<int>(std::floor(endSec)));
-  times.reserve(static_cast<size_t>((to - from) + 1));
-  for (int t = from; t <= to; t++) times.push_back(static_cast<double>(t));
-  return times;
+static bool hasLogoAt(cv::VideoCapture& cap,
+                      double tSec,
+                      const Args& args,
+                      const logo_detector::LogoModel& model,
+                      double* outDistOrNull = nullptr) {
+  cv::Mat frame;
+  if (!readFrameAt(cap, tSec, frame)) return false;
+  const double dist = logo_detector::distanceToLogo(frame, model.cornerIndex, args.roiWidthPct, model.meanHist);
+  if (outDistOrNull) *outDistOrNull = dist;
+  return dist <= model.threshold;
 }
 
-static double knnAvgDistToSeedHists(const cv::Mat& histRow,
-                                    const cv::Mat& allHists,
-                                    const std::vector<int>& seeds,
-                                    int k) {
-  if (histRow.empty() || allHists.empty() || seeds.empty()) return 0.0;
-  std::vector<double> d;
-  d.reserve(seeds.size());
-  for (int s : seeds) {
-    if (s < 0 || s >= allHists.rows) continue;
-    d.push_back(cv::compareHist(histRow, allHists.row(s), cv::HISTCMP_BHATTACHARYYA));
+static int computeThreadCount(int threads) {
+  const int detectedCores = static_cast<int>(std::thread::hardware_concurrency());
+  const int wanted = (threads <= 0) ? (detectedCores > 0 ? detectedCores : 1) : threads;
+  return std::max(1, wanted);
+}
+
+struct RefineProbe {
+  size_t adIdx = 0;
+  bool isStartWindow = true;
+  size_t pos = 0;
+  double tSec = 0.0;
+};
+
+static bool evaluateHasLogoParallelProbes(const std::string& source,
+                                          const Args& args,
+                                          const logo_detector::LogoModel& model,
+                                          double totalDurationSec,
+                                          const std::vector<RefineProbe>& probes,
+                                          std::vector<char>& outHasLogo) {
+  outHasLogo.assign(probes.size(), 0);
+  if (probes.empty()) return true;
+
+  const int threadCount = computeThreadCount(args.threads);
+  std::vector<std::vector<int>> buckets(static_cast<size_t>(threadCount));
+  for (int i = 0; i < static_cast<int>(probes.size()); i++) {
+    const double t = probes[static_cast<size_t>(i)].tSec;
+    const int bucket =
+        std::min(threadCount - 1,
+                 std::max(0, static_cast<int>(((totalDurationSec > 0.0) ? (t / totalDurationSec) : 0.0) * threadCount)));
+    buckets[static_cast<size_t>(bucket)].push_back(i);
   }
-  if (d.empty()) return 0.0;
-  const int kk = std::max(1, std::min(k, static_cast<int>(d.size())));
-  std::nth_element(d.begin(), d.begin() + (kk - 1), d.end());
-  std::partial_sort(d.begin(), d.begin() + kk, d.end());
-  double sum = 0.0;
-  for (int i = 0; i < kk; i++) sum += d[static_cast<size_t>(i)];
-  return sum / static_cast<double>(kk);
+
+  std::mutex errorMu;
+  std::string firstError;
+
+  auto worker = [&](const std::vector<int>& idxs) {
+    try {
+      if (idxs.empty()) return;
+      cv::VideoCapture cap(source);
+      if (!cap.isOpened()) throw std::runtime_error("OpenCV could not open m3u8 in refine worker thread");
+      cap.set(cv::CAP_PROP_BUFFERSIZE, 1);
+
+      cv::Mat frame;
+      for (int idx : idxs) {
+        const double t = probes[static_cast<size_t>(idx)].tSec;
+        cap.set(cv::CAP_PROP_POS_MSEC, t * 1000.0);
+        if (!cap.read(frame) || frame.empty()) {
+          outHasLogo[static_cast<size_t>(idx)] = 0;
+        } else {
+          const double dist = logo_detector::distanceToLogo(frame, model.cornerIndex, args.roiWidthPct, model.meanHist);
+          outHasLogo[static_cast<size_t>(idx)] = (dist <= model.threshold) ? 1 : 0;
+        }
+      }
+    } catch (const std::exception& e) {
+      std::lock_guard<std::mutex> lock(errorMu);
+      if (firstError.empty()) firstError = e.what();
+    }
+  };
+
+  std::vector<std::thread> pool;
+  pool.reserve(static_cast<size_t>(threadCount));
+  for (int t = 0; t < threadCount; t++) pool.emplace_back(worker, std::cref(buckets[static_cast<size_t>(t)]));
+  for (auto& th : pool) th.join();
+
+  if (!firstError.empty()) {
+    progress(args, std::string("Refine: error: ") + firstError);
+    return false;
+  }
+  return true;
+}
+
+template <typename IntervalT>
+static void refineIntervalsIterative(const Args& args,
+                                     const std::string& source,
+                                     double totalDurationSec,
+                                     const logo_detector::LogoModel& model,
+                                     std::vector<IntervalT>& ads,
+                                     const fs::path* debugDirOrNull) {
+  if (ads.empty()) return;
+
+  const double refineStepSec = 2.5;
+  progress(args, "Refinando intervalos (-30s, step=" + std::to_string(refineStepSec) + "s, paralelo)");
+
+  struct PerAd {
+    std::vector<double> startTimes;
+    std::vector<double> endTimes;
+    std::vector<size_t> startProbeIdx;
+    std::vector<size_t> endProbeIdx;
+  };
+  std::vector<PerAd> per;
+  per.resize(ads.size());
+
+  std::vector<RefineProbe> probes;
+  probes.reserve(ads.size() * 32);
+
+  for (size_t idx = 0; idx < ads.size(); idx++) {
+    const double coarseStart = ads[idx].startSec;
+    const double coarseEnd = ads[idx].endSec;
+    const double startWinA = std::max(0.0, coarseStart - 30.0);
+    const double startWinB = std::min(totalDurationSec, coarseStart);
+    const double endWinA = std::max(0.0, coarseEnd - 30.0);
+    const double endWinB = std::min(totalDurationSec, coarseEnd);
+
+    for (double t = startWinA; t <= startWinB + 1e-9; t += refineStepSec) {
+      per[idx].startTimes.push_back(t);
+      per[idx].startProbeIdx.push_back(probes.size());
+      probes.push_back(RefineProbe{idx, true, per[idx].startTimes.size() - 1, t});
+    }
+    for (double t = endWinA; t <= endWinB + 1e-9; t += refineStepSec) {
+      per[idx].endTimes.push_back(t);
+      per[idx].endProbeIdx.push_back(probes.size());
+      probes.push_back(RefineProbe{idx, false, per[idx].endTimes.size() - 1, t});
+    }
+  }
+
+  progress(args, "Refine: probes=" + std::to_string(probes.size()) +
+                     ", threads=" + std::to_string(computeThreadCount(args.threads)));
+
+  std::vector<char> probeHas;
+  if (!evaluateHasLogoParallelProbes(source, args, model, totalDurationSec, probes, probeHas)) {
+    progress(args, "Refine: fallo paralelismo; manteniendo intervalos sin refinar");
+    return;
+  }
+
+  std::ofstream debugCsv;
+  if (debugDirOrNull) {
+    const fs::path p = (*debugDirOrNull) / "refine_intervals.csv";
+    debugCsv.open(p);
+    if (debugCsv.is_open()) {
+      debugCsv << "idx,coarseStart,coarseEnd,refinedStart,refinedEnd\n";
+    }
+  }
+
+  for (size_t idx = 0; idx < ads.size(); idx++) {
+    auto& it = ads[idx];
+    const double coarseStart = it.startSec;
+    const double coarseEnd = it.endSec;
+
+    const auto& startTimes = per[idx].startTimes;
+    const auto& endTimes = per[idx].endTimes;
+    std::vector<char> startHas(startTimes.size(), 0);
+    std::vector<char> endHas(endTimes.size(), 0);
+    for (size_t i = 0; i < startHas.size(); i++) {
+      const size_t pIdx = per[idx].startProbeIdx[i];
+      if (pIdx < probeHas.size()) startHas[i] = probeHas[pIdx];
+    }
+    for (size_t i = 0; i < endHas.size(); i++) {
+      const size_t pIdx = per[idx].endProbeIdx[i];
+      if (pIdx < probeHas.size()) endHas[i] = probeHas[pIdx];
+    }
+
+    // Refine start: scan forward, find the first second where logo disappears.
+    double refinedStart = coarseStart;
+    if (!startHas.empty() && startHas[0] == 0) {
+      refinedStart = startTimes[0];
+    } else {
+      for (size_t i = 1; i < startHas.size(); i++) {
+        if (startHas[i - 1] != 0 && startHas[i] == 0) {
+          refinedStart = startTimes[i];
+          break;
+        }
+      }
+    }
+
+    // Refine end: scan forward, find the first second where logo appears.
+    double refinedEnd = coarseEnd;
+    {
+      // We expect this window to straddle the end boundary; pick the first second where logo is present.
+      // If logo is already present at endWinA, refinedEnd becomes endWinA.
+      for (size_t i = 0; i < endHas.size(); i++) {
+        if (endHas[i] != 0) {
+          refinedEnd = endTimes[i];
+          break;
+        }
+      }
+    }
+
+    if (refinedEnd < refinedStart) {
+      refinedStart = coarseStart;
+      refinedEnd = coarseEnd;
+    }
+
+    if (debugCsv.is_open()) {
+      debugCsv << idx << "," << coarseStart << "," << coarseEnd << "," << refinedStart << "," << refinedEnd << "\n";
+    }
+
+    if (refinedStart != coarseStart || refinedEnd != coarseEnd) {
+      progress(args,
+               "Refine AD#" + std::to_string(idx) + ": " +
+                   formatSec(coarseStart) + " (" + formatHms(coarseStart) + ") -> " +
+                   formatSec(coarseEnd) + " (" + formatHms(coarseEnd) + ")" +
+                   "  =>  " +
+                   formatSec(refinedStart) + " (" + formatHms(refinedStart) + ") -> " +
+                   formatSec(refinedEnd) + " (" + formatHms(refinedEnd) + ")");
+    }
+
+    it.startSec = refinedStart;
+    it.endSec = refinedEnd;
+  }
 }
 
 static std::vector<cv::Point2f> pcaPoints(const logo_detector::TrainingOutput& training) {
@@ -1104,89 +1290,12 @@ int main(int argc, char** argv) {
       }
     }
 
-    // Second pass refinement: for each detected AD window, resample at 1fps in +/-30s
-    // and refine start/end to 1-second precision.
-    if (!ads.empty()) {
-      progress(args, "Refinando ads detectados (+/-30s, 1 frame por segundo)");
-      cv::VideoCapture refineCap(args.m3u8);
-      if (!refineCap.isOpened()) throw std::runtime_error("could not open m3u8 for refinement");
-      refineCap.set(cv::CAP_PROP_BUFFERSIZE, 1);
-
-      const double pad = 30.0;
-      const std::vector<int> seeds = training.model.logoSampleIndices;
-      const int knnK = std::max(1, std::min(args.knnK, std::max(1, static_cast<int>(seeds.size()) - 1)));
-
-      for (size_t ai = 0; ai < ads.size(); ai++) {
-        const double coarseStart = ads[ai].startSec;
-        const double coarseEnd = ads[ai].endSec;
-        const double winStart = std::max(0.0, coarseStart - pad);
-        const double winEnd = std::min(totalDurationSec, coarseEnd + pad);
-        const auto times = buildSecondGrid(winStart, winEnd);
-        if (times.size() < 2) continue;
-
-        progress(args,
-                 "Refine AD " + std::to_string(ai + 1) + "/" + std::to_string(ads.size()) + ": " +
-                     formatSec(coarseStart) + " (" + formatHms(coarseStart) + ") -> " +
-                     formatSec(coarseEnd) + " (" + formatHms(coarseEnd) + ")" +
-                     " (window " + formatHms(winStart) + " -> " + formatHms(winEnd) + ")");
-
-        std::vector<char> noLogo;
-        noLogo.reserve(times.size());
-
-        cv::Mat frame;
-        for (double t : times) {
-          bool hasLogoNow = true;
-          if (readFrameAt(refineCap, t, frame)) {
-            const cv::Mat h = logo_detector::roiHist512Hsv(frame, args.cornerIndex, args.roiWidthPct);
-            if (args.outlier && args.outlierMode == "knn") {
-              const double score = knnAvgDistToSeedHists(h, training.sampleHists, seeds, knnK);
-              hasLogoNow = (score <= usedKnnThreshold);
-            } else {
-              const double dist = cv::compareHist(h, training.model.meanHist, cv::HISTCMP_BHATTACHARYYA);
-              hasLogoNow = (dist <= training.model.threshold);
-            }
-          }
-          noLogo.push_back(hasLogoNow ? 0 : 1);
-        }
-
-        // Find the no-logo run that best overlaps the coarse interval.
-        double bestOverlap = 0.0;
-        int bestA = -1, bestB = -1;
-        int i = 0;
-        while (i < static_cast<int>(noLogo.size())) {
-          while (i < static_cast<int>(noLogo.size()) && noLogo[static_cast<size_t>(i)] == 0) i++;
-          if (i >= static_cast<int>(noLogo.size())) break;
-          const int a = i;
-          while (i < static_cast<int>(noLogo.size()) && noLogo[static_cast<size_t>(i)] != 0) i++;
-          const int b = i - 1;
-
-          const double runStart = times[static_cast<size_t>(a)];
-          const double runEndExclusive =
-              (b + 1 < static_cast<int>(times.size())) ? times[static_cast<size_t>(b + 1)] : (times[static_cast<size_t>(b)] + 1.0);
-          const double overlap = std::max(0.0, std::min(runEndExclusive, coarseEnd) - std::max(runStart, coarseStart));
-          if (overlap > bestOverlap) {
-            bestOverlap = overlap;
-            bestA = a;
-            bestB = b;
-          }
-        }
-
-        if (bestA >= 0 && bestB >= bestA && bestOverlap > 0.0) {
-          const double refinedStart = times[static_cast<size_t>(bestA)];
-          const double refinedEnd =
-              (bestB + 1 < static_cast<int>(times.size())) ? times[static_cast<size_t>(bestB + 1)] : (times[static_cast<size_t>(bestB)] + 1.0);
-
-          if ((refinedEnd - refinedStart) >= args.minAdSec) {
-            ads[ai].startSec = refinedStart;
-            ads[ai].endSec = refinedEnd;
-            ads[ai].startPdt = offsetToProgramDateTime(segments, segEpochMs, refinedStart);
-            ads[ai].endPdt = offsetToProgramDateTime(segments, segEpochMs, refinedEnd);
-            progress(args,
-                     "Refinado: " + formatSec(refinedStart) + " (" + formatHms(refinedStart) + ") -> " +
-                         formatSec(refinedEnd) + " (" + formatHms(refinedEnd) + ")");
-          }
-        }
-      }
+    // Second pass: refine boundaries around each detected AD interval.
+    refineIntervalsIterative(args, args.m3u8, totalDurationSec, training.model, ads,
+                             args.debug ? &logosOutDir : nullptr);
+    for (auto& it : ads) {
+      it.startPdt = offsetToProgramDateTime(segments, segEpochMs, it.startSec);
+      it.endPdt = offsetToProgramDateTime(segments, segEpochMs, it.endSec);
     }
 
     const fs::path outPath(args.outputPath);
