@@ -13,8 +13,7 @@ export function detectAds({ m3u8Url, corner = "br" }) {
     cornerFlag,
     "--interval", "30",
     "--tokayo",
-    "--debug",
-    "--output", "/dev/null",
+    "--debug"
   ];
 
   console.log(`[ads-detector] Binary: ${ADS_DETECTOR_BIN}`);
@@ -26,6 +25,7 @@ export function detectAds({ m3u8Url, corner = "br" }) {
     encoding: "utf-8",
     timeout: 300_000,
     maxBuffer: 10 * 1024 * 1024,
+    stdio: ["pipe", "pipe", "inherit"],
   });
 
   return JSON.parse(stdout);
