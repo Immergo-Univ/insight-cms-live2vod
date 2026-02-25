@@ -1,0 +1,65 @@
+{
+  "m3u8": "https://rjrtvjlocal-ioriver-cdn.encoders.immergo.tv/2/streamPlaylist.m3u8?startTime=1771995600&endTime=1771998600",
+  "totalDurationSec": 3000,
+  "process": {
+    "elapsedMs": 65067,
+    "elapsedSec": 65.067
+  },
+  "training": {
+    "sampleEverySec": 30,
+    "sampleCount": 100,
+    "roiWidthPct": 0.15,
+    "k": 2,
+    "logoCorner": "bottom_right",
+    "logoThresholdBhattacharyya": 0.738946,
+    "detection": {
+      "strategy": "tokayo",
+      "tokayo": {
+        "method": "pixel-median + NCC",
+        "nccThreshold": 0.5,
+        "logoSubRect": {"x":0,"y":74,"w":192,"h":118}
+      },
+      "enterConsecutive": 1,
+      "exitConsecutive": 1
+    }
+  },
+  "ads": [
+    {
+      "startOffsetSec": 472,
+      "startOffsetHms": "00:07:52",
+      "endOffsetSec": 648,
+      "endOffsetHms": "00:10:48",
+      "startProgramDateTime": "2026-02-25T05:07:53.454+0000",
+      "endProgramDateTime": "2026-02-25T05:10:49.454+0000"
+    },
+    {
+      "startOffsetSec": 1605,
+      "startOffsetHms": "00:26:45",
+      "endOffsetSec": 1782,
+      "endOffsetHms": "00:29:42",
+      "startProgramDateTime": "2026-02-25T05:26:46.454+0000",
+      "endProgramDateTime": "2026-02-25T05:29:43.454+0000"
+    },
+    {
+      "startOffsetSec": 2527,
+      "startOffsetHms": "00:42:07",
+      "endOffsetSec": 2732,
+      "endOffsetHms": "00:45:32",
+      "startProgramDateTime": "2026-02-25T05:42:08.454+0000",
+      "endProgramDateTime": "2026-02-25T05:45:33.454+0000"
+    },
+    {
+      "startOffsetSec": 2881,
+      "startOffsetHms": "00:48:01",
+      "endOffsetSec": 2912,
+      "endOffsetHms": "00:48:32",
+      "startProgramDateTime": "2026-02-25T05:48:02.454+0000",
+      "endProgramDateTime": "2026-02-25T05:48:33.454+0000"
+    }
+  ],
+  "debug": {
+    "enabled": true,
+    "logosOutputDir": "/home/ezequiel/www/insight-cms-live2vod/backend/utils/bin/logos_output",
+    "logoSampleCount": 81
+  }
+}

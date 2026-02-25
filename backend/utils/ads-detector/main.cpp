@@ -253,7 +253,7 @@ static void refineIntervalsIterative(const Args& args,
                                      const TokayoModel* tokayo = nullptr) {
   if (ads.empty()) return;
 
-  const double refineStepSec = 1;
+  const double refineStepSec = 5.0;
   progress(args, "Refinando intervalos (-30s, step=" + std::to_string(refineStepSec) + "s, paralelo)");
 
   struct PerAd {

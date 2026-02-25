@@ -68,7 +68,7 @@ Para refinar el inicio/fin de cada AD:
   - busca el primer instante donde **comienza a verse el logo**
 
 Parámetros fijos:
-- Paso de muestreo: **2.5 segundos**
+- Paso de muestreo: **5 segundos**
 - Ventana: **30 segundos hacia atrás**
 
 Performance:
