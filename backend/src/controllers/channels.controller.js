@@ -1,25 +1,24 @@
 import { Router } from "express";
 import { fetchChannelsWithArchive, mapChannelData } from "../services/channels.service.js";
+import { resolveTenant } from "../services/auth.service.js";
 
 export const channelsRouter = Router();
 
 channelsRouter.get("/", async (req, res) => {
   try {
-    const accountId = req.query.accountId;
     const tenantId = req.query.tenantId || req.headers["x-tenant-id"];
-    const authToken = req.headers.authorization;
 
-    if (!accountId || !tenantId) {
+    if (!tenantId) {
       return res.status(400).json({
-        error: "Missing required query parameters: accountId, tenantId",
+        error: "Missing required query parameter: tenantId",
       });
     }
 
-    if (!authToken) {
-      return res.status(401).json({ error: "Missing Authorization header" });
-    }
+    const { accountId } = await resolveTenant(tenantId);
 
-    const rawChannels = await fetchChannelsWithArchive({ accountId, tenantId, authToken });
+    console.log(`[channels] tenantId="${tenantId}" → accountId="${accountId}"`);
+
+    const rawChannels = await fetchChannelsWithArchive({ accountId, tenantId });
 
     rawChannels.forEach((ch) => {
       const evCount = ch.epgObject?.events?.length ?? 0;

@@ -87,7 +87,7 @@ class AccountSettingsService {
    */
   async getAccountSettings(accountId?: string): Promise<AccountSettings | null> {
     try {
-      const accountIdToUse = accountId || httpClient.getAccountId();
+      const accountIdToUse = accountId || (await httpClient.getAccountId());
       const bffClient = httpClient.getBffClient();
 
       const url = `/multiscreen/account-settings?accountId=${accountIdToUse}`;

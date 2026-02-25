@@ -77,6 +77,7 @@ export function Live2VodPage() {
                 <TimelinePanel
                   dateRange={dateRange}
                   epgEvents={selectedChannel.epgEvents}
+                  hlsStream={selectedChannel.hlsStream}
                   onTimeWindowChange={setTimeWindow}
                 />
               ) : (

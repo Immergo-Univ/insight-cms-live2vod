@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { DateValue, RangeValue } from "react-aria-components";
 import { now as intlNow } from "@internationalized/date";
+import { TimelineAds } from "./timeline-ads";
 import { TimelineCurrentTime } from "./timeline-current-time";
 import { TimelinePrograms } from "./timeline-programs";
 import { TimelineRuler, PX_PER_MINUTE, MINUTES_PER_TICK } from "./timeline-ruler";
 import { TimelineSelection } from "./timeline-selection";
 import { useTimezone } from "@/hooks/use-timezone";
+import { getPrecalculatedAds, type PreCalcAd } from "@/services/ads.service";
 import type { EpgEvent } from "@/types/channel";
 
 export interface TimeWindow {
@@ -16,10 +18,11 @@ export interface TimeWindow {
 interface TimelinePanelProps {
   dateRange: RangeValue<DateValue>;
   epgEvents?: EpgEvent[];
+  hlsStream?: string;
   onTimeWindowChange?: (tw: TimeWindow) => void;
 }
 
-export function TimelinePanel({ dateRange, epgEvents = [], onTimeWindowChange }: TimelinePanelProps) {
+export function TimelinePanel({ dateRange, epgEvents = [], hlsStream, onTimeWindowChange }: TimelinePanelProps) {
   const tz = useTimezone();
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -40,6 +43,18 @@ export function TimelinePanel({ dateRange, epgEvents = [], onTimeWindowChange }:
   const totalDays = useMemo(() => {
     return Math.ceil(totalMinutes / (24 * 60));
   }, [totalMinutes]);
+
+  const [precalcAds, setPrecalcAds] = useState<PreCalcAd[]>([]);
+
+  useEffect(() => {
+    if (!hlsStream) return;
+    const startEpoch = Math.floor(startDate.getTime() / 1000);
+    const endEpoch = Math.floor(endDate.getTime() / 1000);
+
+    getPrecalculatedAds(hlsStream, startEpoch, endEpoch)
+      .then((result) => setPrecalcAds(result.ads))
+      .catch(() => setPrecalcAds([]));
+  }, [hlsStream, startDate, endDate]);
 
   const [selTop, setSelTop] = useState(0);
   const [selBottom, setSelBottom] = useState(60);
@@ -113,6 +128,12 @@ export function TimelinePanel({ dateRange, epgEvents = [], onTimeWindowChange }:
             startDate={startDate}
             tz={tz}
             onTickClick={handleTickClick}
+          />
+
+          <TimelineAds
+            ads={precalcAds}
+            startDate={startDate}
+            totalMinutes={totalMinutes}
           />
 
           <TimelinePrograms

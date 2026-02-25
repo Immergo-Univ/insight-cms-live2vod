@@ -60,7 +60,7 @@ export const AccountSettingsProvider = ({ children }: AccountSettingsProviderPro
       setLoading(true);
       setError(null);
       try {
-        const accountId = httpClient.getAccountId();
+        const accountId = await httpClient.getAccountId();
         const settings = await accountSettingsService.getAccountSettings(accountId);
         setAccountSettings(settings);
       } catch (err) {

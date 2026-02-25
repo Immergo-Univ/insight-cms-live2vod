@@ -6,15 +6,12 @@ const BFF_BASE_URL = "/api";
 function getQueryParams() {
   const params = new URLSearchParams(window.location.search);
   return {
-    accountId: params.get("accountId") || "",
     tenantId: params.get("tenantId") || "",
-    authToken: params.get("authToken") || "",
   };
 }
 
 export interface ApiConfig {
   baseUrl: string;
-  authToken: string;
   tenantId: string;
   accountId: string;
 }
@@ -23,20 +20,27 @@ export interface BffConfig {
   baseUrl: string;
 }
 
+interface AuthContext {
+  tenantId: string;
+  accountId: string;
+  accounts: Array<{ _id: string; title: string; customerId: string }>;
+  customers: Array<{ _id: string; title: string; code: string }>;
+}
+
 export class HttpClient {
   protected config: ApiConfig;
   protected bffConfig: BffConfig;
   protected client: AxiosInstance;
   protected bffClient: AxiosInstance;
+  private authContextPromise: Promise<AuthContext> | null = null;
 
   constructor() {
     const qp = getQueryParams();
 
     this.config = {
       baseUrl: API_BASE_URL,
-      authToken: qp.authToken,
       tenantId: qp.tenantId,
-      accountId: qp.accountId,
+      accountId: "",
     };
 
     this.bffConfig = {
@@ -47,7 +51,6 @@ export class HttpClient {
       baseURL: this.config.baseUrl,
       headers: {
         "Content-Type": "application/json",
-        "Authorization": `Bearer ${this.config.authToken}`,
         "x-tenant-id": this.config.tenantId,
       },
     });
@@ -56,7 +59,6 @@ export class HttpClient {
       baseURL: this.bffConfig.baseUrl,
       headers: {
         "Content-Type": "application/json",
-        "Authorization": `Bearer ${this.config.authToken}`,
         "x-tenant-id": this.config.tenantId,
       },
     });
@@ -67,11 +69,6 @@ export class HttpClient {
 
     if (config.baseUrl) {
       this.client.defaults.baseURL = config.baseUrl;
-    }
-
-    if (config.authToken) {
-      this.client.defaults.headers.common['Authorization'] = `Bearer ${config.authToken}`;
-      this.bffClient.defaults.headers.common['Authorization'] = `Bearer ${config.authToken}`;
     }
 
     if (config.tenantId) {
@@ -107,11 +104,26 @@ export class HttpClient {
     return 'An unknown error occurred';
   }
 
-  getAccountId(): string {
-    if (!this.config.accountId) {
-      this.config.accountId = getQueryParams().accountId;
+  async fetchAuthContext(): Promise<AuthContext> {
+    if (!this.authContextPromise) {
+      this.authContextPromise = this.bffClient
+        .get<AuthContext>("/auth/context", {
+          params: { tenantId: this.config.tenantId },
+        })
+        .then((res) => {
+          this.config.accountId = res.data.accountId;
+          return res.data;
+        });
     }
-    return this.config.accountId;
+    return this.authContextPromise;
+  }
+
+  async getAccountId(): Promise<string> {
+    if (this.config.accountId) {
+      return this.config.accountId;
+    }
+    const ctx = await this.fetchAuthContext();
+    return ctx.accountId;
   }
 
   getTenantId(): string {

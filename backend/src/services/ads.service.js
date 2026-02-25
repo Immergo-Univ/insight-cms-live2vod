@@ -1,21 +1,26 @@
-import { execSync } from "child_process";
+import { execSync, execFile } from "child_process";
+import { promisify } from "util";
 import path from "path";
 import { fileURLToPath } from "url";
+
+const execFileAsync = promisify(execFile);
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ADS_DETECTOR_BIN = path.resolve(__dirname, "../../utils/bin/ads_detector");
 
-export function detectAds({ m3u8Url, corner = "br" }) {
-  const cornerFlag = `--${corner}`;
-
-  const args = [
+function buildArgs({ m3u8Url, corner = "br", debug = true }) {
+  return [
     "--m3u8", m3u8Url,
-    cornerFlag,
+    `--${corner}`,
     "--interval", "30",
     "--threads", "20",
     "--tokayo",
-    "--debug"
+    ...(debug ? ["--debug"] : []),
   ];
+}
+
+export function detectAds({ m3u8Url, corner = "br" }) {
+  const args = buildArgs({ m3u8Url, corner, debug: true });
 
   console.log(`[ads-detector] Binary: ${ADS_DETECTOR_BIN}`);
   console.log(`[ads-detector] Arguments:`, args);
@@ -27,6 +32,22 @@ export function detectAds({ m3u8Url, corner = "br" }) {
     timeout: 300_000,
     maxBuffer: 10 * 1024 * 1024,
     stdio: ["pipe", "pipe", "inherit"],
+  });
+
+  return JSON.parse(stdout);
+}
+
+/**
+ * Non-blocking version used by the prewarm process so the server
+ * can keep handling requests while pre-warming runs in background.
+ */
+export async function detectAdsAsync({ m3u8Url, corner = "br" }) {
+  const args = buildArgs({ m3u8Url, corner, debug: false });
+
+  const { stdout } = await execFileAsync(ADS_DETECTOR_BIN, args, {
+    encoding: "utf-8",
+    timeout: 300_000,
+    maxBuffer: 10 * 1024 * 1024,
   });
 
   return JSON.parse(stdout);

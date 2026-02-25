@@ -5,7 +5,9 @@ import { fileURLToPath } from "url";
 import { channelsRouter } from "./controllers/channels.controller.js";
 import { m3u8Router } from "./controllers/m3u8.controller.js";
 import { adsRouter } from "./controllers/ads.controller.js";
+import { authRouter } from "./controllers/auth.controller.js";
 import { config } from "./config.js";
+import { runPrewarm } from "./services/prewarm.service.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -14,6 +16,7 @@ const PORT = config.port;
 app.use(cors());
 app.use(express.json());
 
+app.use("/api/auth", authRouter);
 app.use("/api/channels", channelsRouter);
 app.use("/api/m3u8", m3u8Router);
 app.use("/api/ads", adsRouter);
@@ -27,4 +30,8 @@ app.get("/{*splat}", (_req, res) => {
 
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
+
+  runPrewarm().catch((err) => {
+    console.error("[prewarm] Fatal error during pre-warm:", err);
+  });
 });
