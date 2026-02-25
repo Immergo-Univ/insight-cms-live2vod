@@ -8,7 +8,6 @@ import {
   EditorJsonButton,
   EditorRightPanel,
   EditorCapturePreview,
-  formatTime,
 } from "@/components/editor";
 import { FRAME_DURATION_SEC } from "@/components/editor/editor-constants";
 import type { EditorPlayerRef } from "@/components/editor";

@@ -119,7 +119,6 @@ export function TimelinePanel({ dateRange, epgEvents = [], onTimeWindowChange }:
             events={epgEvents}
             startDate={startDate}
             totalMinutes={totalMinutes}
-            tz={tz}
             onProgramClick={handleProgramClick}
           />
 

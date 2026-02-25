@@ -6,7 +6,6 @@ interface TimelineProgramsProps {
   events: EpgEvent[];
   startDate: Date;
   totalMinutes: number;
-  tz: string;
   onProgramClick: (startMinute: number, endMinute: number) => void;
 }
 
@@ -20,7 +19,6 @@ export function TimelinePrograms({
   events,
   startDate,
   totalMinutes,
-  tz,
   onProgramClick,
 }: TimelineProgramsProps) {
   const positioned = useMemo(() => {

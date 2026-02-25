@@ -61,7 +61,6 @@ export function ChannelDatePicker({
       value={value}
       onChange={onChange}
       className="flex flex-col gap-2"
-      timeZone={tz}
     >
       <header className="flex items-center justify-between">
         <Button
