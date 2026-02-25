@@ -23,6 +23,7 @@ struct TrainingOutput {
   cv::Mat sampleHists;                 // N x 512 (CV_32F), ROI histogram per sample
   std::vector<std::vector<unsigned char>> sampleRoiPng;  // N (optional, debug)
   cv::Mat pca2d;                       // N x 2 (CV_32F)
+  cv::PCA pcaModel;                    // PCA model for projecting new histograms
   std::vector<int> kmeansLabels;       // N
   int logoClusterLabel = 0;
 };
@@ -41,6 +42,10 @@ double distanceToLogo(const cv::Mat& bgrFrame,
                       int cornerIndex,
                       double roiWidthPct,
                       const cv::Mat& meanHist);
+
+cv::Mat extractHistogram(const cv::Mat& bgrFrame,
+                         int cornerIndex,
+                         double roiWidthPct);
 
 }  // namespace logo_detector
 

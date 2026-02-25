@@ -244,6 +244,7 @@ TrainingOutput train(const std::string& source,
   cv::Mat projected;
   pca.project(data, projected);  // N x 2
   out.pca2d = projected.clone();
+  out.pcaModel = pca;
 
   cv::Mat labels;
   cv::kmeans(projected,
@@ -330,6 +331,12 @@ TrainingOutput train(const std::string& source,
   out.model.threshold = threshold;
   out.model.logoSampleIndices = logoSeeds;
   return out;
+}
+
+cv::Mat extractHistogram(const cv::Mat& bgrFrame,
+                         int cornerIndex,
+                         double roiWidthPct) {
+  return cornerHist(bgrFrame, cornerIndex, roiWidthPct);
 }
 
 }  // namespace logo_detector

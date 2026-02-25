@@ -8,9 +8,8 @@ const ADS_DETECTOR_BIN = path.resolve(__dirname, "../../utils/bin/ads_detector")
 export function detectAds({ m3u8Url, corner = "br" }) {
   const cornerFlag = `--${corner}`;
 
-  const cmd = [
-    ADS_DETECTOR_BIN,
-    "--m3u8", `'${m3u8Url}'`,
+  const args = [
+    "--m3u8", m3u8Url,
     cornerFlag,
     "--interval", "30",
     "--threads", "30",
@@ -18,7 +17,12 @@ export function detectAds({ m3u8Url, corner = "br" }) {
     "--outlier-mode", "knn",
     "--quiet",
     "--output", "/dev/null",
-  ].join(" ");
+  ];
+
+  console.log(`[ads-detector] Binary: ${ADS_DETECTOR_BIN}`);
+  console.log(`[ads-detector] Arguments:`, args);
+
+  const cmd = [ADS_DETECTOR_BIN, ...args.map((a) => (a.includes(" ") || a.includes("?") || a.includes("&") ? `'${a}'` : a))].join(" ");
 
   const stdout = execSync(cmd, {
     encoding: "utf-8",

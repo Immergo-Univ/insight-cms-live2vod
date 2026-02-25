@@ -16,7 +16,11 @@
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <limits>
+#include <memory>
+#include <numeric>
 #include <optional>
+#include <random>
 #include <sstream>
 #include <thread>
 #include <atomic>
@@ -39,16 +43,18 @@ struct Args {
   int smoothWindow = 3;          // moving average window over distances (1 = disabled)
   double enterMult = 1.25;       // enter AD if dist >= threshold * enterMult
   double exitMult = 1.00;        // exit AD if dist <= threshold * exitMult (must be <= enterMult)
-  int enterConsecutive = 2;      // require N consecutive no-logo samples to enter AD
-  int exitConsecutive = 2;       // require N consecutive logo samples to exit AD
+  int enterConsecutive = 1;      // require N consecutive no-logo samples to enter AD
+  int exitConsecutive = 1;       // require N consecutive logo samples to exit AD
   bool outlier = false;          // if true, use DBSCAN on PCA points instead of Bhattacharyya distance
   std::string outlierMode = "dbscan"; // dbscan | lof | knn
   double dbscanEps = 0.0;        // 0 = auto
   int dbscanMinPts = 5;
   int lofK = 10;
   double lofThreshold = 1.60;
-  int knnK = 7;
+  int knnK = 10;
   double knnQuantile = 0.95;
+  bool tokayo = false;
+  double tokayoTh = 0.3;       // NCC threshold (0 = auto-detect from gap in scores)
   bool debug = false;
   bool quiet = false;
   int cornerIndex = -1;  // 0 TL, 1 TR, 2 BL, 3 BR (required)
@@ -141,12 +147,31 @@ struct RefineProbe {
   double tSec = 0.0;
 };
 
+struct TokayoModel {
+  cv::Mat logoTemplate;    // grayscale logo sub-region extracted from pixel-wise median
+  cv::Rect logoSubRect;    // position of the logo within the corner ROI
+  double nccThreshold;     // NCC threshold for logo/no-logo classification
+  int cornerIndex;
+  double roiWidthPct;
+};
+
+static double mahalanobisDistance2D(const cv::Point2f& pt, const cv::Point2d& center,
+                                   const cv::Mat& covInv) {
+  const double dx = pt.x - center.x;
+  const double dy = pt.y - center.y;
+  const double d2 = dx * dx * covInv.at<double>(0, 0) +
+                    2.0 * dx * dy * covInv.at<double>(0, 1) +
+                    dy * dy * covInv.at<double>(1, 1);
+  return std::sqrt(std::max(0.0, d2));
+}
+
 static bool evaluateHasLogoParallelProbes(const std::string& source,
                                           const Args& args,
                                           const logo_detector::LogoModel& model,
                                           double totalDurationSec,
                                           const std::vector<RefineProbe>& probes,
-                                          std::vector<char>& outHasLogo) {
+                                          std::vector<char>& outHasLogo,
+                                          const TokayoModel* tokayo = nullptr) {
   outHasLogo.assign(probes.size(), 0);
   if (probes.empty()) return true;
 
@@ -176,6 +201,25 @@ static bool evaluateHasLogoParallelProbes(const std::string& source,
         cap.set(cv::CAP_PROP_POS_MSEC, t * 1000.0);
         if (!cap.read(frame) || frame.empty()) {
           outHasLogo[static_cast<size_t>(idx)] = 0;
+        } else if (tokayo) {
+          const auto rect = cv::Rect(
+            (tokayo->cornerIndex == 1 || tokayo->cornerIndex == 3) ? frame.cols - static_cast<int>(std::lround(frame.cols * tokayo->roiWidthPct)) : 0,
+            (tokayo->cornerIndex == 2 || tokayo->cornerIndex == 3) ? frame.rows - static_cast<int>(std::lround(frame.cols * tokayo->roiWidthPct)) : 0,
+            static_cast<int>(std::lround(frame.cols * tokayo->roiWidthPct)),
+            static_cast<int>(std::lround(frame.cols * tokayo->roiWidthPct)));
+          cv::Mat roi = frame(rect & cv::Rect(0, 0, frame.cols, frame.rows));
+          cv::Mat gray;
+          cv::cvtColor(roi, gray, cv::COLOR_BGR2GRAY);
+          cv::GaussianBlur(gray, gray, cv::Size(3, 3), 0);
+          const cv::Rect subRect = tokayo->logoSubRect & cv::Rect(0, 0, gray.cols, gray.rows);
+          if (subRect.width > 0 && subRect.height > 0 &&
+              subRect.width == tokayo->logoTemplate.cols && subRect.height == tokayo->logoTemplate.rows) {
+            cv::Mat result;
+            cv::matchTemplate(gray(subRect), tokayo->logoTemplate, result, cv::TM_CCOEFF_NORMED);
+            outHasLogo[static_cast<size_t>(idx)] = (result.at<float>(0, 0) >= tokayo->nccThreshold) ? 1 : 0;
+          } else {
+            outHasLogo[static_cast<size_t>(idx)] = 0;
+          }
         } else {
           const double dist = logo_detector::distanceToLogo(frame, model.cornerIndex, args.roiWidthPct, model.meanHist);
           outHasLogo[static_cast<size_t>(idx)] = (dist <= model.threshold) ? 1 : 0;
@@ -205,7 +249,8 @@ static void refineIntervalsIterative(const Args& args,
                                      double totalDurationSec,
                                      const logo_detector::LogoModel& model,
                                      std::vector<IntervalT>& ads,
-                                     const fs::path* debugDirOrNull) {
+                                     const fs::path* debugDirOrNull,
+                                     const TokayoModel* tokayo = nullptr) {
   if (ads.empty()) return;
 
   const double refineStepSec = 2.5;
@@ -247,7 +292,7 @@ static void refineIntervalsIterative(const Args& args,
                      ", threads=" + std::to_string(computeThreadCount(args.threads)));
 
   std::vector<char> probeHas;
-  if (!evaluateHasLogoParallelProbes(source, args, model, totalDurationSec, probes, probeHas)) {
+  if (!evaluateHasLogoParallelProbes(source, args, model, totalDurationSec, probes, probeHas, tokayo)) {
     progress(args, "Refine: fallo paralelismo; manteniendo intervalos sin refinar");
     return;
   }
@@ -570,6 +615,106 @@ static double knnAvgDistToSeedsHist(const cv::Mat& hists,
   return sum / static_cast<double>(kk);
 }
 
+// ---------------------------------------------------------------------------
+// Tokayo mode: MCD (Minimum Covariance Determinant) + Mahalanobis
+// ---------------------------------------------------------------------------
+
+struct McdResult {
+  cv::Point2d center;
+  cv::Mat cov;      // 2x2
+  cv::Mat covInv;   // 2x2
+  double det;
+  std::vector<int> support;  // indices of h-subset
+};
+
+static McdResult computeMCD(const std::vector<cv::Point2f>& pts, double supportFraction) {
+  const int n = static_cast<int>(pts.size());
+  const int h = std::max(3, static_cast<int>(std::ceil(supportFraction * n)));
+
+  auto computeStats = [&](const std::vector<int>& indices)
+      -> std::tuple<double, double, cv::Mat> {
+    double mx = 0, my = 0;
+    for (int i : indices) { mx += pts[i].x; my += pts[i].y; }
+    mx /= static_cast<double>(indices.size());
+    my /= static_cast<double>(indices.size());
+
+    double c00 = 0, c01 = 0, c11 = 0;
+    for (int i : indices) {
+      const double dx = pts[i].x - mx;
+      const double dy = pts[i].y - my;
+      c00 += dx * dx;
+      c01 += dx * dy;
+      c11 += dy * dy;
+    }
+    const double nn = std::max(1.0, static_cast<double>(indices.size() - 1));
+    c00 /= nn; c01 /= nn; c11 /= nn;
+    cv::Mat cov = (cv::Mat_<double>(2, 2) << c00, c01, c01, c11);
+    return {mx, my, cov};
+  };
+
+  auto regularize = [](cv::Mat& cov) {
+    if (cv::determinant(cov) < 1e-15) {
+      cov.at<double>(0, 0) += 1e-10;
+      cov.at<double>(1, 1) += 1e-10;
+    }
+  };
+
+  // C-step: compute mean+cov of subset, then pick h closest by Mahalanobis.
+  auto cStep = [&](std::vector<int>& indices) -> double {
+    auto [mx, my, cov] = computeStats(indices);
+    regularize(cov);
+    const cv::Mat inv = cov.inv();
+    const cv::Point2d center(mx, my);
+
+    std::vector<std::pair<double, int>> dists;
+    dists.reserve(n);
+    for (int i = 0; i < n; i++) {
+      dists.emplace_back(mahalanobisDistance2D(pts[i], center, inv), i);
+    }
+    std::partial_sort(dists.begin(), dists.begin() + h, dists.end());
+
+    indices.clear();
+    indices.reserve(h);
+    for (int i = 0; i < h; i++) indices.push_back(dists[i].second);
+    return cv::determinant(cov);
+  };
+
+  std::mt19937 rng(42);
+  double bestDet = std::numeric_limits<double>::max();
+  std::vector<int> bestSubset;
+
+  const int nTrials = 20;
+  for (int trial = 0; trial < nTrials; trial++) {
+    std::vector<int> all(n);
+    std::iota(all.begin(), all.end(), 0);
+    std::shuffle(all.begin(), all.end(), rng);
+    std::vector<int> subset(all.begin(), all.begin() + h);
+
+    double prevDet = std::numeric_limits<double>::max();
+    for (int step = 0; step < 100; step++) {
+      const double det = cStep(subset);
+      if (std::abs(det - prevDet) < 1e-18) break;
+      prevDet = det;
+    }
+
+    if (prevDet < bestDet) {
+      bestDet = prevDet;
+      bestSubset = subset;
+    }
+  }
+
+  auto [mx, my, cov] = computeStats(bestSubset);
+  regularize(cov);
+
+  McdResult result;
+  result.center = cv::Point2d(mx, my);
+  result.cov = cov;
+  result.covInv = cov.inv();
+  result.det = cv::determinant(cov);
+  result.support = bestSubset;
+  return result;
+}
+
 static void printHelp() {
   std::cout
       << "Usage:\n"
@@ -581,6 +726,7 @@ static void printHelp() {
       << "               [--dbscan-eps 0] [--dbscan-minpts 5]\n"
       << "               [--lof-k 10] [--lof-th 1.6]\n"
       << "               [--knn-k 7] [--knn-q 0.95]\n"
+      << "               [--tokayo] [--tokayo-th 0.0]\n"
       << "               (--tl|--tr|--bl|--br) [--debug] [--quiet]\n";
 }
 
@@ -598,6 +744,10 @@ static Args parseArgs(int argc, char** argv) {
     }
     if (arg == "--outlier") {
       a.outlier = true;
+      continue;
+    }
+    if (arg == "--tokayo") {
+      a.tokayo = true;
       continue;
     }
     if (arg == "--quiet") {
@@ -644,6 +794,7 @@ static Args parseArgs(int argc, char** argv) {
     else if (arg == "--lof-th") a.lofThreshold = std::stod(take("--lof-th"));
     else if (arg == "--knn-k") a.knnK = std::stoi(take("--knn-k"));
     else if (arg == "--knn-q" || arg == "--knn-quantile") a.knnQuantile = std::stod(take(arg.c_str()));
+    else if (arg == "--tokayo-th") a.tokayoTh = std::stod(take("--tokayo-th"));
     else if (arg == "--roi" || arg == "--roi-pct") {
       double v = std::stod(take(arg.c_str()));
       if (v > 1.0) v = v / 100.0;  // allow passing 10 for 10%
@@ -699,6 +850,12 @@ static Args parseArgs(int argc, char** argv) {
   }
   if (a.knnQuantile <= 0.0 || a.knnQuantile > 1.0) {
     throw std::runtime_error("--knn-q must be in (0,1]");
+  }
+  if (a.tokayo && a.outlier) {
+    throw std::runtime_error("--tokayo and --outlier are mutually exclusive");
+  }
+  if (a.tokayoTh < 0.0 || a.tokayoTh > 1.0) {
+    throw std::runtime_error("--tokayo-th must be in [0,1] (0 = auto-detect)");
   }
   return a;
 }
@@ -889,6 +1046,173 @@ static void exportDebugPcaPlot(const fs::path& outDir,
   cv::imwrite(pngPath.string(), img);
 }
 
+static void exportDebugPcaTokayoPlot(const fs::path& outDir,
+                                     const logo_detector::TrainingOutput& training,
+                                     const std::vector<double>& mahalDists,
+                                     double mahalThreshold,
+                                     const McdResult& mcd,
+                                     const std::string& baseName) {
+  if (training.pca2d.empty() || training.pca2d.rows <= 0) return;
+  const int n = training.pca2d.rows;
+
+  // CSV
+  {
+    const fs::path csvPath = outDir / (baseName + ".csv");
+    std::ofstream csv(csvPath);
+    csv << "index,timeSec,x,y,mahalanobis,isLogo\n";
+    for (int i = 0; i < n; i++) {
+      const double t = training.sampleTimesSec[static_cast<size_t>(i)];
+      csv << i << ',' << t << ','
+          << training.pca2d.at<float>(i, 0) << ',' << training.pca2d.at<float>(i, 1) << ','
+          << mahalDists[static_cast<size_t>(i)] << ','
+          << (mahalDists[static_cast<size_t>(i)] <= mahalThreshold ? 1 : 0) << "\n";
+    }
+  }
+
+  // Decode ROI thumbnails upfront.
+  const int thumbSize = 120;
+  const int borderPx = 4;
+  std::vector<cv::Mat> thumbs(static_cast<size_t>(n));
+  for (int i = 0; i < n; i++) {
+    if (static_cast<size_t>(i) < training.sampleRoiPng.size() && !training.sampleRoiPng[static_cast<size_t>(i)].empty()) {
+      const auto& bytes = training.sampleRoiPng[static_cast<size_t>(i)];
+      cv::Mat decoded = cv::imdecode(cv::Mat(bytes), cv::IMREAD_COLOR);
+      if (!decoded.empty()) {
+        cv::resize(decoded, thumbs[static_cast<size_t>(i)], cv::Size(thumbSize, thumbSize), 0, 0, cv::INTER_AREA);
+      }
+    }
+  }
+
+  // Compute plot bounds with margin for the ellipse + thumbnails.
+  float minX = training.pca2d.at<float>(0, 0), maxX = minX;
+  float minY = training.pca2d.at<float>(0, 1), maxY = minY;
+  for (int i = 1; i < n; i++) {
+    minX = std::min(minX, training.pca2d.at<float>(i, 0));
+    maxX = std::max(maxX, training.pca2d.at<float>(i, 0));
+    minY = std::min(minY, training.pca2d.at<float>(i, 1));
+    maxY = std::max(maxY, training.pca2d.at<float>(i, 1));
+  }
+  const float marginX = (maxX - minX) * 0.18f;
+  const float marginY = (maxY - minY) * 0.18f;
+  minX -= marginX; maxX += marginX;
+  minY -= marginY; maxY += marginY;
+  if (std::abs(maxX - minX) < 1e-6f) { minX -= 1.0f; maxX += 1.0f; }
+  if (std::abs(maxY - minY) < 1e-6f) { minY -= 1.0f; maxY += 1.0f; }
+
+  // ~10 MP: 4000 x 2500 = 10,000,000
+  const int width = 4000;
+  const int height = 2500;
+  const int pad = 180;
+  cv::Mat img(height, width, CV_8UC3, cv::Scalar(255, 255, 255));
+
+  const auto mapPX = [&](float x) -> int {
+    return pad + static_cast<int>(((x - minX) / (maxX - minX)) * (width - 2 * pad));
+  };
+  const auto mapPY = [&](float y) -> int {
+    return (height - pad) - static_cast<int>(((y - minY) / (maxY - minY)) * (height - 2 * pad));
+  };
+
+  // Axes
+  cv::line(img, cv::Point(pad, height - pad), cv::Point(width - pad, height - pad), cv::Scalar(0, 0, 0), 2);
+  cv::line(img, cv::Point(pad, pad), cv::Point(pad, height - pad), cv::Scalar(0, 0, 0), 2);
+  cv::putText(img, "PCA X", cv::Point(width / 2 - 60, height - 40), cv::FONT_HERSHEY_SIMPLEX, 1.8, cv::Scalar(0, 0, 0), 2);
+  cv::putText(img, "PCA Y", cv::Point(20, height / 2), cv::FONT_HERSHEY_SIMPLEX, 1.8, cv::Scalar(0, 0, 0), 2);
+
+  // Draw the Mahalanobis threshold ellipse.
+  {
+    cv::Mat eigenvalues, eigenvectors;
+    cv::eigen(mcd.cov, eigenvalues, eigenvectors);
+
+    const double ev0 = eigenvalues.at<double>(0, 0);
+    const double ev1 = eigenvalues.at<double>(1, 0);
+    const double semiA = mahalThreshold * std::sqrt(std::max(0.0, ev0));
+    const double semiB = mahalThreshold * std::sqrt(std::max(0.0, ev1));
+
+    const double angle = std::atan2(eigenvectors.at<double>(0, 1), eigenvectors.at<double>(0, 0))
+                         * 180.0 / CV_PI;
+
+    const int nPts = 720;
+    std::vector<cv::Point> ellipsePx;
+    ellipsePx.reserve(nPts);
+    for (int t = 0; t < nPts; t++) {
+      const double theta = static_cast<double>(t) * 2.0 * CV_PI / nPts;
+      const double ex = semiA * std::cos(theta);
+      const double ey = semiB * std::sin(theta);
+      const double angleRad = angle * CV_PI / 180.0;
+      const double rx = mcd.center.x + ex * std::cos(angleRad) - ey * std::sin(angleRad);
+      const double ry = mcd.center.y + ex * std::sin(angleRad) + ey * std::cos(angleRad);
+      ellipsePx.emplace_back(mapPX(static_cast<float>(rx)), mapPY(static_cast<float>(ry)));
+    }
+    cv::polylines(img, ellipsePx, true, cv::Scalar(200, 100, 0), 4, cv::LINE_AA);
+  }
+
+  // Draw MCD center.
+  cv::drawMarker(img,
+                 cv::Point(mapPX(static_cast<float>(mcd.center.x)), mapPY(static_cast<float>(mcd.center.y))),
+                 cv::Scalar(200, 100, 0), cv::MARKER_CROSS, 30, 3, cv::LINE_AA);
+
+  // Draw each sample as its ROI thumbnail with a colored border.
+  const int totalThumb = thumbSize + 2 * borderPx;
+  const int halfThumb = totalThumb / 2;
+  for (int i = 0; i < n; i++) {
+    const float x = training.pca2d.at<float>(i, 0);
+    const float y = training.pca2d.at<float>(i, 1);
+    const int cx = mapPX(x);
+    const int cy = mapPY(y);
+    const bool isLogo = (mahalDists[static_cast<size_t>(i)] <= mahalThreshold);
+    const cv::Scalar borderColor = isLogo ? cv::Scalar(0, 180, 0) : cv::Scalar(0, 0, 220);
+
+    const int x0 = cx - halfThumb;
+    const int y0 = cy - halfThumb;
+
+    // Clamp to image bounds.
+    if (x0 < 0 || y0 < 0 || x0 + totalThumb > width || y0 + totalThumb > height) {
+      cv::circle(img, cv::Point(cx, cy), 8, borderColor, cv::FILLED, cv::LINE_AA);
+      continue;
+    }
+
+    // Draw colored border rectangle.
+    cv::rectangle(img, cv::Rect(x0, y0, totalThumb, totalThumb), borderColor, borderPx, cv::LINE_AA);
+
+    // Paste thumbnail if available.
+    if (!thumbs[static_cast<size_t>(i)].empty()) {
+      const cv::Rect roi(x0 + borderPx, y0 + borderPx, thumbSize, thumbSize);
+      thumbs[static_cast<size_t>(i)].copyTo(img(roi));
+    } else {
+      cv::rectangle(img, cv::Rect(x0 + borderPx, y0 + borderPx, thumbSize, thumbSize),
+                    cv::Scalar(220, 220, 220), cv::FILLED);
+      cv::putText(img, "?", cv::Point(cx - 12, cy + 12), cv::FONT_HERSHEY_SIMPLEX, 1.2, borderColor, 2);
+    }
+  }
+
+  // Legend
+  const int lx = width - pad - 550;
+  const int ly = pad + 20;
+  cv::rectangle(img, cv::Rect(lx - 15, ly - 15, 540, 160), cv::Scalar(245, 245, 245), cv::FILLED);
+  cv::rectangle(img, cv::Rect(lx - 15, ly - 15, 540, 160), cv::Scalar(180, 180, 180), 2);
+
+  cv::rectangle(img, cv::Rect(lx, ly + 2, 20, 20), cv::Scalar(0, 180, 0), cv::FILLED);
+  cv::putText(img, "logo (inside ellipse)", cv::Point(lx + 30, ly + 20), cv::FONT_HERSHEY_SIMPLEX, 1.0, cv::Scalar(0, 0, 0), 2);
+  cv::rectangle(img, cv::Rect(lx, ly + 42, 20, 20), cv::Scalar(0, 0, 220), cv::FILLED);
+  cv::putText(img, "no-logo (outlier)", cv::Point(lx + 30, ly + 60), cv::FONT_HERSHEY_SIMPLEX, 1.0, cv::Scalar(0, 0, 0), 2);
+  cv::line(img, cv::Point(lx, ly + 90), cv::Point(lx + 20, ly + 90), cv::Scalar(200, 100, 0), 4, cv::LINE_AA);
+
+  std::ostringstream thLabel;
+  thLabel << std::fixed << std::setprecision(2) << "Mahalanobis threshold = " << mahalThreshold;
+  cv::putText(img, thLabel.str(), cv::Point(lx + 30, ly + 97), cv::FONT_HERSHEY_SIMPLEX, 0.9, cv::Scalar(200, 100, 0), 2);
+
+  std::ostringstream statsLabel;
+  int logoCount = 0, outlierCount = 0;
+  for (int i = 0; i < n; i++) {
+    if (mahalDists[static_cast<size_t>(i)] <= mahalThreshold) logoCount++; else outlierCount++;
+  }
+  statsLabel << "samples: " << n << " | logo: " << logoCount << " | outlier: " << outlierCount;
+  cv::putText(img, statsLabel.str(), cv::Point(lx + 5, ly + 135), cv::FONT_HERSHEY_SIMPLEX, 0.85, cv::Scalar(80, 80, 80), 2);
+
+  const fs::path pngPath = outDir / (baseName + ".png");
+  cv::imwrite(pngPath.string(), img);
+}
+
 int main(int argc, char** argv) {
   const auto processStart = std::chrono::steady_clock::now();
   try {
@@ -931,7 +1255,7 @@ int main(int argc, char** argv) {
         args.cornerIndex,
         args.sampleEverySec,
         args.threads,
-        args.debug,
+        args.debug || args.tokayo,
         [&](int current, int total) {
           if (args.quiet) return;
           progress(args,
@@ -958,13 +1282,16 @@ int main(int argc, char** argv) {
     };
     std::vector<Interval> ads;
 
+    const std::string strategyName = args.tokayo ? "tokayo" :
+                                     args.outlier ? ("outlier/" + args.outlierMode) : "bhattacharyya";
     progress(args,
              "Detectando ads desde muestras (cada " + std::to_string(training.sampleEverySec) +
                  " sec, min-ad-sec=" + std::to_string(args.minAdSec) +
-                 ", strategy=" + std::string(args.outlier ? ("outlier/" + args.outlierMode) : "bhattacharyya") +
-                 ", smooth=" + std::to_string(args.smoothWindow) +
-                 ", enterMult=" + std::to_string(args.enterMult) +
-                 ", exitMult=" + std::to_string(args.exitMult) +
+                 ", strategy=" + strategyName +
+                 (args.tokayo ? (", nccTh=" + std::to_string(args.tokayoTh) + " (0=auto)")
+                              : (", smooth=" + std::to_string(args.smoothWindow) +
+                                 ", enterMult=" + std::to_string(args.enterMult) +
+                                 ", exitMult=" + std::to_string(args.exitMult))) +
                  ", enterN=" + std::to_string(args.enterConsecutive) +
                  ", exitN=" + std::to_string(args.exitConsecutive) + ")");
 
@@ -984,7 +1311,196 @@ int main(int argc, char** argv) {
     double usedKnnQ = 0.0;
     double usedKnnThreshold = 0.0;
 
-    if (!args.outlier) {
+    std::unique_ptr<TokayoModel> tokayoModelPtr;
+
+    if (args.tokayo) {
+      // --- Tokayo: pixel-wise median + stddev logo detection + NCC ---
+
+      // 1. Decode all ROI PNGs to grayscale + slight blur.
+      progress(args, "Tokayo: decodificando ROIs a escala de grises + blur");
+      std::vector<cv::Mat> grayRois;
+      grayRois.reserve(static_cast<size_t>(sampleCount));
+      for (int i = 0; i < sampleCount; i++) {
+        if (static_cast<size_t>(i) >= training.sampleRoiPng.size() ||
+            training.sampleRoiPng[static_cast<size_t>(i)].empty()) {
+          throw std::runtime_error("tokayo: missing ROI image for sample " + std::to_string(i));
+        }
+        cv::Mat decoded = cv::imdecode(training.sampleRoiPng[static_cast<size_t>(i)], cv::IMREAD_COLOR);
+        if (decoded.empty()) throw std::runtime_error("tokayo: could not decode ROI PNG for sample " + std::to_string(i));
+        cv::Mat gray;
+        cv::cvtColor(decoded, gray, cv::COLOR_BGR2GRAY);
+        cv::GaussianBlur(gray, gray, cv::Size(3, 3), 0);
+        grayRois.push_back(gray);
+      }
+      const int roiH = grayRois[0].rows;
+      const int roiW = grayRois[0].cols;
+      progress(args, "Tokayo: ROI size=" + std::to_string(roiW) + "x" + std::to_string(roiH) +
+                         ", samples=" + std::to_string(sampleCount));
+
+      // 2. Compute pixel-wise median across all samples.
+      progress(args, "Tokayo: calculando mediana pixel a pixel");
+      cv::Mat medianImg(roiH, roiW, CV_8UC1);
+      {
+        std::vector<uint8_t> vals(static_cast<size_t>(sampleCount));
+        for (int y = 0; y < roiH; y++) {
+          for (int x = 0; x < roiW; x++) {
+            for (int i = 0; i < sampleCount; i++) {
+              vals[static_cast<size_t>(i)] = grayRois[static_cast<size_t>(i)].at<uint8_t>(y, x);
+            }
+            std::nth_element(vals.begin(), vals.begin() + sampleCount / 2, vals.end());
+            medianImg.at<uint8_t>(y, x) = vals[static_cast<size_t>(sampleCount / 2)];
+          }
+        }
+      }
+
+      // 3. Compute per-pixel stddev to find constant (logo) vs varying (background) pixels.
+      progress(args, "Tokayo: calculando stddev pixel a pixel");
+      cv::Mat stddevImg(roiH, roiW, CV_32FC1);
+      for (int y = 0; y < roiH; y++) {
+        for (int x = 0; x < roiW; x++) {
+          double sum = 0, sum2 = 0;
+          for (int i = 0; i < sampleCount; i++) {
+            const double v = grayRois[static_cast<size_t>(i)].at<uint8_t>(y, x);
+            sum += v;
+            sum2 += v * v;
+          }
+          const double mean = sum / sampleCount;
+          const double var = (sum2 / sampleCount) - mean * mean;
+          stddevImg.at<float>(y, x) = static_cast<float>(std::sqrt(std::max(0.0, var)));
+        }
+      }
+
+      // 4. Threshold stddev to find the logo region (low variance = constant = logo).
+      cv::Mat stddevNorm;
+      cv::normalize(stddevImg, stddevNorm, 0, 255, cv::NORM_MINMAX);
+      stddevNorm.convertTo(stddevNorm, CV_8UC1);
+
+      cv::Mat logoMask;
+      cv::threshold(stddevNorm, logoMask, 0, 255, cv::THRESH_BINARY_INV | cv::THRESH_OTSU);
+
+      cv::Mat morphKernel = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(5, 5));
+      cv::morphologyEx(logoMask, logoMask, cv::MORPH_CLOSE, morphKernel);
+      cv::morphologyEx(logoMask, logoMask, cv::MORPH_OPEN, morphKernel);
+
+      std::vector<std::vector<cv::Point>> contours;
+      cv::findContours(logoMask, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
+      if (contours.empty()) throw std::runtime_error("tokayo: no logo region found in stddev analysis");
+
+      size_t largestIdx = 0;
+      double largestArea = 0;
+      for (size_t ci = 0; ci < contours.size(); ci++) {
+        const double area = cv::contourArea(contours[ci]);
+        if (area > largestArea) { largestArea = area; largestIdx = ci; }
+      }
+
+      cv::Rect logoSubRect = cv::boundingRect(contours[largestIdx]);
+      const int padPx = 2;
+      logoSubRect.x = std::max(0, logoSubRect.x - padPx);
+      logoSubRect.y = std::max(0, logoSubRect.y - padPx);
+      logoSubRect.width = std::min(roiW - logoSubRect.x, logoSubRect.width + 2 * padPx);
+      logoSubRect.height = std::min(roiH - logoSubRect.y, logoSubRect.height + 2 * padPx);
+
+      progress(args, "Tokayo: logo sub-ROI=" + std::to_string(logoSubRect.x) + "," +
+                         std::to_string(logoSubRect.y) + " " +
+                         std::to_string(logoSubRect.width) + "x" + std::to_string(logoSubRect.height));
+
+      // 5. Extract logo template from median image.
+      cv::Mat logoTemplate = medianImg(logoSubRect).clone();
+
+      // 6. NCC (normalized cross-correlation) of each sample against the template.
+      progress(args, "Tokayo: correlacion cruzada normalizada (NCC)");
+      std::vector<double> nccScores;
+      nccScores.reserve(static_cast<size_t>(sampleCount));
+      for (int i = 0; i < sampleCount; i++) {
+        const cv::Mat sampleSub = grayRois[static_cast<size_t>(i)](logoSubRect);
+        cv::Mat result;
+        cv::matchTemplate(sampleSub, logoTemplate, result, cv::TM_CCOEFF_NORMED);
+        nccScores.push_back(static_cast<double>(result.at<float>(0, 0)));
+      }
+
+      // 7. Determine NCC threshold: auto-detect via largest gap, or use manual value.
+      double nccTh = args.tokayoTh;
+      if (nccTh <= 0.0) {
+        std::vector<double> sorted = nccScores;
+        std::sort(sorted.begin(), sorted.end());
+        double bestGap = 0.0;
+        for (size_t i = 1; i < sorted.size(); i++) {
+          const double gap = sorted[i] - sorted[i - 1];
+          if (gap > bestGap) {
+            bestGap = gap;
+            nccTh = (sorted[i] + sorted[i - 1]) / 2.0;
+          }
+        }
+        if (nccTh <= 0.0) nccTh = 0.5;
+        progress(args, "Tokayo: auto-detected NCC threshold=" + std::to_string(nccTh) +
+                           " (largest gap=" + std::to_string(bestGap) + ")");
+      }
+
+      // 8. Classify.
+      int logoCount = 0, noLogoCount = 0;
+      for (int i = 0; i < sampleCount; i++) {
+        const bool isLogo = (nccScores[static_cast<size_t>(i)] >= nccTh);
+        hasLogo[static_cast<size_t>(i)] = isLogo ? 1 : 0;
+        if (isLogo) logoCount++; else noLogoCount++;
+      }
+      progress(args, "Tokayo: logo=" + std::to_string(logoCount) +
+                         ", no-logo=" + std::to_string(noLogoCount) +
+                         ", nccThreshold=" + std::to_string(nccTh));
+
+      // Build TokayoModel for refinement.
+      tokayoModelPtr = std::make_unique<TokayoModel>();
+      tokayoModelPtr->logoTemplate = logoTemplate.clone();
+      tokayoModelPtr->logoSubRect = logoSubRect;
+      tokayoModelPtr->nccThreshold = nccTh;
+      tokayoModelPtr->cornerIndex = args.cornerIndex;
+      tokayoModelPtr->roiWidthPct = args.roiWidthPct;
+
+      if (args.debug) {
+        // Save median image, stddev, mask, and template.
+        cv::imwrite((logosOutDir / "tokayo_median.png").string(), medianImg);
+        cv::imwrite((logosOutDir / "tokayo_stddev.png").string(), stddevNorm);
+        cv::imwrite((logosOutDir / "tokayo_logo_mask.png").string(), logoMask);
+        cv::imwrite((logosOutDir / "tokayo_logo_template.png").string(), logoTemplate);
+
+        // Draw the detected sub-ROI on the median.
+        cv::Mat medianAnnotated;
+        cv::cvtColor(medianImg, medianAnnotated, cv::COLOR_GRAY2BGR);
+        cv::rectangle(medianAnnotated, logoSubRect, cv::Scalar(0, 255, 0), 2);
+        cv::imwrite((logosOutDir / "tokayo_median_annotated.png").string(), medianAnnotated);
+
+        // Export logos and no-logos as separate folders.
+        const fs::path noLogosDir = logosOutDir / "no-logos";
+        fs::create_directories(noLogosDir);
+        for (int i = 0; i < sampleCount; i++) {
+          if (static_cast<size_t>(i) >= training.sampleRoiPng.size()) continue;
+          const auto& bytes = training.sampleRoiPng[static_cast<size_t>(i)];
+          if (bytes.empty()) continue;
+          if (!hasLogo[static_cast<size_t>(i)]) {
+            const int64_t tMs = static_cast<int64_t>(training.sampleTimesSec[static_cast<size_t>(i)] * 1000.0);
+            std::ostringstream name;
+            name << "nologo_" << std::setw(6) << std::setfill('0') << i << "_t" << tMs << ".png";
+            const fs::path p = noLogosDir / name.str();
+            std::ofstream f(p, std::ios::binary);
+            f.write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+          }
+        }
+
+        // Export NCC scores CSV.
+        const fs::path csvPath = logosOutDir / "tokayo_ncc_scores.csv";
+        std::ofstream csv(csvPath);
+        if (csv.is_open()) {
+          csv << "nccThreshold,logoSubRectX,logoSubRectY,logoSubRectW,logoSubRectH\n";
+          csv << nccTh << "," << logoSubRect.x << "," << logoSubRect.y << ","
+              << logoSubRect.width << "," << logoSubRect.height << "\n";
+          csv << "\nindex,timeSec,ncc,isLogo\n";
+          for (int i = 0; i < sampleCount; i++) {
+            csv << i << "," << training.sampleTimesSec[static_cast<size_t>(i)] << ","
+                << nccScores[static_cast<size_t>(i)] << ","
+                << (hasLogo[static_cast<size_t>(i)] ? 1 : 0) << "\n";
+          }
+        }
+      }
+    } else if (!args.outlier) {
       std::vector<double> distRaw;
       distRaw.reserve(static_cast<size_t>(std::max(0, sampleCount)));
       for (int i = 0; i < sampleCount; i++) {
@@ -1224,13 +1740,15 @@ int main(int argc, char** argv) {
     int logoStreak = 0;
     int startCandidateIdx = -1;
 
+    const bool useBinaryHasLogo = args.outlier || args.tokayo;
+
     for (int i = 0; i < sampleCount; i++) {
-      const bool logoNow = args.outlier ? (hasLogo[static_cast<size_t>(i)] != 0)
-                                        : ((i < static_cast<int>(distSmooth.size())) ? (distSmooth[static_cast<size_t>(i)] <= exitTh) : true);
-      const bool strongNoLogo = args.outlier ? (!logoNow)
-                                            : ((i < static_cast<int>(distSmooth.size())) ? (distSmooth[static_cast<size_t>(i)] >= enterTh) : false);
-      const bool strongLogo = args.outlier ? (logoNow)
-                                          : ((i < static_cast<int>(distSmooth.size())) ? (distSmooth[static_cast<size_t>(i)] <= exitTh) : true);
+      const bool logoNow = useBinaryHasLogo ? (hasLogo[static_cast<size_t>(i)] != 0)
+                                            : ((i < static_cast<int>(distSmooth.size())) ? (distSmooth[static_cast<size_t>(i)] <= exitTh) : true);
+      const bool strongNoLogo = useBinaryHasLogo ? (!logoNow)
+                                                 : ((i < static_cast<int>(distSmooth.size())) ? (distSmooth[static_cast<size_t>(i)] >= enterTh) : false);
+      const bool strongLogo = useBinaryHasLogo ? (logoNow)
+                                               : ((i < static_cast<int>(distSmooth.size())) ? (distSmooth[static_cast<size_t>(i)] <= exitTh) : true);
 
       if (!inAd) {
         if (strongNoLogo) {
@@ -1293,7 +1811,8 @@ int main(int argc, char** argv) {
 
     // Second pass: refine boundaries around each detected AD interval.
     refineIntervalsIterative(args, args.m3u8, totalDurationSec, training.model, ads,
-                             args.debug ? &logosOutDir : nullptr);
+                             args.debug ? &logosOutDir : nullptr,
+                             tokayoModelPtr.get());
     for (auto& it : ads) {
       it.startPdt = offsetToProgramDateTime(segments, segEpochMs, it.startSec);
       it.endPdt = offsetToProgramDateTime(segments, segEpochMs, it.endSec);
@@ -1327,9 +1846,26 @@ int main(int argc, char** argv) {
     json << "    \"logoThresholdBhattacharyya\": " << training.model.threshold << ",\n";
     json << "    \"detection\": {\n";
     json << "      \"strategy\": ";
-    json_util::writeString(json, args.outlier ? "outlier" : "bhattacharyya");
+    json_util::writeString(json, args.tokayo ? "tokayo" : (args.outlier ? "outlier" : "bhattacharyya"));
     json << ",\n";
-    if (args.outlier) {
+    if (args.tokayo) {
+      json << "      \"tokayo\": {\n";
+      json << "        \"method\": \"pixel-median + NCC\",\n";
+      if (tokayoModelPtr) {
+        json << "        \"nccThreshold\": " << tokayoModelPtr->nccThreshold << ",\n";
+        json << "        \"logoSubRect\": {"
+             << "\"x\":" << tokayoModelPtr->logoSubRect.x
+             << ",\"y\":" << tokayoModelPtr->logoSubRect.y
+             << ",\"w\":" << tokayoModelPtr->logoSubRect.width
+             << ",\"h\":" << tokayoModelPtr->logoSubRect.height << "}\n";
+      } else {
+        json << "        \"nccThreshold\": null,\n";
+        json << "        \"logoSubRect\": null\n";
+      }
+      json << "      },\n";
+      json << "      \"enterConsecutive\": " << args.enterConsecutive << ",\n";
+      json << "      \"exitConsecutive\": " << args.exitConsecutive << "\n";
+    } else if (args.outlier) {
       json << "      \"outlierMode\": ";
       json_util::writeString(json, args.outlierMode);
       json << ",\n";
