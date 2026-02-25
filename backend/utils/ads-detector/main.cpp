@@ -39,7 +39,7 @@ struct Args {
   double sampleEverySec = 5.0;
   double roiWidthPct = 0.15;  // ROI side = roiWidthPct * source width (square)
   int k = 2;
-  double minAdSec = 4.0;
+  double minAdSec = 60.0;
   int smoothWindow = 3;          // moving average window over distances (1 = disabled)
   double enterMult = 1.25;       // enter AD if dist >= threshold * enterMult
   double exitMult = 1.00;        // exit AD if dist <= threshold * exitMult (must be <= enterMult)

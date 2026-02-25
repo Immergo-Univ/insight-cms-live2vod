@@ -2,8 +2,8 @@
   "m3u8": "https://rjrtvjlocal-ioriver-cdn.encoders.immergo.tv/0/streamPlaylist.m3u8?startTime=1772015400&endTime=1772017200",
   "totalDurationSec": 1800,
   "process": {
-    "elapsedMs": 20948,
-    "elapsedSec": 20.948
+    "elapsedMs": 53749,
+    "elapsedSec": 53.749
   },
   "training": {
     "sampleEverySec": 30,
@@ -16,7 +16,7 @@
       "strategy": "tokayo",
       "tokayo": {
         "method": "pixel-median + NCC",
-        "nccThreshold": 0.3,
+        "nccThreshold": 0.5,
         "logoSubRect": {"x":28,"y":27,"w":63,"h":54}
       },
       "enterConsecutive": 1,
@@ -25,28 +25,44 @@
   },
   "ads": [
     {
-      "startOffsetSec": 55,
-      "startOffsetHms": "00:00:55",
-      "endOffsetSec": 62.5,
-      "endOffsetHms": "00:01:03",
-      "startProgramDateTime": "2026-02-25T10:30:56.454+0000",
-      "endProgramDateTime": "2026-02-25T10:31:03.954+0000"
+      "startOffsetSec": 0,
+      "startOffsetHms": "00:00:00",
+      "endOffsetSec": 9,
+      "endOffsetHms": "00:00:09",
+      "startProgramDateTime": "2026-02-25T10:30:01.454+0000",
+      "endProgramDateTime": "2026-02-25T10:30:10.454+0000"
     },
     {
-      "startOffsetSec": 512.5,
-      "startOffsetHms": "00:08:33",
+      "startOffsetSec": 54,
+      "startOffsetHms": "00:00:54",
+      "endOffsetSec": 62,
+      "endOffsetHms": "00:01:02",
+      "startProgramDateTime": "2026-02-25T10:30:55.454+0000",
+      "endProgramDateTime": "2026-02-25T10:31:03.454+0000"
+    },
+    {
+      "startOffsetSec": 511,
+      "startOffsetHms": "00:08:31",
       "endOffsetSec": 685,
       "endOffsetHms": "00:11:25",
-      "startProgramDateTime": "2026-02-25T10:38:33.954+0000",
+      "startProgramDateTime": "2026-02-25T10:38:32.454+0000",
       "endProgramDateTime": "2026-02-25T10:41:26.454+0000"
     },
     {
-      "startOffsetSec": 1245,
-      "startOffsetHms": "00:20:45",
-      "endOffsetSec": 1377.5,
+      "startOffsetSec": 956,
+      "startOffsetHms": "00:15:56",
+      "endOffsetSec": 966,
+      "endOffsetHms": "00:16:06",
+      "startProgramDateTime": "2026-02-25T10:45:57.454+0000",
+      "endProgramDateTime": "2026-02-25T10:46:07.454+0000"
+    },
+    {
+      "startOffsetSec": 1241,
+      "startOffsetHms": "00:20:41",
+      "endOffsetSec": 1378,
       "endOffsetHms": "00:22:58",
-      "startProgramDateTime": "2026-02-25T10:50:46.454+0000",
-      "endProgramDateTime": "2026-02-25T10:52:58.954+0000"
+      "startProgramDateTime": "2026-02-25T10:50:42.454+0000",
+      "endProgramDateTime": "2026-02-25T10:52:59.454+0000"
     }
   ],
   "debug": {
