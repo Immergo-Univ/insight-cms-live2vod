@@ -175,7 +175,9 @@ static bool evaluateHasLogoParallelProbes(const std::string& source,
   outHasLogo.assign(probes.size(), 0);
   if (probes.empty()) return true;
 
-  const int threadCount = computeThreadCount(args.threads);
+  const int wantedThreads = computeThreadCount(args.threads);
+  // Avoid opening more VideoCaptures than work items (HLS open/seek is expensive).
+  const int threadCount = std::max(1, std::min(wantedThreads, static_cast<int>(probes.size())));
   std::vector<std::vector<int>> buckets(static_cast<size_t>(threadCount));
   for (int i = 0; i < static_cast<int>(probes.size()); i++) {
     const double t = probes[static_cast<size_t>(i)].tSec;
