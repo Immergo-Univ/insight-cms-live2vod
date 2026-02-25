@@ -6,7 +6,7 @@ WORKDIR /app
 
 # Build ads_detector
 COPY backend/utils/ads-detector/ ./backend/utils/ads-detector/
-RUN g++ -O2 -std=c++17 \
+RUN mkdir -p backend/utils/bin && g++ -O2 -std=c++17 \
       -o backend/utils/bin/ads_detector \
       backend/utils/ads-detector/main.cpp \
       backend/utils/ads-detector/http.cpp \
