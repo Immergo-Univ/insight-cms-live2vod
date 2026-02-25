@@ -13,8 +13,7 @@ export function detectAds({ m3u8Url, corner = "br" }) {
     cornerFlag,
     "--interval", "30",
     "--threads", "30",
-    "--outlier",
-    "--outlier-mode", "knn",
+    "--tokayo",
     "--quiet",
     "--output", "/dev/null",
   ];

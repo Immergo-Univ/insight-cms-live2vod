@@ -54,7 +54,7 @@ struct Args {
   int knnK = 10;
   double knnQuantile = 0.95;
   bool tokayo = false;
-  double tokayoTh = 0.3;       // NCC threshold (0 = auto-detect from gap in scores)
+  double tokayoTh = 0.5;       // NCC threshold (0 = auto-detect from gap in scores)
   bool debug = false;
   bool quiet = false;
   int cornerIndex = -1;  // 0 TL, 1 TR, 2 BL, 3 BR (required)
@@ -253,7 +253,7 @@ static void refineIntervalsIterative(const Args& args,
                                      const TokayoModel* tokayo = nullptr) {
   if (ads.empty()) return;
 
-  const double refineStepSec = 2.5;
+  const double refineStepSec = 1;
   progress(args, "Refinando intervalos (-30s, step=" + std::to_string(refineStepSec) + "s, paralelo)");
 
   struct PerAd {
