@@ -15,3 +15,4 @@ export interface Channel {
   archive: boolean;
   epgEvents: EpgEvent[];
 }
+

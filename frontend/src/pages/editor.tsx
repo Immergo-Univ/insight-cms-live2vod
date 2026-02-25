@@ -12,7 +12,9 @@ import {
 } from "@/components/editor";
 import { FRAME_DURATION_SEC } from "@/components/editor/editor-constants";
 import type { EditorPlayerRef } from "@/components/editor";
+import { detectAds } from "@/services/ads.service";
 import type {
+  EditorAdMarker,
   EditorClipState,
   EditorPosterEntry,
   EditorStateJson,
@@ -41,6 +43,57 @@ export function EditorPage() {
   const [playingClipId, setPlayingClipId] = useState<string | null>(null);
   /** When set, we're playing the full sequence (order 1..N); value = current segment index. */
   const [playingSequenceIndex, setPlayingSequenceIndex] = useState<number | null>(null);
+
+  const [ads, setAds] = useState<EditorAdMarker[]>([]);
+  const [adsLoading, setAdsLoading] = useState(false);
+  const adsTriggeredRef = useRef(false);
+
+  useEffect(() => {
+    if (adsTriggeredRef.current || !clipState?.clipUrl) return;
+    adsTriggeredRef.current = true;
+
+    const corner = clipState.logoCorner || "br";
+    setAdsLoading(true);
+    detectAds(clipState.clipUrl, corner)
+      .then((result) => {
+        setAds(
+          result.ads.map((ad, i) => ({
+            id: crypto.randomUUID(),
+            index: i + 1,
+            startTime:
+              new Date(ad.startProgramDateTime).getTime() / 1000 -
+              clipState.startTime,
+            endTime:
+              new Date(ad.endProgramDateTime).getTime() / 1000 -
+              clipState.startTime,
+          })),
+        );
+      })
+      .catch((err) => console.error("Ads detection failed:", err))
+      .finally(() => setAdsLoading(false));
+  }, [clipState]);
+
+  const handleRemoveAd = useCallback((id: string) => {
+    setAds((prev) => {
+      const filtered = prev.filter((a) => a.id !== id);
+      return filtered.map((a, i) => ({ ...a, index: i + 1 }));
+    });
+  }, []);
+
+  const handleResizeAd = useCallback(
+    (id: string, newStartTime?: number, newEndTime?: number) => {
+      setAds((prev) =>
+        prev.map((a) => {
+          if (a.id !== id) return a;
+          const start = newStartTime ?? a.startTime;
+          const end = newEndTime ?? a.endTime;
+          if (end <= start) return a;
+          return { ...a, startTime: start, endTime: end };
+        }),
+      );
+    },
+    [],
+  );
 
   const sortedClips = useMemo(
     () => [...clips].sort((a, b) => a.order - b.order),
@@ -282,6 +335,17 @@ export function EditorPage() {
     endTime: clipState.endTime,
     posters,
     clips: clips.map((c) => ({ order: c.order, startTime: c.startTime, endTime: c.endTime })),
+    ads: ads.map((a) => ({
+      index: a.index,
+      startTime: a.startTime,
+      endTime: a.endTime,
+      startProgramDateTime: new Date(
+        (clipState.startTime + a.startTime) * 1000,
+      ).toISOString(),
+      endProgramDateTime: new Date(
+        (clipState.startTime + a.endTime) * 1000,
+      ).toISOString(),
+    })),
   };
 
   return (
@@ -354,6 +418,10 @@ export function EditorPage() {
               onSelectClip={setSelectedClipId}
               onRemoveClip={handleRemoveClip}
               onResizeClip={handleResizeClip}
+              ads={ads}
+              adsLoading={adsLoading}
+              onRemoveAd={handleRemoveAd}
+              onResizeAd={handleResizeAd}
             />
           </section>
 

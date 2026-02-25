@@ -56,6 +56,8 @@ export class HttpClient {
       baseURL: this.bffConfig.baseUrl,
       headers: {
         "Content-Type": "application/json",
+        "Authorization": `Bearer ${this.config.authToken}`,
+        "x-tenant-id": this.config.tenantId,
       },
     });
   }
@@ -69,10 +71,12 @@ export class HttpClient {
 
     if (config.authToken) {
       this.client.defaults.headers.common['Authorization'] = `Bearer ${config.authToken}`;
+      this.bffClient.defaults.headers.common['Authorization'] = `Bearer ${config.authToken}`;
     }
 
     if (config.tenantId) {
       this.client.defaults.headers.common['x-tenant-id'] = config.tenantId;
+      this.bffClient.defaults.headers.common['x-tenant-id'] = config.tenantId;
     }
   }
 

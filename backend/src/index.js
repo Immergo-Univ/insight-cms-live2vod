@@ -4,6 +4,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { channelsRouter } from "./controllers/channels.controller.js";
 import { m3u8Router } from "./controllers/m3u8.controller.js";
+import { adsRouter } from "./controllers/ads.controller.js";
 import { config } from "./config.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -15,6 +16,7 @@ app.use(express.json());
 
 app.use("/api/channels", channelsRouter);
 app.use("/api/m3u8", m3u8Router);
+app.use("/api/ads", adsRouter);
 
 const frontendBuildPath = path.join(__dirname, "../../frontend/dist");
 app.use(express.static(frontendBuildPath));

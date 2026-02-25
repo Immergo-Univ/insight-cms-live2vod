@@ -1,18 +1,12 @@
-import axios from "axios";
+import { httpClient } from "./http-client";
 import type { Channel } from "@/types/channel";
 
-function getQueryParams() {
-  const params = new URLSearchParams(window.location.search);
-  return {
-    accountId: params.get("accountId") || "",
-    tenantId: params.get("tenantId") || "",
-  };
-}
-
 export async function getChannels(): Promise<Channel[]> {
-  const { accountId, tenantId } = getQueryParams();
+  const accountId = httpClient.getAccountId();
+  const tenantId = httpClient.getTenantId();
+  const bffClient = httpClient.getBffClient();
 
-  const response = await axios.get<Channel[]>("/api/channels", {
+  const response = await bffClient.get<Channel[]>("/channels", {
     params: { accountId, tenantId },
   });
 

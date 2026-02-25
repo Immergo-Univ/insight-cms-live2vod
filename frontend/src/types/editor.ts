@@ -7,6 +7,17 @@ export interface EditorClipState {
   endTime: number;
   clipUrl: string;
   channelId?: string;
+  logoCorner?: string;
+}
+
+/**
+ * Ad marker detected by the ads detector. Times relative to clip (0 to duration).
+ */
+export interface EditorAdMarker {
+  id: string;
+  index: number;
+  startTime: number;
+  endTime: number;
 }
 
 /**
@@ -43,4 +54,11 @@ export interface EditorStateJson {
   endTime: number;
   posters: EditorPosterEntry[];
   clips: Array<{ order: number; startTime: number; endTime: number }>;
+  ads: Array<{
+    index: number;
+    startTime: number;
+    endTime: number;
+    startProgramDateTime: string;
+    endProgramDateTime: string;
+  }>;
 }

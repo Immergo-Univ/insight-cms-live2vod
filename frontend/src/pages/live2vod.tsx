@@ -218,6 +218,7 @@ function PreviewPanel({
   tz: string;
 }) {
   const navigate = useNavigate();
+  const [logoCorner, setLogoCorner] = useState("br");
 
   const fmt = (ts: number) =>
     new Date(ts * 1000).toLocaleString(undefined, {
@@ -247,6 +248,7 @@ function PreviewPanel({
         endTime: timeWindow.endTime,
         clipUrl: clipUrl.toString(),
         channelId,
+        logoCorner,
       },
     });
   };
@@ -264,13 +266,31 @@ function PreviewPanel({
       <div className="flex flex-1 items-start justify-center overflow-y-auto p-4">
         <div className="flex w-full max-w-3xl flex-col gap-4">
           <VideoPreview streamUrl={streamUrl} timeWindow={timeWindow} />
-          <button
-            onClick={handleOpenEditorClick}
-            className="flex cursor-pointer items-center justify-center gap-2 self-end rounded-lg bg-brand-solid px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-solid-hover"
-          >
-            <Scissors01 className="size-4" />
-            Next
-          </button>
+          <div className="flex items-center justify-end gap-3">
+            <div className="flex items-center gap-2">
+              <label htmlFor="logo-corner" className="text-xs font-medium text-tertiary">
+                Logo corner
+              </label>
+              <select
+                id="logo-corner"
+                value={logoCorner}
+                onChange={(e) => setLogoCorner(e.target.value)}
+                className="rounded-lg border border-secondary bg-primary px-2.5 py-1.5 text-xs text-primary"
+              >
+                <option value="tl">Top Left</option>
+                <option value="tr">Top Right</option>
+                <option value="bl">Bottom Left</option>
+                <option value="br">Bottom Right</option>
+              </select>
+            </div>
+            <button
+              onClick={handleOpenEditorClick}
+              className="flex cursor-pointer items-center justify-center gap-2 rounded-lg bg-brand-solid px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-solid-hover"
+            >
+              <Scissors01 className="size-4" />
+              Next
+            </button>
+          </div>
         </div>
       </div>
     </div>

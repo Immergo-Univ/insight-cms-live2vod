@@ -1,7 +1,7 @@
 import axios from "axios";
 import { config } from "../config.js";
 
-export async function fetchChannelsWithArchive({ accountId, tenantId }) {
+export async function fetchChannelsWithArchive({ accountId, tenantId, authToken }) {
   const filter = `accountId||$eq||${accountId};fields.archive||$eq||toBool(true)`;
   const url = `${config.insightApiBase}/cms/entity/channels/find`;
 
@@ -9,7 +9,7 @@ export async function fetchChannelsWithArchive({ accountId, tenantId }) {
     params: { filter },
     headers: {
       "x-tenant-id": tenantId,
-      Authorization: `Bearer ${config.insightAuthToken}`,
+      Authorization: authToken,
     },
   });
 
