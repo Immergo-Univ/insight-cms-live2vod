@@ -186,6 +186,12 @@ static bool evaluateHasLogoParallelProbes(const std::string& source,
                  std::max(0, static_cast<int>(((totalDurationSec > 0.0) ? (t / totalDurationSec) : 0.0) * threadCount)));
     buckets[static_cast<size_t>(bucket)].push_back(i);
   }
+  // Critical for performance: keep per-thread timestamps mostly increasing to reduce costly HLS seeks.
+  for (auto& b : buckets) {
+    std::sort(b.begin(), b.end(), [&](int a, int c) {
+      return probes[static_cast<size_t>(a)].tSec < probes[static_cast<size_t>(c)].tSec;
+    });
+  }
 
   std::mutex errorMu;
   std::string firstError;
