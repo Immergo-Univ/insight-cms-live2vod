@@ -1,0 +1,40 @@
+---
+alwaysApply: true
+---
+
+
+# Introduccion
+
+Quiero que el backend tenga la funcionalidad de hacer de AD detector. Esto es, dado un m3u8, necesitamos saber entre que ventanas de tiempo aparecen ads, estas ventanas de tiempo deben aparecer reflejadas en un JSON (La respuesta del servicio de backend)
+
+## Estrategia de reconocimiento
+
+* La estrategia que vamos a seguir es la de reconocimiento de ausencia de logo, por lo tanto la estrategia a seguir va a ser la siguiente
+
+- Tomar fotogramas a lo largo del video de fuente, 5 segundos de tiempo, equiespaciados solo de la region pasada por parametro al ejecutar la aplicacion (Osea puede ser solo br, bl, tr o tl) del tamaño indicado, sino el default es 15%
+
+- Tomar solo la esquina De la pantalla que se te indica por pantalla, tomando una ROI del 15% de ancho y el correspondiente % de alto (manteniendo el aspect ratio del video)
+--tl: arriba a la izquierda
+--tr: arriba a la derecha
+--bl: abajo a la izquierda
+--br: abajo a la derecha
+
+Ejemplo de uso: 
+bin/ads_detector --m3u8 "https://ch14channel14.encoders.immergo.tv/app/2/streamPlaylist.m3u8?startTime=1771909800&endTime=1771918200" --tr --output backend/utils/ads_output.json --debug
+
+
+- Tomar el histograma de cada una de estas imagenes, y pasarlo a vector.
+
+- Aplicar PCA sobre estos vectores a dos dimensiones.
+
+- Identificar el cumulo del principal cluster (Seran aquellas muestras que tengan logo) Utilizar Kmeans
+
+- A partir de este cumulo identificar:
+* Set representativo de logos (Imagenes)
+* Donde comenzó un AD y donde termina.
+
+# Detalle importante
+
+* Si se le pasa por parametro --debug al ejecutar el aplicativo en C++, entonces dejar disponible en una carpeta /logos_output relativa al ejecutable binario compilado, todo el set de imagenes que se catalogaron en la clusterizacion como logo (con Kmeans)
+
+* Para optimizar el procesamiento, obtener cuantos threads tiene el sistema disponible (cores) y abrir un hilo por cada CPU para obtener las imagenes. Esto exigira la CPU al maximo asi como tambien el networking porque habra un seeking en paralelo al mismo stream. Pero ganaremos en velocidad muchisimo. El stream deberas dividirlo en estas partes y deberas hacer el seeking para obtener las capturas en paralelo en cada una de estas partes

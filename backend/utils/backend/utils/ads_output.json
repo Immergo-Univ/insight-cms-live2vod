@@ -1,0 +1,48 @@
+{
+  "m3u8": "https://rjrtvjlocal-ioriver-cdn.encoders.immergo.tv/0/streamPlaylist.m3u8?startTime=1771917000&endTime=1771924600",
+  "totalDurationSec": 7602,
+  "training": {
+    "sampleEverySec": 30,
+    "sampleCount": 254,
+    "roiWidthPct": 0.15,
+    "k": 2,
+    "logoCorner": "bottom_right",
+    "logoThresholdBhattacharyya": 0.696764,
+    "detection": {
+      "strategy": "outlier",
+      "outlierMode": "knn",
+      "knn": {
+        "k": 7,
+        "quantile": 0.95,
+        "threshold": 0.755655
+      },
+      "enterConsecutive": 2,
+      "exitConsecutive": 2
+    }
+  },
+  "ads": [
+    {
+      "startOffsetSec": 4230,
+      "endOffsetSec": 4290,
+      "startProgramDateTime": "2026-02-24T08:20:31.454+0000",
+      "endProgramDateTime": "2026-02-24T08:21:31.454+0000"
+    },
+    {
+      "startOffsetSec": 4890,
+      "endOffsetSec": 4950,
+      "startProgramDateTime": "2026-02-24T08:31:31.454+0000",
+      "endProgramDateTime": "2026-02-24T08:32:31.454+0000"
+    },
+    {
+      "startOffsetSec": 6060,
+      "endOffsetSec": 6180,
+      "startProgramDateTime": "2026-02-24T08:51:01.454+0000",
+      "endProgramDateTime": "2026-02-24T08:53:01.454+0000"
+    }
+  ],
+  "debug": {
+    "enabled": true,
+    "logosOutputDir": "/home/ezequiel/www/insight-cms-live2vod/backend/utils/bin/logos_output",
+    "logoSampleCount": 185
+  }
+}
