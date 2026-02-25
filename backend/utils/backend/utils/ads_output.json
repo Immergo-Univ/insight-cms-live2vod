@@ -1,6 +1,10 @@
 {
   "m3u8": "https://rjrtvjlocal-ioriver-cdn.encoders.immergo.tv/0/streamPlaylist.m3u8?startTime=1771917000&endTime=1771924600",
   "totalDurationSec": 7602,
+  "process": {
+    "elapsedMs": 29580,
+    "elapsedSec": 29.58
+  },
   "training": {
     "sampleEverySec": 30,
     "sampleCount": 254,
@@ -23,26 +27,32 @@
   "ads": [
     {
       "startOffsetSec": 4202.5,
+      "startOffsetHms": "01:10:03",
       "endOffsetSec": 4265,
+      "endOffsetHms": "01:11:05",
       "startProgramDateTime": "2026-02-24T08:20:03.954+0000",
       "endProgramDateTime": "2026-02-24T08:21:06.454+0000"
     },
     {
       "startOffsetSec": 4880,
+      "startOffsetHms": "01:21:20",
       "endOffsetSec": 4945,
+      "endOffsetHms": "01:22:25",
       "startProgramDateTime": "2026-02-24T08:31:21.454+0000",
       "endProgramDateTime": "2026-02-24T08:32:26.454+0000"
     },
     {
       "startOffsetSec": 6032.5,
+      "startOffsetHms": "01:40:33",
       "endOffsetSec": 6170,
+      "endOffsetHms": "01:42:50",
       "startProgramDateTime": "2026-02-24T08:50:33.954+0000",
       "endProgramDateTime": "2026-02-24T08:52:51.454+0000"
     }
   ],
   "debug": {
-    "enabled": true,
-    "logosOutputDir": "/home/ezequiel/www/insight-cms-live2vod/backend/utils/bin/logos_output",
+    "enabled": false,
+    "logosOutputDir": null,
     "logoSampleCount": 185
   }
 }

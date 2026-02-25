@@ -890,6 +890,7 @@ static void exportDebugPcaPlot(const fs::path& outDir,
 }
 
 int main(int argc, char** argv) {
+  const auto processStart = std::chrono::steady_clock::now();
   try {
     const Args args = parseArgs(argc, argv);
 
@@ -1300,89 +1301,112 @@ int main(int argc, char** argv) {
 
     const fs::path outPath(args.outputPath);
     ensureParentDirExists(outPath);
+    const auto processEnd = std::chrono::steady_clock::now();
+    const auto elapsedMs =
+        std::chrono::duration_cast<std::chrono::milliseconds>(processEnd - processStart).count();
+    const double elapsedSec = static_cast<double>(elapsedMs) / 1000.0;
+
+    std::ostringstream json;
+    json << "{\n";
+    json << "  \"m3u8\": ";
+    json_util::writeString(json, args.m3u8);
+    json << ",\n";
+    json << "  \"totalDurationSec\": " << totalDurationSec << ",\n";
+    json << "  \"process\": {\n";
+    json << "    \"elapsedMs\": " << elapsedMs << ",\n";
+    json << "    \"elapsedSec\": " << elapsedSec << "\n";
+    json << "  },\n";
+    json << "  \"training\": {\n";
+    json << "    \"sampleEverySec\": " << training.sampleEverySec << ",\n";
+    json << "    \"sampleCount\": " << training.sampleTimesSec.size() << ",\n";
+    json << "    \"roiWidthPct\": " << args.roiWidthPct << ",\n";
+    json << "    \"k\": " << args.k << ",\n";
+    json << "    \"logoCorner\": ";
+    json_util::writeString(json, cornerName(training.model.cornerIndex));
+    json << ",\n";
+    json << "    \"logoThresholdBhattacharyya\": " << training.model.threshold << ",\n";
+    json << "    \"detection\": {\n";
+    json << "      \"strategy\": ";
+    json_util::writeString(json, args.outlier ? "outlier" : "bhattacharyya");
+    json << ",\n";
+    if (args.outlier) {
+      json << "      \"outlierMode\": ";
+      json_util::writeString(json, args.outlierMode);
+      json << ",\n";
+      if (args.outlierMode == "dbscan") {
+        json << "      \"dbscan\": {\n";
+        json << "        \"eps\": " << usedDbscanEps << ",\n";
+        json << "        \"minPts\": " << usedDbscanMinPts << ",\n";
+        json << "        \"logoClusterLabel\": " << dbscanLogoLabel << "\n";
+        json << "      },\n";
+      } else if (args.outlierMode == "lof") {
+        json << "      \"lof\": {\n";
+        json << "        \"k\": " << args.lofK << ",\n";
+        json << "        \"threshold\": " << args.lofThreshold << "\n";
+        json << "      },\n";
+      } else if (args.outlierMode == "knn") {
+        json << "      \"knn\": {\n";
+        json << "        \"k\": " << usedKnnK << ",\n";
+        json << "        \"quantile\": " << usedKnnQ << ",\n";
+        json << "        \"threshold\": " << usedKnnThreshold << "\n";
+        json << "      },\n";
+      }
+      json << "      \"enterConsecutive\": " << args.enterConsecutive << ",\n";
+      json << "      \"exitConsecutive\": " << args.exitConsecutive << "\n";
+    } else {
+      json << "      \"smoothWindow\": " << args.smoothWindow << ",\n";
+      json << "      \"enterMult\": " << args.enterMult << ",\n";
+      json << "      \"exitMult\": " << args.exitMult << ",\n";
+      json << "      \"enterThreshold\": " << enterTh << ",\n";
+      json << "      \"exitThreshold\": " << exitTh << ",\n";
+      json << "      \"enterConsecutive\": " << args.enterConsecutive << ",\n";
+      json << "      \"exitConsecutive\": " << args.exitConsecutive << "\n";
+    }
+    json << "    }\n";
+    json << "  },\n";
+    json << "  \"ads\": [\n";
+    for (size_t i = 0; i < ads.size(); i++) {
+      const auto& it = ads[i];
+      json << "    {\n";
+      json << "      \"startOffsetSec\": " << it.startSec << ",\n";
+      json << "      \"startOffsetHms\": ";
+      json_util::writeString(json, formatHms(it.startSec));
+      json << ",\n";
+      json << "      \"endOffsetSec\": " << it.endSec << ",\n";
+      json << "      \"endOffsetHms\": ";
+      json_util::writeString(json, formatHms(it.endSec));
+      json << ",\n";
+      json << "      \"startProgramDateTime\": ";
+      if (it.startPdt.has_value()) json_util::writeString(json, it.startPdt.value());
+      else json << "null";
+      json << ",\n";
+      json << "      \"endProgramDateTime\": ";
+      if (it.endPdt.has_value()) json_util::writeString(json, it.endPdt.value());
+      else json << "null";
+      json << "\n";
+      json << "    }" << (i + 1 < ads.size() ? "," : "") << "\n";
+    }
+    json << "  ],\n";
+    json << "  \"debug\": {\n";
+    json << "    \"enabled\": " << (args.debug ? "true" : "false") << ",\n";
+    json << "    \"logosOutputDir\": ";
+    if (args.debug) json_util::writeString(json, logosOutDir.string());
+    else json << "null";
+    json << ",\n";
+    json << "    \"logoSampleCount\": " << training.model.logoSampleIndices.size() << "\n";
+    json << "  }\n";
+    json << "}\n";
+
+    const std::string jsonStr = json.str();
+
     std::ofstream out(outPath);
     if (!out.is_open()) throw std::runtime_error("could not open output file: " + args.outputPath);
     progress(args, "Escribiendo salida JSON en: " + args.outputPath);
+    out << jsonStr;
+    out.close();
 
-    out << "{\n";
-    out << "  \"m3u8\": ";
-    json_util::writeString(out, args.m3u8);
-    out << ",\n";
-    out << "  \"totalDurationSec\": " << totalDurationSec << ",\n";
-    out << "  \"training\": {\n";
-    out << "    \"sampleEverySec\": " << training.sampleEverySec << ",\n";
-    out << "    \"sampleCount\": " << training.sampleTimesSec.size() << ",\n";
-    out << "    \"roiWidthPct\": " << args.roiWidthPct << ",\n";
-    out << "    \"k\": " << args.k << ",\n";
-    out << "    \"logoCorner\": ";
-    json_util::writeString(out, cornerName(training.model.cornerIndex));
-    out << ",\n";
-    out << "    \"logoThresholdBhattacharyya\": " << training.model.threshold << ",\n";
-    out << "    \"detection\": {\n";
-    out << "      \"strategy\": ";
-    json_util::writeString(out, args.outlier ? "outlier" : "bhattacharyya");
-    out << ",\n";
-    if (args.outlier) {
-      out << "      \"outlierMode\": ";
-      json_util::writeString(out, args.outlierMode);
-      out << ",\n";
-      if (args.outlierMode == "dbscan") {
-        out << "      \"dbscan\": {\n";
-        out << "        \"eps\": " << usedDbscanEps << ",\n";
-        out << "        \"minPts\": " << usedDbscanMinPts << ",\n";
-        out << "        \"logoClusterLabel\": " << dbscanLogoLabel << "\n";
-        out << "      },\n";
-      } else if (args.outlierMode == "lof") {
-        out << "      \"lof\": {\n";
-        out << "        \"k\": " << args.lofK << ",\n";
-        out << "        \"threshold\": " << args.lofThreshold << "\n";
-        out << "      },\n";
-      } else if (args.outlierMode == "knn") {
-        out << "      \"knn\": {\n";
-        out << "        \"k\": " << usedKnnK << ",\n";
-        out << "        \"quantile\": " << usedKnnQ << ",\n";
-        out << "        \"threshold\": " << usedKnnThreshold << "\n";
-        out << "      },\n";
-      }
-      out << "      \"enterConsecutive\": " << args.enterConsecutive << ",\n";
-      out << "      \"exitConsecutive\": " << args.exitConsecutive << "\n";
-    } else {
-      out << "      \"smoothWindow\": " << args.smoothWindow << ",\n";
-      out << "      \"enterMult\": " << args.enterMult << ",\n";
-      out << "      \"exitMult\": " << args.exitMult << ",\n";
-      out << "      \"enterThreshold\": " << enterTh << ",\n";
-      out << "      \"exitThreshold\": " << exitTh << ",\n";
-      out << "      \"enterConsecutive\": " << args.enterConsecutive << ",\n";
-      out << "      \"exitConsecutive\": " << args.exitConsecutive << "\n";
-    }
-    out << "    }\n";
-    out << "  },\n";
-    out << "  \"ads\": [\n";
-    for (size_t i = 0; i < ads.size(); i++) {
-      const auto& it = ads[i];
-      out << "    {\n";
-      out << "      \"startOffsetSec\": " << it.startSec << ",\n";
-      out << "      \"endOffsetSec\": " << it.endSec << ",\n";
-      out << "      \"startProgramDateTime\": ";
-      if (it.startPdt.has_value()) json_util::writeString(out, it.startPdt.value());
-      else out << "null";
-      out << ",\n";
-      out << "      \"endProgramDateTime\": ";
-      if (it.endPdt.has_value()) json_util::writeString(out, it.endPdt.value());
-      else out << "null";
-      out << "\n";
-      out << "    }" << (i + 1 < ads.size() ? "," : "") << "\n";
-    }
-    out << "  ],\n";
-    out << "  \"debug\": {\n";
-    out << "    \"enabled\": " << (args.debug ? "true" : "false") << ",\n";
-    out << "    \"logosOutputDir\": ";
-    if (args.debug) json_util::writeString(out, logosOutDir.string());
-    else out << "null";
-    out << ",\n";
-    out << "    \"logoSampleCount\": " << training.model.logoSampleIndices.size() << "\n";
-    out << "  }\n";
-    out << "}\n";
+    // Always print JSON to stdout, even with --quiet.
+    std::cout << jsonStr;
     progress(args, "Fin. Ads encontrados: " + std::to_string(ads.size()));
     return 0;
   } catch (const std::exception& e) {
