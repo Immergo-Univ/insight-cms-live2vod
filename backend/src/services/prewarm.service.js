@@ -35,7 +35,6 @@ function getBaseUrl(hlsStream) {
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const MAX_CONSECUTIVE_FAILURES = 3;
-const MAX_NO_ARCHIVE_SKIPS = 12;
 
 async function processChannel(affiliate, channel, blockDurationSec, startDate, endDate) {
   const hlsStream = channel.hlsStream;
@@ -99,15 +98,8 @@ async function processChannel(affiliate, channel, blockDurationSec, startDate, e
       if (!archiveStartFound) {
         noArchiveSkips++;
         console.log(
-          `[prewarm] [${affiliate.tenantId}] [${channel.title}] [${hourIdx}/${totalHours}] ${hourLabel} — no archive (${elapsed}s, skip ${noArchiveSkips}/${MAX_NO_ARCHIVE_SKIPS})`
+          `[prewarm] [${affiliate.tenantId}] [${channel.title}] [${hourIdx}/${totalHours}] ${hourLabel} — no archive (${elapsed}s)`
         );
-
-        if (noArchiveSkips >= MAX_NO_ARCHIVE_SKIPS) {
-          console.log(
-            `[prewarm] [${affiliate.tenantId}] [${channel.title}] No archive found after ${noArchiveSkips} hours — skipping channel`
-          );
-          break;
-        }
       } else {
         consecutiveFailures++;
         console.error(
