@@ -2,7 +2,12 @@ import { prewarmConfig } from "../cache_prewarm.js";
 import { resolveTenant } from "./auth.service.js";
 import { fetchChannelsWithArchive } from "./channels.service.js";
 import { detectAdsAsync } from "./ads.service.js";
-import { registerChannel, appendDetectionResult, getStats } from "./ads-precalc.service.js";
+import {
+  registerChannel,
+  appendDetectionResult,
+  getProcessedLatest,
+  getStats,
+} from "./ads-precalc.service.js";
 
 function floorToHour(date) {
   const d = new Date(date);
@@ -27,38 +32,24 @@ function getBaseUrl(hlsStream) {
   return `${url.origin}${url.pathname}`;
 }
 
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
 const MAX_CONSECUTIVE_FAILURES = 3;
 
-async function prewarmChannel(affiliate, channel, blockDurationSec, daysBack) {
+async function processChannel(affiliate, channel, blockDurationSec, startDate, endDate) {
   const hlsStream = channel.hlsStream;
-  if (!hlsStream) {
-    console.log(`[prewarm] Skipping channel "${channel.title}" — no hlsStream`);
-    return 0;
-  }
-
-  console.log(`[prewarm] ──── Channel: "${channel.title}" (${channel._id}) ────`);
-
-  const now = new Date();
-  const daysBackMs = daysBack * 24 * 60 * 60 * 1000;
-
-  const oldestDate = floorToHour(new Date(now.getTime() - daysBackMs));
-  const newestDate = ceilToHour(now);
+  if (!hlsStream) return 0;
 
   const baseUrlStr = getBaseUrl(hlsStream);
-
   registerChannel(baseUrlStr);
 
-  console.log(
-    `[prewarm] Processing range: ${oldestDate.toISOString()} → ${newestDate.toISOString()} (oldest first)`
-  );
-
-  let current = new Date(oldestDate);
+  let current = new Date(startDate);
   let processedCount = 0;
   let totalAdsFound = 0;
   let consecutiveFailures = 0;
-  let archiveStartFound = false;
+  let archiveStartFound = !!getProcessedLatest(baseUrlStr);
 
-  while (current < newestDate) {
+  while (current < endDate) {
     const startEpoch = Math.floor(current.getTime() / 1000);
     const endEpoch = startEpoch + blockDurationSec;
     const hourLabel = formatHour(current);
@@ -98,7 +89,7 @@ async function prewarmChannel(affiliate, channel, blockDurationSec, daysBack) {
 
         if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
           console.log(
-            `[prewarm] [${affiliate.tenantId}] [${channel.title}] Too many failures after archive start — stopping`
+            `[prewarm] [${affiliate.tenantId}] [${channel.title}] Too many failures — stopping this pass`
           );
           break;
         }
@@ -108,41 +99,40 @@ async function prewarmChannel(affiliate, channel, blockDurationSec, daysBack) {
     current = new Date(current.getTime() + blockDurationSec * 1000);
   }
 
-  console.log(
-    `[prewarm] Channel "${channel.title}" done — ${processedCount} hours processed, ${totalAdsFound} ads found`
-  );
+  if (processedCount > 0) {
+    console.log(
+      `[prewarm] [${affiliate.tenantId}] [${channel.title}] Pass done — ${processedCount} hours, ${totalAdsFound} ads`
+    );
+  }
   return processedCount;
 }
 
-export async function runPrewarm() {
-  const { daysBack = 3, blockDurationMinutes = 60, affiliates = [] } = prewarmConfig;
-  const blockDurationSec = blockDurationMinutes * 60;
+async function runPass(affiliates, blockDurationSec, daysBack) {
+  const now = new Date();
+  const daysBackMs = daysBack * 24 * 60 * 60 * 1000;
+  const globalOldest = floorToHour(new Date(now.getTime() - daysBackMs));
+  const globalNewest = ceilToHour(now);
 
-  console.log("═══════════════════════════════════════════════════════");
-  console.log("[prewarm] Starting ads pre-calculation…");
-  console.log(`[prewarm] Config: daysBack=${daysBack}, blockDuration=${blockDurationMinutes}min, affiliates=${affiliates.length}`);
-  console.log("═══════════════════════════════════════════════════════");
-
-  const globalStart = Date.now();
+  let totalProcessed = 0;
 
   for (const affiliate of affiliates) {
-    console.log(`\n[prewarm] ════ Affiliate: ${affiliate.tenantId} ════`);
-
     try {
       const { accountId } = await resolveTenant(affiliate.tenantId);
-
-      console.log(
-        `[prewarm] Affiliate "${affiliate.tenantId}" → accountId="${accountId}"`
-      );
-
       const channels = await fetchChannelsWithArchive({ accountId, tenantId: affiliate.tenantId });
 
-      console.log(
-        `[prewarm] Found ${channels.length} channel(s) with archive for "${affiliate.tenantId}"`
-      );
-
       for (const channel of channels) {
-        await prewarmChannel(affiliate, channel, blockDurationSec, daysBack);
+        const baseUrlStr = getBaseUrl(channel.hlsStream || "");
+        const lastProcessed = getProcessedLatest(baseUrlStr);
+
+        const startDate = lastProcessed
+          ? new Date(lastProcessed * 1000)
+          : globalOldest;
+
+        if (startDate >= globalNewest) continue;
+
+        totalProcessed += await processChannel(
+          affiliate, channel, blockDurationSec, startDate, globalNewest
+        );
       }
     } catch (err) {
       console.error(
@@ -151,14 +141,44 @@ export async function runPrewarm() {
     }
   }
 
-  const elapsedSec = ((Date.now() - globalStart) / 1000).toFixed(1);
-  const stats = getStats();
+  return totalProcessed;
+}
 
-  console.log("\n═══════════════════════════════════════════════════════");
-  console.log(`[prewarm] Pre-calculation complete in ${elapsedSec}s`);
-  console.log(`[prewarm] Total ads pre-calculated: ${stats.totalAds}`);
-  for (const ch of stats.channels) {
-    console.log(`[prewarm]   ${ch.baseUrl} — ${ch.adsCount} ads (${ch.earliest} → ${ch.latest})`);
-  }
+export async function runPrewarm() {
+  const { daysBack = 3, blockDurationMinutes = 60, affiliates = [] } = prewarmConfig;
+  const blockDurationSec = blockDurationMinutes * 60;
+
   console.log("═══════════════════════════════════════════════════════");
+  console.log("[prewarm] Starting continuous ads pre-calculation…");
+  console.log(`[prewarm] Config: daysBack=${daysBack}, blockDuration=${blockDurationMinutes}min, affiliates=${affiliates.length}`);
+  console.log("═══════════════════════════════════════════════════════");
+
+  let passNumber = 0;
+
+  while (true) {
+    passNumber++;
+    const passStart = Date.now();
+
+    console.log(`\n[prewarm] ── Pass #${passNumber} starting ──`);
+
+    const processed = await runPass(affiliates, blockDurationSec, daysBack);
+
+    const elapsedSec = ((Date.now() - passStart) / 1000).toFixed(1);
+    const stats = getStats();
+
+    console.log(`[prewarm] ── Pass #${passNumber} done in ${elapsedSec}s — ${processed} new hours processed ──`);
+    console.log(`[prewarm] Total ads in store: ${stats.totalAds}`);
+    for (const ch of stats.channels) {
+      console.log(`[prewarm]   ${ch.baseUrl} — ${ch.adsCount} ads (${ch.earliest} → ${ch.latest})`);
+    }
+
+    if (processed === 0) {
+      const waitMin = blockDurationMinutes;
+      console.log(`[prewarm] Nothing new to process — waiting ${waitMin}min for next hour…`);
+      await sleep(waitMin * 60 * 1000);
+    } else {
+      console.log(`[prewarm] Checking for more new hours…`);
+      await sleep(5_000);
+    }
+  }
 }

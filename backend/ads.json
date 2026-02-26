@@ -1,9 +1,9 @@
 {
-  "m3u8": "https://rjrtvjlocal-ioriver-cdn.encoders.immergo.tv/2/streamPlaylist.m3u8?startTime=1771905600&endTime=1771909200",
+  "m3u8": "https://rjrtvjlocal-ioriver-cdn.encoders.immergo.tv/2/streamPlaylist.m3u8?startTime=1771923600&endTime=1771927200",
   "totalDurationSec": 3600,
   "process": {
-    "elapsedMs": 88040,
-    "elapsedSec": 88.04
+    "elapsedMs": 81914,
+    "elapsedSec": 81.914
   },
   "training": {
     "sampleEverySec": 30,
@@ -11,13 +11,13 @@
     "roiWidthPct": 0.15,
     "k": 2,
     "logoCorner": "bottom_right",
-    "logoThresholdBhattacharyya": 0.76787,
+    "logoThresholdBhattacharyya": 0.616211,
     "detection": {
       "strategy": "tokayo",
       "tokayo": {
         "method": "pixel-median + NCC",
         "nccThreshold": 0.5,
-        "logoSubRect": {"x":44,"y":41,"w":81,"h":79}
+        "logoSubRect": {"x":0,"y":0,"w":133,"h":144}
       },
       "enterConsecutive": 1,
       "exitConsecutive": 1
@@ -25,73 +25,57 @@
   },
   "ads": [
     {
-      "startOffsetSec": 0,
-      "startOffsetHms": "00:00:00",
-      "endOffsetSec": 97,
-      "endOffsetHms": "00:01:37",
-      "startProgramDateTime": "2026-02-24T04:00:01.454+0000",
-      "endProgramDateTime": "2026-02-24T04:01:38.454+0000"
+      "startOffsetSec": 194,
+      "startOffsetHms": "00:03:14",
+      "endOffsetSec": 240,
+      "endOffsetHms": "00:04:00",
+      "startProgramDateTime": "2026-02-24T09:03:15.454+0000",
+      "endProgramDateTime": "2026-02-24T09:04:01.454+0000"
     },
     {
-      "startOffsetSec": 157,
-      "startOffsetHms": "00:02:37",
-      "endOffsetSec": 226,
-      "endOffsetHms": "00:03:46",
-      "startProgramDateTime": "2026-02-24T04:02:38.454+0000",
-      "endProgramDateTime": "2026-02-24T04:03:47.454+0000"
+      "startOffsetSec": 1122,
+      "startOffsetHms": "00:18:42",
+      "endOffsetSec": 1200,
+      "endOffsetHms": "00:20:00",
+      "startProgramDateTime": "2026-02-24T09:18:43.454+0000",
+      "endProgramDateTime": "2026-02-24T09:20:01.454+0000"
     },
     {
-      "startOffsetSec": 492,
-      "startOffsetHms": "00:08:12",
-      "endOffsetSec": 511,
-      "endOffsetHms": "00:08:31",
-      "startProgramDateTime": "2026-02-24T04:08:13.454+0000",
-      "endProgramDateTime": "2026-02-24T04:08:32.454+0000"
+      "startOffsetSec": 1826,
+      "startOffsetHms": "00:30:26",
+      "endOffsetSec": 1860,
+      "endOffsetHms": "00:31:00",
+      "startProgramDateTime": "2026-02-24T09:30:27.454+0000",
+      "endProgramDateTime": "2026-02-24T09:31:01.454+0000"
     },
     {
-      "startOffsetSec": 541,
-      "startOffsetHms": "00:09:01",
-      "endOffsetSec": 571,
-      "endOffsetHms": "00:09:31",
-      "startProgramDateTime": "2026-02-24T04:09:02.454+0000",
-      "endProgramDateTime": "2026-02-24T04:09:32.454+0000"
+      "startOffsetSec": 1860,
+      "startOffsetHms": "00:31:00",
+      "endOffsetSec": 1950,
+      "endOffsetHms": "00:32:30",
+      "startProgramDateTime": "2026-02-24T09:31:01.454+0000",
+      "endProgramDateTime": "2026-02-24T09:32:31.454+0000"
     },
     {
-      "startOffsetSec": 1951,
-      "startOffsetHms": "00:32:31",
-      "endOffsetSec": 2027,
-      "endOffsetHms": "00:33:47",
-      "startProgramDateTime": "2026-02-24T04:32:32.454+0000",
-      "endProgramDateTime": "2026-02-24T04:33:48.454+0000"
+      "startOffsetSec": 3045,
+      "startOffsetHms": "00:50:45",
+      "endOffsetSec": 3091,
+      "endOffsetHms": "00:51:31",
+      "startProgramDateTime": "2026-02-24T09:50:46.454+0000",
+      "endProgramDateTime": "2026-02-24T09:51:32.454+0000"
     },
     {
-      "startOffsetSec": 2140,
-      "startOffsetHms": "00:35:40",
-      "endOffsetSec": 2163,
-      "endOffsetHms": "00:36:03",
-      "startProgramDateTime": "2026-02-24T04:35:41.454+0000",
-      "endProgramDateTime": "2026-02-24T04:36:04.454+0000"
-    },
-    {
-      "startOffsetSec": 2313,
-      "startOffsetHms": "00:38:33",
-      "endOffsetSec": 2346,
-      "endOffsetHms": "00:39:06",
-      "startProgramDateTime": "2026-02-24T04:38:34.454+0000",
-      "endProgramDateTime": "2026-02-24T04:39:07.454+0000"
-    },
-    {
-      "startOffsetSec": 2653,
-      "startOffsetHms": "00:44:13",
-      "endOffsetSec": 2729,
-      "endOffsetHms": "00:45:29",
-      "startProgramDateTime": "2026-02-24T04:44:14.454+0000",
-      "endProgramDateTime": "2026-02-24T04:45:30.454+0000"
+      "startOffsetSec": 3553,
+      "startOffsetHms": "00:59:13",
+      "endOffsetSec": 3600,
+      "endOffsetHms": "01:00:00",
+      "startProgramDateTime": "2026-02-24T09:59:14.454+0000",
+      "endProgramDateTime": "2026-02-24T10:00:01.454+0000"
     }
   ],
   "debug": {
     "enabled": false,
     "logosOutputDir": null,
-    "logoSampleCount": 99
+    "logoSampleCount": 95
   }
 }

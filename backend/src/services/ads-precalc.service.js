@@ -20,6 +20,12 @@ export function registerChannel(baseUrl) {
   }
 }
 
+export function getProcessedLatest(baseUrl) {
+  const channel = store.get(baseUrl);
+  if (!channel || channel.processedLatest === -Infinity) return null;
+  return channel.processedLatest;
+}
+
 export function appendDetectionResult(baseUrl, blockStartEpoch, blockEndEpoch, detectionResult) {
   const channel = store.get(baseUrl);
   if (!channel) return;
