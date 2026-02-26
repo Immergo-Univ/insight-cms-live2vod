@@ -1242,6 +1242,23 @@ int main(int argc, char** argv) {
              "Segmentos: " + std::to_string(segments.size()) +
                  ", duracion total aprox: " + std::to_string(totalDurationSec) + " sec");
 
+    if (isHttp) {
+      progress(args, "Verificando accesibilidad del primer segmento…");
+      std::string firstSegUrl = segments[0].uri;
+      if (firstSegUrl.rfind("http", 0) != 0) {
+        auto pos = args.m3u8.rfind('/');
+        if (pos != std::string::npos) {
+          firstSegUrl = args.m3u8.substr(0, pos + 1) + firstSegUrl;
+        }
+        auto qpos = firstSegUrl.find('?');
+        if (qpos != std::string::npos) firstSegUrl = firstSegUrl.substr(0, qpos);
+      }
+      if (!http::headOk(firstSegUrl, 3)) {
+        throw std::runtime_error("first segment not reachable: " + firstSegUrl);
+      }
+      progress(args, "Primer segmento accesible OK");
+    }
+
     std::vector<std::optional<int64_t>> segEpochMs;
     segEpochMs.reserve(segments.size());
     progress(args, "Convirtiendo EXT-X-PROGRAM-DATE-TIME a epoch (si existe)");

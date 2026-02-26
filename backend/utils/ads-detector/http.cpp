@@ -45,5 +45,26 @@ std::string get(const std::string& url, long timeoutSeconds) {
   return response;
 }
 
+bool headOk(const std::string& url, long timeoutSeconds) {
+  CURL* curl = curl_easy_init();
+  if (!curl) return false;
+
+  curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+  curl_easy_setopt(curl, CURLOPT_NOBODY, 1L);
+  curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+  curl_easy_setopt(curl, CURLOPT_TIMEOUT, timeoutSeconds);
+  curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, timeoutSeconds);
+  curl_easy_setopt(curl, CURLOPT_USERAGENT, "insight-ads-detector/1.0");
+
+  const CURLcode res = curl_easy_perform(curl);
+  long httpCode = 0;
+  if (res == CURLE_OK) {
+    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &httpCode);
+  }
+  curl_easy_cleanup(curl);
+
+  return res == CURLE_OK && httpCode >= 200 && httpCode < 400;
+}
+
 }  // namespace http
 
