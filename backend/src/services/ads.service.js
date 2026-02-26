@@ -46,7 +46,7 @@ export async function detectAdsAsync({ m3u8Url, corner = "br" }) {
 
   const { stdout } = await execFileAsync(ADS_DETECTOR_BIN, args, {
     encoding: "utf-8",
-    timeout: 300_000,
+    timeout: 10_000,
     maxBuffer: 10 * 1024 * 1024,
   });
 
