@@ -35,30 +35,45 @@ function getBaseUrl(hlsStream) {
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const MAX_CONSECUTIVE_FAILURES = 3;
+const MAX_NO_ARCHIVE_SKIPS = 12;
 
 async function processChannel(affiliate, channel, blockDurationSec, startDate, endDate) {
   const hlsStream = channel.hlsStream;
-  if (!hlsStream) return 0;
+  if (!hlsStream) {
+    console.log(`[prewarm] [${affiliate.tenantId}] [${channel.title}] No hlsStream — skipping channel`);
+    return 0;
+  }
 
   const baseUrlStr = getBaseUrl(hlsStream);
   registerChannel(baseUrlStr);
+
+  const totalHours = Math.ceil((endDate.getTime() - startDate.getTime()) / (blockDurationSec * 1000));
+  console.log(
+    `[prewarm] [${affiliate.tenantId}] [${channel.title}] ` +
+    `Processing ${totalHours} hours: ${formatHour(startDate)} → ${formatHour(endDate)}`
+  );
+  console.log(`[prewarm] [${affiliate.tenantId}] [${channel.title}] Base URL: ${baseUrlStr}`);
 
   let current = new Date(startDate);
   let processedCount = 0;
   let totalAdsFound = 0;
   let consecutiveFailures = 0;
+  let noArchiveSkips = 0;
   let archiveStartFound = !!getProcessedLatest(baseUrlStr);
 
   while (current < endDate) {
     const startEpoch = Math.floor(current.getTime() / 1000);
     const endEpoch = startEpoch + blockDurationSec;
     const hourLabel = formatHour(current);
+    const hourIdx = processedCount + noArchiveSkips + consecutiveFailures + 1;
 
     const m3u8Url = `${baseUrlStr}?startTime=${startEpoch}&endTime=${endEpoch}`;
 
     console.log(
-      `[prewarm] [${affiliate.tenantId}] [${channel.title}] Processing: ${hourLabel}`
+      `[prewarm] [${affiliate.tenantId}] [${channel.title}] [${hourIdx}/${totalHours}] ${hourLabel} — detecting…`
     );
+
+    const t0 = Date.now();
 
     try {
       const result = await detectAdsAsync({
@@ -66,30 +81,42 @@ async function processChannel(affiliate, channel, blockDurationSec, startDate, e
         corner: affiliate.corner || "br",
       });
 
+      const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
       const adCount = result.ads?.length ?? 0;
       appendDetectionResult(baseUrlStr, startEpoch, endEpoch, result);
       totalAdsFound += adCount;
       consecutiveFailures = 0;
+      noArchiveSkips = 0;
       archiveStartFound = true;
 
       console.log(
-        `[prewarm] [${affiliate.tenantId}] [${channel.title}] ${hourLabel} → ${adCount} ad(s) detected`
+        `[prewarm] [${affiliate.tenantId}] [${channel.title}] [${hourIdx}/${totalHours}] ${hourLabel} → ${adCount} ad(s) detected (${elapsed}s)`
       );
       processedCount++;
     } catch (err) {
+      const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
+
       if (!archiveStartFound) {
+        noArchiveSkips++;
         console.log(
-          `[prewarm] [${affiliate.tenantId}] [${channel.title}] ${hourLabel} — no archive yet, skipping`
+          `[prewarm] [${affiliate.tenantId}] [${channel.title}] [${hourIdx}/${totalHours}] ${hourLabel} — no archive (${elapsed}s, skip ${noArchiveSkips}/${MAX_NO_ARCHIVE_SKIPS})`
         );
+
+        if (noArchiveSkips >= MAX_NO_ARCHIVE_SKIPS) {
+          console.log(
+            `[prewarm] [${affiliate.tenantId}] [${channel.title}] No archive found after ${noArchiveSkips} hours — skipping channel`
+          );
+          break;
+        }
       } else {
         consecutiveFailures++;
         console.error(
-          `[prewarm] [${affiliate.tenantId}] [${channel.title}] ${hourLabel} — FAILED (${consecutiveFailures}/${MAX_CONSECUTIVE_FAILURES})`
+          `[prewarm] [${affiliate.tenantId}] [${channel.title}] [${hourIdx}/${totalHours}] ${hourLabel} — FAILED (${elapsed}s, ${consecutiveFailures}/${MAX_CONSECUTIVE_FAILURES})`
         );
 
         if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
           console.log(
-            `[prewarm] [${affiliate.tenantId}] [${channel.title}] Too many failures — stopping this pass`
+            `[prewarm] [${affiliate.tenantId}] [${channel.title}] Too many failures after archive start — stopping`
           );
           break;
         }
@@ -99,11 +126,9 @@ async function processChannel(affiliate, channel, blockDurationSec, startDate, e
     current = new Date(current.getTime() + blockDurationSec * 1000);
   }
 
-  if (processedCount > 0) {
-    console.log(
-      `[prewarm] [${affiliate.tenantId}] [${channel.title}] Pass done — ${processedCount} hours, ${totalAdsFound} ads`
-    );
-  }
+  console.log(
+    `[prewarm] [${affiliate.tenantId}] [${channel.title}] Done — ${processedCount} hours processed, ${totalAdsFound} ads found, ${noArchiveSkips} skipped`
+  );
   return processedCount;
 }
 
@@ -116,19 +141,33 @@ async function runPass(affiliates, blockDurationSec, daysBack) {
   let totalProcessed = 0;
 
   for (const affiliate of affiliates) {
+    console.log(`[prewarm] ════ Affiliate: ${affiliate.tenantId} ════`);
+
     try {
       const { accountId } = await resolveTenant(affiliate.tenantId);
+
+      console.log(`[prewarm] accountId="${accountId}"`);
+
       const channels = await fetchChannelsWithArchive({ accountId, tenantId: affiliate.tenantId });
 
+      console.log(`[prewarm] ${channels.length} channel(s) with archive`);
+
       for (const channel of channels) {
-        const baseUrlStr = getBaseUrl(channel.hlsStream || "");
+        if (!channel.hlsStream) continue;
+
+        const baseUrlStr = getBaseUrl(channel.hlsStream);
         const lastProcessed = getProcessedLatest(baseUrlStr);
 
         const startDate = lastProcessed
           ? new Date(lastProcessed * 1000)
           : globalOldest;
 
-        if (startDate >= globalNewest) continue;
+        if (startDate >= globalNewest) {
+          console.log(
+            `[prewarm] [${affiliate.tenantId}] [${channel.title}] Already up to date — nothing to process`
+          );
+          continue;
+        }
 
         totalProcessed += await processChannel(
           affiliate, channel, blockDurationSec, startDate, globalNewest
@@ -166,18 +205,18 @@ export async function runPrewarm() {
     const elapsedSec = ((Date.now() - passStart) / 1000).toFixed(1);
     const stats = getStats();
 
-    console.log(`[prewarm] ── Pass #${passNumber} done in ${elapsedSec}s — ${processed} new hours processed ──`);
-    console.log(`[prewarm] Total ads in store: ${stats.totalAds}`);
+    console.log(`[prewarm] ── Pass #${passNumber} done in ${elapsedSec}s — ${processed} new hours ──`);
+    console.log(`[prewarm] Store: ${stats.totalAds} ads total`);
     for (const ch of stats.channels) {
       console.log(`[prewarm]   ${ch.baseUrl} — ${ch.adsCount} ads (${ch.earliest} → ${ch.latest})`);
     }
 
     if (processed === 0) {
       const waitMin = blockDurationMinutes;
-      console.log(`[prewarm] Nothing new to process — waiting ${waitMin}min for next hour…`);
+      console.log(`[prewarm] Nothing new — waiting ${waitMin}min…`);
       await sleep(waitMin * 60 * 1000);
     } else {
-      console.log(`[prewarm] Checking for more new hours…`);
+      console.log(`[prewarm] Checking for more…`);
       await sleep(5_000);
     }
   }
