@@ -13,7 +13,6 @@ function buildArgs({ m3u8Url, corner = "br", debug = true }) {
     "--m3u8", m3u8Url,
     `--${corner}`,
     "--interval", "30",
-    "--threads", "20",
     "--tokayo",
     ...(debug ? ["--debug"] : []),
   ];
