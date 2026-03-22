@@ -4,7 +4,6 @@ Toolkit **Live → VOD** compuesto por:
 
 - **Frontend**: React + Vite (con proxy a `/api` durante desarrollo).
 - **Backend**: Node.js + Express (expone endpoints `/api/*` y en producción sirve el build del frontend desde `frontend/dist`).
-- **(Opcional) Ads detector**: utilitario C++ `backend/utils/ads-detector` para detectar ventanas de ads en un stream HLS (`.m3u8`) en base a ausencia de logo.
 
 ---
 
@@ -36,19 +35,6 @@ npm -v
 Opción B: `nvm` (si preferís manejar versiones)
 
 - Instalá `nvm` y luego `nvm install 20 && nvm use 20`.
-
-#### Dependencias del ads-detector (C++ / OpenCV) (opcional)
-
-Solo si vas a **compilar/ejecutar** `backend/utils/ads-detector`:
-
-```bash
-sudo apt install -y build-essential pkg-config
-sudo apt install -y libopencv-dev libcurl4-openssl-dev
-```
-
-Notas:
-
-- OpenCV en Ubuntu suele venir compilado con backend FFmpeg para `cv::VideoCapture` (HLS/m3u8). Si tenés problemas abriendo streams, instalá también `ffmpeg`.
 
 ---
 
@@ -133,28 +119,7 @@ El backend expone endpoints bajo `/api`:
   - Descarga el `.m3u8` y calcula el rango usando `#EXT-X-PROGRAM-DATE-TIME`.
   - Devuelve `{ startDate, endDate }` en ISO.
 
----
-
-### Ads detector (C++) (opcional)
-
-Código fuente:
-
-- `backend/utils/ads-detector/*.cpp`
-
-Dependencias:
-
-- OpenCV (`libopencv-dev`)
-- libcurl (`libcurl4-openssl-dev`)
-
-El binario esperado (según doc) es:
-
-- `backend/utils/bin/ads_detector`
-
-Ejemplo de uso (según `docs/ads-detector.mdc`):
-
-```bash
-bin/ads_detector --m3u8 "https://.../streamPlaylist.m3u8?startTime=...&endTime=..." --tr --output backend/utils/ads_output.json --debug
-```
+- **Ads (precálculo en memoria):** `GET /api/ads/precalculated`, `POST /api/ads/detect` — ver [`docs/ads-api-and-future-detection.md`](docs/ads-api-and-future-detection.md).
 
 ---
 
@@ -186,19 +151,6 @@ npm -v
 Option B: `nvm` (version management)
 
 - Install `nvm`, then `nvm install 20 && nvm use 20`.
-
-#### Ads detector dependencies (C++ / OpenCV) (optional)
-
-Only if you want to **compile/run** `backend/utils/ads-detector`:
-
-```bash
-sudo apt install -y build-essential pkg-config
-sudo apt install -y libopencv-dev libcurl4-openssl-dev
-```
-
-Notes:
-
-- Ubuntu OpenCV is usually built with FFmpeg backend for `cv::VideoCapture` (HLS/m3u8). If you have trouble opening HLS streams, also install `ffmpeg`.
 
 ---
 
@@ -279,3 +231,4 @@ Then:
 - **`GET /api/m3u8/date-range?hlsStream=...`**
   - Downloads the playlist and computes the range using `#EXT-X-PROGRAM-DATE-TIME`.
 
+- **Ads (in-memory precalc):** `GET /api/ads/precalculated`, `POST /api/ads/detect` — see [`docs/ads-api-and-future-detection.md`](docs/ads-api-and-future-detection.md).

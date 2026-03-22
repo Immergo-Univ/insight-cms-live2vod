@@ -39,16 +39,27 @@ adsRouter.post("/detect", (req, res) => {
     const result = queryAdsByM3u8Url(m3u8Url);
 
     if (!result) {
-      return res.json({ m3u8: m3u8Url, totalDurationSec: 0, ads: [] });
+      return res.json({
+        m3u8: m3u8Url,
+        totalDurationSec: 0,
+        process: { elapsedMs: 0, elapsedSec: 0 },
+        ads: [],
+      });
     }
 
     const range = result._processedRange;
+    const payload = {
+      m3u8: result.m3u8,
+      totalDurationSec: result.totalDurationSec,
+      process: result.process,
+      ads: result.ads,
+    };
     console.log(
-      `[ads] Pre-calc query for: ${m3u8Url} — ${result.ads.length} ad(s)` +
-      (range ? ` (processed: ${range.earliest} → ${range.latest})` : "")
+      `[ads] Pre-calc query for: ${m3u8Url} — ${payload.ads.length} ad(s)` +
+        (range ? ` (processed: ${range.earliest} → ${range.latest})` : ""),
     );
 
-    res.json(result);
+    res.json(payload);
   } catch (error) {
     console.error("[ads] Lookup failed:", error.message);
     res.status(500).json({ error: error.message });

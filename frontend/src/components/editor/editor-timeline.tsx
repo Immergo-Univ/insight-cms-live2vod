@@ -155,9 +155,11 @@ export function EditorTimeline({
       if (dragging.edge === "left") {
         const newStart = Math.max(0, Math.min(t, dragging.endTime - minDuration));
         onResizeClip(dragging.clipId, newStart, undefined);
+        onSeek(newStart);
       } else {
         const newEnd = Math.max(dragging.startTime + minDuration, Math.min(durationSeconds, t));
         onResizeClip(dragging.clipId, undefined, newEnd);
+        onSeek(newEnd);
       }
     };
     const onMouseUp = () => setDragging(null);
@@ -167,7 +169,7 @@ export function EditorTimeline({
       window.removeEventListener("mousemove", onMouseMove);
       window.removeEventListener("mouseup", onMouseUp);
     };
-  }, [dragging, durationSeconds, currentTimeSeconds, totalWidthPx, onResizeClip, pixelToTime]);
+  }, [dragging, durationSeconds, currentTimeSeconds, totalWidthPx, onResizeClip, onSeek, pixelToTime]);
 
   useEffect(() => {
     if (!adDragging || !onResizeAd) return;
@@ -178,9 +180,11 @@ export function EditorTimeline({
       if (adDragging.edge === "left") {
         const newStart = Math.max(0, Math.min(t, adDragging.endTime - minDuration));
         onResizeAd(adDragging.adId, newStart, undefined);
+        onSeek(newStart);
       } else {
         const newEnd = Math.max(adDragging.startTime + minDuration, Math.min(durationSeconds, t));
         onResizeAd(adDragging.adId, undefined, newEnd);
+        onSeek(newEnd);
       }
     };
     const onMouseUp = () => setAdDragging(null);
@@ -190,7 +194,7 @@ export function EditorTimeline({
       window.removeEventListener("mousemove", onMouseMove);
       window.removeEventListener("mouseup", onMouseUp);
     };
-  }, [adDragging, durationSeconds, onResizeAd, pixelToTime]);
+  }, [adDragging, durationSeconds, onResizeAd, onSeek, pixelToTime]);
 
   const handleTimelineClick = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {

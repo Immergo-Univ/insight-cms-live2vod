@@ -1,5 +1,8 @@
 import { httpClient } from "./http-client";
 
+// Ads segments are served from the backend in-memory precalc store (POST/GET below).
+// Until an ingestion job or external detector fills that store, responses are empty arrays.
+
 export interface DetectedAd {
   startOffsetSec: number;
   endOffsetSec: number;
