@@ -1,7 +1,7 @@
 {
   "channel_id": "66e0a4ff7e61ef0023b6e9e8",
-  "input_playlist_url": "https://rjrtvjlocal-ioriver-cdn.encoders.immergo.tv/2/streamPlaylist.m3u8?startTime=1774761120&endTime=1774761240",
-  "media_playlist_url": "https://rjrtvjlocal-ioriver-cdn.encoders.immergo.tv/2/streamPlaylist.m3u8?startTime=1774761120&endTime=1774761240",
+  "input_playlist_url": "https://rjrtvjlocal-ioriver-cdn.encoders.immergo.tv/2/streamPlaylist.m3u8?startTime=1774761240&endTime=1774761360",
+  "media_playlist_url": "https://rjrtvjlocal-ioriver-cdn.encoders.immergo.tv/2/streamPlaylist.m3u8?startTime=1774761240&endTime=1774761360",
   "detector_json": "/home/ezequiel/www/insight-cms-live2vod/backend/utils/logo-detector-features/output/66e0a4ff7e61ef0023b6e9e8.json",
   "logo_template_path": "/home/ezequiel/www/insight-cms-live2vod/backend/utils/logo-detector-features/output/66e0a4ff7e61ef0023b6e9e8_logo.jpg",
   "logo_template_paths": [
@@ -9,14 +9,15 @@
   ],
   "reference_frame_wh": [ 1280, 720 ],
   "video_size_wh": [ 1280, 720 ],
-  "search_roi_xywh": [ 1123, 559, 96, 98 ],
-  "logo_bbox_on_stream_xywh": [ 1132, 568, 78, 80 ],
+  "search_roi_xywh": [ 1110, 546, 126, 124 ],
+  "logo_bbox_on_stream_xywh": [ 1132, 568, 82, 80 ],
   "sample_interval_seconds": 10,
-  "match_threshold": 0.6,
+  "match_threshold": 0.48,
   "match_method": "C_max_variant_max_luma_or_Sobel_TM_CCOEFF_NORMED_accurate_ffmpeg_seek",
   "min_consecutive_absent_samples_to_open_ad": 2,
   "min_consecutive_present_samples_to_close_ad": 2,
-  "scanned_duration_seconds": 24,
+  "scanned_duration_seconds": 120,
+  "media_timeline_zero_epoch_utc": 1774761244,
   "ad_segments": [
   ]
 }

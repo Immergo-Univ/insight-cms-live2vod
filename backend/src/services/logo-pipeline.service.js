@@ -169,6 +169,10 @@ export async function runTemplateMatcher(m3u8Url, channelId, ctx = {}) {
     detectorOutputDir,
     "--max-seconds",
     String(config.logoScan.matcherWindowSeconds + 120),
+    "--threshold",
+    String(config.logoScan.matcherMatchThreshold),
+    "--search-pad-frac",
+    String(config.logoScan.matcherSearchPadFrac),
   ];
   const scope =
     ctx.tenantId != null && ctx.slotStartEpoch != null

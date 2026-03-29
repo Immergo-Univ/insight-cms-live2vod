@@ -38,6 +38,21 @@ export const config = {
     fragmentSeconds: parseInt(process.env.LOGO_SCAN_FRAGMENT_SEC || "600", 10),
     /** logo-template-matching archive window length (seconds); default 2 min per run. Override with LOGO_SCAN_MATCHER_WINDOW_SEC. */
     matcherWindowSeconds: parseInt(process.env.LOGO_SCAN_MATCHER_WINDOW_SEC || "120", 10),
+    /**
+     * logo-template-matching: min normalized correlation to treat sample as logo-present (lower = more
+     * permissive, fewer false ad gaps). Env: LOGO_SCAN_MATCHER_THRESHOLD
+     */
+    matcherMatchThreshold: (() => {
+      const v = parseFloat(process.env.LOGO_SCAN_MATCHER_THRESHOLD ?? "0.48");
+      return Number.isFinite(v) && v >= 0 && v <= 1 ? v : 0.48;
+    })(),
+    /**
+     * Fraction of bbox w/h added as padding around the search ROI. Env: LOGO_SCAN_MATCHER_SEARCH_PAD_FRAC
+     */
+    matcherSearchPadFrac: (() => {
+      const v = parseFloat(process.env.LOGO_SCAN_MATCHER_SEARCH_PAD_FRAC ?? "0.28");
+      return Number.isFinite(v) && v >= 0 && v <= 1.5 ? v : 0.28;
+    })(),
     /** UTC hour size for logo-detector multi-hour window alignment only. */
     hourSeconds: 3600,
     /** Archive window (wall-clock UTC hours) fed to logo-detector for bbox/template extraction. */

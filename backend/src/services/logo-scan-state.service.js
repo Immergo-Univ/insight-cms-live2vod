@@ -40,6 +40,31 @@ export function alignEpochToMatcherSlot(epochSec) {
   return Math.floor(epochSec / w) * w;
 }
 
+/** Oldest instant we keep ads/fragments for (unix seconds). */
+export function retentionCutoffEpoch(nowSec) {
+  return nowSec - config.logoScan.archiveHours * 3600;
+}
+
+/** Earliest matcher slot start (inclusive) to walk: within retention and matcherArchiveHours. */
+export function matcherScanCutoffEpoch(nowSec) {
+  const retention = retentionCutoffEpoch(nowSec);
+  const archiveCap = nowSec - config.logoScan.matcherArchiveHours * 3600;
+  return Math.max(retention, archiveCap);
+}
+
+/**
+ * True when every matcher slot from latestSlotStart down to matcherScanCutoffEpoch(now) is processed.
+ * Used to choose catch-up sweep vs latest-window-only refresh.
+ */
+export function hasFullMatcherArchiveCoverage(tenantId, channelId, nowSec, latestSlotStart) {
+  const slotSec = matcherWindowSec();
+  const scanCutoff = matcherScanCutoffEpoch(nowSec);
+  for (let s = latestSlotStart; s >= scanCutoff; s -= slotSec) {
+    if (!isMatcherSlotProcessed(tenantId, channelId, s)) return false;
+  }
+  return true;
+}
+
 function scheduleSave() {
   if (saveTimer) clearTimeout(saveTimer);
   saveTimer = setTimeout(() => {

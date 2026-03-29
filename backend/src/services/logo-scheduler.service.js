@@ -20,6 +20,9 @@ import {
   markDetectorSuccessful,
   getDetectorCacheExpiryIso,
   getFragmentsForChannel,
+  retentionCutoffEpoch,
+  matcherScanCutoffEpoch,
+  hasFullMatcherArchiveCoverage,
 } from "./logo-scan-state.service.js";
 import { ingestMatcherAds, pruneAdsOlderThan } from "./ads-precalc.service.js";
 import { saveChannelProcessingSnapshot, resolveHlsBaseUrl } from "./channel-ads-disk.service.js";
@@ -37,17 +40,6 @@ let runPromise = null;
 
 function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
-}
-
-function retentionCutoff(nowSec) {
-  return nowSec - config.logoScan.archiveHours * 3600;
-}
-
-/** Earliest matcher slot start (inclusive) to walk: within retention and within matcherArchiveHours. */
-function matcherScanCutoffEpoch(nowSec) {
-  const retention = retentionCutoff(nowSec);
-  const archiveCap = nowSec - config.logoScan.matcherArchiveHours * 3600;
-  return Math.max(retention, archiveCap);
 }
 
 function matcherWindowSec() {
@@ -181,7 +173,8 @@ async function backfillChannel(tenantId, channelId, hlsBase, latestHourStart, la
   const detStart = latestHourStart - (detHours - 1) * hourSec;
   const detectorUrl = buildDetectorArchiveM3u8(hlsBase, latestHourStart);
   console.log(
-    `[logo-scan] ── Channel backfill START tenant=${tenantId} channel=${channelId} ` +
+    `[logo-scan] ── Channel archive catch-up START tenant=${tenantId} channel=${channelId} ` +
+      `(newest→oldest until full window or run budget) ` +
       `detector_window_UTC=[${detStart}, ${latestHourStart + hourSec}) (${detHours}h) ` +
       `matcher_slot_sec=${slotSec}`,
   );
@@ -191,6 +184,7 @@ async function backfillChannel(tenantId, channelId, hlsBase, latestHourStart, la
   }
 
   const scanCutoff = matcherScanCutoffEpoch(nowSec);
+  const retentionCut = retentionCutoffEpoch(nowSec);
   const maxRuns = config.logoScan.matcherMaxRunsPerChannelPerCycle;
   let matcherFailed = false;
   let stoppedByBudget = false;
@@ -198,7 +192,7 @@ async function backfillChannel(tenantId, channelId, hlsBase, latestHourStart, la
 
   console.log(
     `[logo-scan] backfill scan window oldest_slot_UTC>=${scanCutoff} ` +
-      `(matcherArchiveHours=${config.logoScan.matcherArchiveHours} retentionCutoff=${retentionCutoff(nowSec)}) ` +
+      `(matcherArchiveHours=${config.logoScan.matcherArchiveHours} retentionCutoff=${retentionCut}) ` +
       `maxRunsPerCycle=${maxRuns || "∞"}`,
   );
 
@@ -261,7 +255,7 @@ async function backfillChannel(tenantId, channelId, hlsBase, latestHourStart, la
 
 async function runOneCycle() {
   const nowSec = Math.floor(Date.now() / 1000);
-  const cutoff = retentionCutoff(nowSec);
+  const cutoff = retentionCutoffEpoch(nowSec);
   pruneFragmentsOlderThan(cutoff);
   await pruneAdsOlderThan(cutoff);
 
@@ -292,16 +286,15 @@ async function runOneCycle() {
         continue;
       }
 
-      const bfDone = isBackfillComplete(tenantId, channelId);
+      const archiveCovered = hasFullMatcherArchiveCoverage(tenantId, channelId, nowSec, latestSlotStart);
       console.log(
         `[logo-scan] STAGE channel ${i + 1}/${rawChannels.length} id=${channelId} title="${title}" ` +
-          `backfillComplete=${bfDone}` +
-          (bfDone ? " (this pass: latest archive window only)" : ""),
+          `archiveCoverage=${archiveCovered} backfillFlag=${isBackfillComplete(tenantId, channelId)}`,
       );
-      if (bfDone) {
-        await refreshLatestMatcherSlot(tenantId, channelId, hlsBase, latestHourStart, latestSlotStart);
-      } else {
+      if (!archiveCovered) {
         await backfillChannel(tenantId, channelId, hlsBase, latestHourStart, latestSlotStart, nowSec);
+      } else {
+        await refreshLatestMatcherSlot(tenantId, channelId, hlsBase, latestHourStart, latestSlotStart);
       }
       console.log(`[logo-scan] STAGE channel END ${i + 1}/${rawChannels.length} id=${channelId}`);
     }

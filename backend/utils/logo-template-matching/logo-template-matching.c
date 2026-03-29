@@ -15,6 +15,7 @@
  *
  * Usage:
  *   ./logo-template-matching <m3u8_url> <channel_id> [--max-seconds N] [--detector-output DIR]
+ *   [--threshold 0..1] [--search-pad-frac F]
  *
  * Default detector dir: $LOGO_TM_DETECTOR_OUTPUT or <cwd>/../logo-detector-features/output
  * Output: ./output/ads/<channel_id>.json
@@ -43,8 +44,10 @@
 static const int kSampleIntervalSec = 10;
 static const int kMinAbsentToOpen = 2;
 static const int kMinPresentToClose = 2;
-static const double kDefaultMatchThreshold = 0.60;
-static const double kSearchPadFrac = 0.12;
+/* Lower threshold => more samples classified as logo present (fewer false “ad” gaps). */
+static const double kDefaultMatchThreshold = 0.40;
+/* Extra margin around scaled logo_bbox for sliding-window search (fraction of bbox w/h). */
+static const double kDefaultSearchPadFrac = 0.50;
 #define FFMPEG_CMD_CAP 16384
 #define MAX_LOGO_VARIANTS 4
 
@@ -246,6 +249,25 @@ static int m3u8_first_program_date_time_unix(const DynBuf *pl, int64_t *unix_out
     trim(buf);
     if (parse_iso8601_utc_unix(buf, unix_out) == 0) return 0;
     p = eol ? eol + 1 : p + strlen(p);
+  }
+  return -1;
+}
+
+/* Parse ?key= or &key= integer (e.g. startTime on streamPlaylist URL). */
+static int url_query_param_int64(const char *url, const char *key, int64_t *out) {
+  if (!url || !key || !out) return -1;
+  char needle[80];
+  int n = snprintf(needle, sizeof needle, "%s=", key);
+  if (n <= 0 || n >= (int)sizeof needle) return -1;
+  const char *p = url - 1;
+  while ((p = strstr(p + 1, needle)) != NULL) {
+    if (!(p == url || p[-1] == '?' || p[-1] == '&')) continue;
+    const char *q = p + strlen(needle);
+    char *end = NULL;
+    long long v = strtoll(q, &end, 10);
+    if (end == q) continue;
+    *out = (int64_t)v;
+    return 0;
   }
   return -1;
 }
@@ -706,6 +728,21 @@ static void fmt_hhmmss(double sec, char *buf, size_t nbuf) {
   snprintf(buf, nbuf, "%02lld:%02d:%02d", (long long)h, m, ss);
 }
 
+/* RFC3339 UTC for sample log lines (int64_t unix seconds). */
+static void format_unix_utc_iso(int64_t unix_sec, char *buf, size_t nbuf) {
+  if (nbuf < 22) {
+    if (nbuf) buf[0] = '\0';
+    return;
+  }
+  time_t tt = (time_t)unix_sec;
+  struct tm g;
+  if (gmtime_r(&tt, &g) == NULL) {
+    snprintf(buf, nbuf, "?");
+    return;
+  }
+  strftime(buf, nbuf, "%Y-%m-%dT%H:%M:%SZ", &g);
+}
+
 static int ensure_dir(const char *path) {
   struct stat st;
   if (stat(path, &st) == 0) return S_ISDIR(st.st_mode) ? 0 : -1;
@@ -742,12 +779,13 @@ static void print_usage(const char *prog) {
           "Usage: %s <m3u8_url> <channel_id> [options]\n"
           "  --max-seconds N\n"
           "  --detector-output DIR\n"
-          "  --threshold 0..1   (default %.2f)\n"
+          "  --threshold 0..1   (default %.2f; lower = more permissive logo-present)\n"
+          "  --search-pad-frac F  ROI padding around bbox as fraction of w/h (default %.2f)\n"
           "  --logo-jpg PATH    (replace output/<id>_logo.jpg; use a crop from the SAME encoder you scan)\n"
           "  --alt-logo-jpg PATH (extra template; repeat up to %d×; score = max over variants × max(luma, Sobel))\n"
           "  Reads ../logo-detector-features/output/<channel_id>.json and <channel_id>_logo.jpg (or DIR).\n"
           "  Writes ./output/ads/<channel_id>.json\n",
-          prog, kDefaultMatchThreshold, MAX_LOGO_VARIANTS - 1);
+          prog, kDefaultMatchThreshold, kDefaultSearchPadFrac, MAX_LOGO_VARIANTS - 1);
 }
 
 int main(int argc, char **argv) {
@@ -757,6 +795,7 @@ int main(int argc, char **argv) {
   double max_seconds = 0;
   int have_max = 0;
   double match_threshold = kDefaultMatchThreshold;
+  double search_pad_frac = kDefaultSearchPadFrac;
   const char *logo_jpg_override = NULL;
   const char *alt_logo_jpg[MAX_LOGO_VARIANTS - 1];
   int n_alt_logo = 0;
@@ -774,6 +813,12 @@ int main(int argc, char **argv) {
       match_threshold = strtod(argv[++i], NULL);
       if (match_threshold < 0 || match_threshold > 1) {
         fprintf(stderr, "--threshold must be between 0 and 1\n");
+        return 1;
+      }
+    } else if (strcmp(argv[i], "--search-pad-frac") == 0 && i + 1 < argc) {
+      search_pad_frac = strtod(argv[++i], NULL);
+      if (search_pad_frac < 0 || search_pad_frac > 1.5) {
+        fprintf(stderr, "--search-pad-frac must be between 0 and 1.5\n");
         return 1;
       }
     } else if (strcmp(argv[i], "--logo-jpg") == 0 && i + 1 < argc) {
@@ -866,6 +911,9 @@ int main(int argc, char **argv) {
     ltm_log("timeline anchor: first EXT-X-PROGRAM-DATE-TIME → unix_utc=%lld\n",
             (long long)media_timeline_zero_epoch_utc);
 
+  int64_t url_start_unix = 0;
+  int have_url_start = url_query_param_int64(m3u8, "startTime", &url_start_unix) == 0;
+
   int fw, fh;
   if (ffprobe_wh(resolved, &fw, &fh, &err) != 0) {
     fprintf(stderr, "%s\n", err ? err : "ffprobe");
@@ -945,7 +993,7 @@ int main(int argc, char **argv) {
   int ox, oy, ow, oh;
   scale_bbox(bx, by, bw, bh, ref_w, ref_h, fw, fh, &ox, &oy, &ow, &oh);
   int sx, sy, sw, sh;
-  expand_roi(ox, oy, ow, oh, fw, fh, kSearchPadFrac, &sx, &sy, &sw, &sh);
+  expand_roi(ox, oy, ow, oh, fw, fh, search_pad_frac, &sx, &sy, &sw, &sh);
 
   const char *primary_logo_path = logo_jpg_override ? logo_jpg_override : logo_path_heap;
   const char *tpl_src[MAX_LOGO_VARIANTS];
@@ -1015,10 +1063,22 @@ int main(int argc, char **argv) {
           "(max luma/Sobel per variant, accurate seek)\n",
           fw, fh, ref_w, ref_h, sx, sy, sw, sh, tw0, th0, n_variants, num_samples, interval, match_threshold);
 
+  /* Log wall_utc from playlist URL startTime + media_t only (ingest still may use PDT in JSON). */
+  int64_t wall_time_anchor_utc = url_start_unix;
+  int have_wall_time_utc = have_url_start;
+  if (have_wall_time_utc)
+    ltm_log("per-sample wall_utc = url startTime + media_t\n");
+
   for (int i = 0; i < num_samples; i++) {
     int t = i * interval;
     if (ffmpeg_one_frame_bgr(resolved, t, fw, fh, frame, &err) != 0) {
       ltm_log("t=%ds decode failed: %s — marking absent\n", t, err ? err : "?");
+      if (have_wall_time_utc) {
+        char wbuf[48];
+        int64_t we = wall_time_anchor_utc + (int64_t)t;
+        format_unix_utc_iso(we, wbuf, sizeof wbuf);
+        ltm_log("       wall_utc=%s epoch=%lld\n", wbuf, (long long)we);
+      }
       free(err);
       err = NULL;
       present[i] = 0;
@@ -1035,6 +1095,12 @@ int main(int argc, char **argv) {
     }
     present[i] = (best >= match_threshold) ? 1 : 0;
     ltm_log("t=%6ds match=%.3f present=%d\n", t, best, (int)present[i]);
+    if (have_wall_time_utc) {
+      char wbuf[48];
+      int64_t we = wall_time_anchor_utc + (int64_t)t;
+      format_unix_utc_iso(we, wbuf, sizeof wbuf);
+      ltm_log("       wall_utc=%s epoch=%lld\n", wbuf, (long long)we);
+    }
   }
 
   int nwin = 0, *ws = NULL, *we = NULL;
