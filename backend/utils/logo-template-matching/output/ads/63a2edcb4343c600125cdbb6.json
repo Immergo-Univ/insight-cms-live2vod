@@ -1,7 +1,7 @@
 {
   "channel_id": "63a2edcb4343c600125cdbb6",
-  "input_playlist_url": "https://ch14channel14-cdn.encoders.immergo.tv/2/streamPlaylist.m3u8?startTime=1774807440&endTime=1774807560",
-  "media_playlist_url": "https://ch14channel14-cdn.encoders.immergo.tv/2/streamPlaylist.m3u8?startTime=1774807440&endTime=1774807560",
+  "input_playlist_url": "https://ch14channel14-cdn.encoders.immergo.tv/2/streamPlaylist.m3u8?startTime=1774813680&endTime=1774813800",
+  "media_playlist_url": "https://ch14channel14-cdn.encoders.immergo.tv/2/streamPlaylist.m3u8?startTime=1774813680&endTime=1774813800",
   "detector_json": "/home/ezequiel/www/insight-cms-live2vod/backend/utils/logo-detector-features/output/63a2edcb4343c600125cdbb6.json",
   "logo_template_path": "/home/ezequiel/www/insight-cms-live2vod/backend/utils/logo-detector-features/output/63a2edcb4343c600125cdbb6_logo.jpg",
   "logo_template_paths": [
@@ -12,21 +12,21 @@
   "search_roi_xywh": [ 1112, 122, 117, 41 ],
   "logo_bbox_on_stream_xywh": [ 1133, 129, 75, 27 ],
   "sample_interval_seconds": 10,
-  "match_threshold": 0.48,
+  "match_threshold": 0.6,
   "match_method": "C_max_variant_max_luma_or_Sobel_TM_CCOEFF_NORMED_accurate_ffmpeg_seek",
   "min_consecutive_absent_samples_to_open_ad": 2,
   "min_consecutive_present_samples_to_close_ad": 2,
-  "scanned_duration_seconds": 102,
+  "scanned_duration_seconds": 120,
   "media_timeline_zero_epoch_utc": null,
   "ad_segments": [
     {
-      "start_media_seconds": 40,
-      "end_media_seconds_inclusive": 50,
-      "duration_media_seconds": 20,
-      "start_hhmmss": "00:00:40",
-      "end_hhmmss": "00:01:00",
-      "start_sample_index": 4,
-      "end_sample_index": 5
+      "start_media_seconds": 0,
+      "end_media_seconds_inclusive": 90,
+      "duration_media_seconds": 100,
+      "start_hhmmss": "00:00:00",
+      "end_hhmmss": "00:01:40",
+      "start_sample_index": 0,
+      "end_sample_index": 9
     }
   ]
 }

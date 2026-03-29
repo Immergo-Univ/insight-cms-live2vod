@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight, Trash01 } from "@untitledui/icons";
 import {
   COLUMN_WIDTH_PX,
@@ -89,8 +89,28 @@ export function EditorTimeline({
 
   const zoomMs = ZOOM_LEVELS_MS[zoomIndex] ?? ZOOM_LEVELS_MS[0];
   const zoomSeconds = zoomMs / 1000;
-  const columnCount = Math.max(1, Math.ceil(durationSeconds / zoomSeconds));
-  const totalWidthPx = columnCount * COLUMN_WIDTH_PX;
+  /**
+   * Fixed px per second so playhead, scrub, ads, and thumbnails share one linear time axis.
+   * Previously each column was COLUMN_WIDTH_PX wide while the last column covered less than
+   * zoomSeconds of media — linear playhead mapping then drifted from thumbnail sample times.
+   */
+  const pixelsPerSecond = COLUMN_WIDTH_PX / zoomSeconds;
+  const timelineSegments = useMemo(() => {
+    const segs: { startTime: number; widthPx: number }[] = [];
+    if (durationSeconds <= 0 || zoomSeconds <= 0) return segs;
+    for (let i = 0; ; i++) {
+      const startTime = i * zoomSeconds;
+      if (startTime >= durationSeconds) break;
+      const endTime = Math.min(startTime + zoomSeconds, durationSeconds);
+      segs.push({
+        startTime,
+        widthPx: (endTime - startTime) * pixelsPerSecond,
+      });
+    }
+    return segs;
+  }, [durationSeconds, zoomSeconds, pixelsPerSecond]);
+  const totalWidthPx =
+    durationSeconds > 0 ? durationSeconds * pixelsPerSecond : COLUMN_WIDTH_PX;
 
   const pixelToTime = useCallback(
     (clientX: number) => {
@@ -105,9 +125,7 @@ export function EditorTimeline({
   );
 
   const playheadPx =
-    durationSeconds > 0
-      ? (currentTimeSeconds / durationSeconds) * totalWidthPx
-      : 0;
+    durationSeconds > 0 ? currentTimeSeconds * pixelsPerSecond : 0;
 
   useEffect(() => {
     const content = scrollRef.current;
@@ -182,7 +200,7 @@ export function EditorTimeline({
 
     if (zoomChanged) {
       const t = playheadTimeForZoomRef.current;
-      const playheadPxNow = (t / durationSeconds) * totalWidthPx;
+      const playheadPxNow = t * pixelsPerSecond;
       const target = playheadPxNow - content.clientWidth / 2;
       const maxScroll = Math.max(0, content.scrollWidth - content.clientWidth);
       const next = Math.max(0, Math.min(target, maxScroll));
@@ -193,7 +211,7 @@ export function EditorTimeline({
     }
 
     prevZoomIndexRef.current = zoomIndex;
-  }, [zoomIndex, totalWidthPx, durationSeconds]);
+  }, [zoomIndex, totalWidthPx, durationSeconds, pixelsPerSecond]);
 
   useEffect(() => {
     if (!dragging || !onResizeClip) return;
@@ -204,10 +222,10 @@ export function EditorTimeline({
       const inner = innerRef.current;
       const rect = inner?.getBoundingClientRect();
       const mouseX = rect ? e.clientX - rect.left : null;
-      const playheadPx =
-        durationSeconds > 0 ? (currentTimeSeconds / durationSeconds) * totalWidthPx : 0;
+      const playheadPxLocal =
+        durationSeconds > 0 ? currentTimeSeconds * pixelsPerSecond : 0;
 
-      const isNearPlayhead = mouseX !== null && Math.abs(mouseX - playheadPx) <= stickyPx;
+      const isNearPlayhead = mouseX !== null && Math.abs(mouseX - playheadPxLocal) <= stickyPx;
       const stickyTime = currentTimeSeconds;
 
       let t = pixelToTime(e.clientX);
@@ -236,7 +254,7 @@ export function EditorTimeline({
       window.removeEventListener("mousemove", onMouseMove);
       window.removeEventListener("mouseup", onMouseUp);
     };
-  }, [dragging, durationSeconds, currentTimeSeconds, totalWidthPx, onResizeClip, onSeek, pixelToTime]);
+  }, [dragging, durationSeconds, currentTimeSeconds, pixelsPerSecond, onResizeClip, onSeek, pixelToTime]);
 
   useEffect(() => {
     if (!adDragging || !onResizeAd) return;
@@ -381,18 +399,17 @@ export function EditorTimeline({
               }}
               onClick={handleTimelineClick}
             >
-            {Array.from({ length: columnCount }, (_, i) => {
-              const timeSec = i * zoomSeconds;
-              const thumbUrl = buildThumbnailUrl(clipUrl, timeSec, channelId);
+            {timelineSegments.map((seg, i) => {
+              const thumbUrl = buildThumbnailUrl(clipUrl, seg.startTime, channelId);
               return (
                 <div
-                  key={i}
+                  key={`${seg.startTime}-${i}`}
                   className="flex shrink-0 flex-col"
-                  style={{ width: COLUMN_WIDTH_PX }}
+                  style={{ width: seg.widthPx }}
                 >
                   <div
                     className="min-h-0 flex-1 w-full bg-quaternary"
-                    style={{ width: COLUMN_WIDTH_PX }}
+                    style={{ width: seg.widthPx }}
                   >
                     <img
                       src={thumbUrl}
@@ -402,15 +419,15 @@ export function EditorTimeline({
                     />
                   </div>
                   <div className="flex h-6 shrink-0 items-center justify-center text-[10px] text-tertiary">
-                    {formatTime(timeSec)}
+                    {formatTime(seg.startTime)}
                   </div>
                 </div>
               );
             })}
           {/* Ad markers (red) */}
           {ads.map((ad) => {
-            const adLeft = (ad.startTime / durationSeconds) * totalWidthPx;
-            const adWidth = ((ad.endTime - ad.startTime) / durationSeconds) * totalWidthPx;
+            const adLeft = ad.startTime * pixelsPerSecond;
+            const adWidth = (ad.endTime - ad.startTime) * pixelsPerSecond;
             const isAdHover = hoverAdId === ad.id;
             const canResizeAd = onResizeAd && adWidth > 8;
 
@@ -477,8 +494,8 @@ export function EditorTimeline({
 
           {/* Clip overlays (blue) */}
           {clips.map((c) => {
-            const left = (c.startTime / durationSeconds) * totalWidthPx;
-            const width = ((c.endTime - c.startTime) / durationSeconds) * totalWidthPx;
+            const left = c.startTime * pixelsPerSecond;
+            const width = (c.endTime - c.startTime) * pixelsPerSecond;
             const isHover = hoverClipId === c.id;
             const isSelected = selectedClipId === c.id;
             const canResize = onResizeClip && width > 8;
