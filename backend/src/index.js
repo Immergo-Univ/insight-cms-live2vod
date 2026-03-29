@@ -8,6 +8,7 @@ import { adsRouter } from "./controllers/ads.controller.js";
 import { authRouter } from "./controllers/auth.controller.js";
 import { config } from "./config.js";
 import { startLogoScanScheduler } from "./services/logo-scheduler.service.js";
+import { startLogoLiveMatchingService } from "./services/logo-live-matching.service.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -31,4 +32,5 @@ app.get("/{*splat}", (_req, res) => {
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
   startLogoScanScheduler();
+  startLogoLiveMatchingService();
 });

@@ -323,7 +323,7 @@ async function schedulerLoop() {
  */
 export function startLogoScanScheduler() {
   if (!config.logoScan.enabled) {
-    console.log("[logo-scan] Scheduler disabled (set LOGO_SCAN_ENABLED=true to enable)");
+    console.log("[logo-scan] Archive/history scan disabled (optional: LOGO_SCAN_ENABLED=true)");
     return;
   }
   if (schedulerRunning) return;

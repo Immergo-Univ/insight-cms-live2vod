@@ -212,3 +212,49 @@ export async function runTemplateMatcher(m3u8Url, channelId, ctx = {}) {
     return null;
   }
 }
+
+/**
+ * Single-frame probe: local path or image URL + channel_id. Parses JSON from stdout.
+ * @returns {Promise<Record<string, unknown> | null>}
+ */
+export async function runProbeTemplateMatch(framePathOrUrl, channelId) {
+  const bin = config.logoScan.logoMatcherBin;
+  const cwd = config.logoScan.logoMatcherDir;
+  if (!(await fileExists(bin))) {
+    console.error(`[logo-live] Missing binary: ${bin} (build logo-template-matching)`);
+    return null;
+  }
+  const detectorOutputDir = path.join(config.logoScan.logoDetectorDir, "output");
+  const args = [
+    framePathOrUrl,
+    channelId,
+    "--detector-output",
+    detectorOutputDir,
+    "--threshold",
+    String(config.logoScan.matcherMatchThreshold),
+    "--search-pad-frac",
+    String(config.logoScan.matcherSearchPadFrac),
+  ];
+  try {
+    const { stdout, stderr } = await runExecutable(bin, args, {
+      cwd,
+      timeoutMs: config.logoLiveMatching.probeTimeoutMs,
+      stdoutPrefix: null,
+      stderrPrefix: "[logo-template-matching]",
+    });
+    if (stderr && process.env.LOGO_LIVE_DEBUG === "true") {
+      console.error(stderr.slice(-2000));
+    }
+    const raw = stdout.trim();
+    const start = raw.indexOf("{");
+    const end = raw.lastIndexOf("}");
+    if (start < 0 || end <= start) {
+      console.error(`[logo-live] probe: no JSON in stdout for channel=${channelId}`);
+      return null;
+    }
+    return JSON.parse(raw.slice(start, end + 1));
+  } catch (e) {
+    console.error(`[logo-live] probe failed channel=${channelId}: ${e.message}`);
+    return null;
+  }
+}

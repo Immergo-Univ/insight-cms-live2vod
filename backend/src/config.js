@@ -10,8 +10,12 @@ export const config = {
   insightApiUsername: process.env.INSIGHT_API_USERNAME,
   insightApiPassword: process.env.INSIGHT_API_PASSWORD,
   /** Tenants scanned by the logo/archive pipeline (same IDs as x-tenant-id / frontend). */
-  tenants: ["rjr"],
+  tenants: ["channel14","rjr"],
 
+  /**
+   * Legacy archive pipeline (template-matching over DVR windows, backfill). Off by default.
+   * Opt-in only: LOGO_SCAN_ENABLED=true — not required for live logo / ad detection.
+   */
   logoScan: {
     enabled: process.env.LOGO_SCAN_ENABLED === "true",
     /** Pause between full scheduler cycles (ms). */
@@ -68,5 +72,26 @@ export const config = {
     matcherTimeoutMs: parseInt(process.env.LOGO_SCAN_MATCHER_TIMEOUT_MS || "900000", 10),
     /** Reuse logo-detector JSON/JPG without re-running the binary while cache is fresh (ms). */
     detectorCacheTtlMs: parseInt(process.env.LOGO_SCAN_DETECTOR_CACHE_MS || String(24 * 3600 * 1000), 10),
+  },
+
+  /**
+   * Live HLS: probe + logo presence / ad hysteresis. On by default; set LOGO_LIVE_MATCHING_ENABLED=false to disable.
+   */
+  logoLiveMatching: {
+    enabled: process.env.LOGO_LIVE_MATCHING_ENABLED !== "false",
+    intervalMs: parseInt(process.env.LOGO_LIVE_MATCHING_INTERVAL_MS || "1000", 10),
+    /** Kill ffmpeg if the live grab does not finish (avoids freezing all channels). */
+    ffmpegFrameTimeoutMs: parseInt(process.env.LOGO_LIVE_FFMPEG_TIMEOUT_MS || "45000", 10),
+    /** How often to refresh the channel list from the API (ms). */
+    discoveryIntervalMs: parseInt(process.env.LOGO_LIVE_DISCOVERY_INTERVAL_MS || "60000", 10),
+    probeTimeoutMs: parseInt(process.env.LOGO_LIVE_PROBE_TIMEOUT_MS || "90000", 10),
+    stateFilePath:
+      process.env.LOGO_LIVE_MATCHING_STATE_FILE ||
+      path.join(backendRoot, "data", "logo-live-matching-state.json"),
+    /** Empty = use config.tenants */
+    tenantIds: (process.env.LOGO_LIVE_TENANTS || "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean),
   },
 };

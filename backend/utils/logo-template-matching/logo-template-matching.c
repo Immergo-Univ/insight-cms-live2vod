@@ -14,11 +14,12 @@
  *   gcc -O2 -std=c11 -Wall -Wextra logo-template-matching.c -o logo-template-matching -lcurl -lm
  *
  * Usage:
- *   ./logo-template-matching <m3u8_url> <channel_id> [--max-seconds N] [--detector-output DIR]
- *   [--threshold 0..1] [--search-pad-frac F]
+ *   HLS/VOD: ./logo-template-matching <m3u8_url> <channel_id> [--max-seconds N] ...
+ *   Single frame (stdout JSON): ./logo-template-matching <image.jpg|https://.../x.png> <channel_id> ...
+ *     (not .m3u8); uses same detector JSON + template as HLS mode.
  *
  * Default detector dir: $LOGO_TM_DETECTOR_OUTPUT or <cwd>/../logo-detector-features/output
- * Output: ./output/ads/<channel_id>.json
+ * HLS output: ./output/ads/<channel_id>.json
  *
  * Requires: libcurl, ffmpeg, ffprobe in PATH.
  */
@@ -42,7 +43,7 @@
 #include <unistd.h>
 
 static const int kSampleIntervalSec = 10;
-static const int kMinAbsentToOpen = 2;
+static const int kMinAbsentToOpen = 5;
 static const int kMinPresentToClose = 2;
 /* Lower threshold => more samples classified as logo present (fewer false “ad” gaps). */
 static const double kDefaultMatchThreshold = 0.40;
@@ -713,6 +714,199 @@ static void jesc(const char *s, FILE *fp) {
   fputc('"', fp);
 }
 
+static int ascii_tolower_c(int c) {
+  return (c >= 'A' && c <= 'Z') ? c + 32 : c;
+}
+
+static int ends_with_ignore_case(const char *s, const char *suffix) {
+  size_t ls = strlen(s), lf = strlen(suffix);
+  if (lf > ls) return 0;
+  const char *a = s + ls - lf;
+  for (; *suffix; a++, suffix++)
+    if (ascii_tolower_c((unsigned char)*a) != ascii_tolower_c((unsigned char)*suffix)) return 0;
+  return 1;
+}
+
+/* Copy s into out up to '?' for extension checks on URLs. */
+static void path_before_query(const char *s, char *out, size_t nout) {
+  size_t i = 0;
+  for (; s[i] && s[i] != '?' && i + 1 < nout; i++) out[i] = s[i];
+  out[i] = '\0';
+}
+
+static int path_looks_like_image_ext(const char *path_no_query) {
+  return ends_with_ignore_case(path_no_query, ".jpg") ||
+         ends_with_ignore_case(path_no_query, ".jpeg") ||
+         ends_with_ignore_case(path_no_query, ".jpe") ||
+         ends_with_ignore_case(path_no_query, ".png") ||
+         ends_with_ignore_case(path_no_query, ".webp") ||
+         ends_with_ignore_case(path_no_query, ".bmp");
+}
+
+/* True => first positional is an image file/URL, not an HLS playlist. */
+static int input_is_single_frame_probe(const char *s) {
+  if (strcasestr(s, ".m3u8") != NULL) return 0;
+  if (strncmp(s, "http://", 7) == 0 || strncmp(s, "https://", 8) == 0) {
+    char tmp[512];
+    path_before_query(s, tmp, sizeof tmp);
+    return path_looks_like_image_ext(tmp);
+  }
+  struct stat st;
+  if (stat(s, &st) == 0 && S_ISREG(st.st_mode)) return 1;
+  char tmp[PATH_MAX];
+  path_before_query(s, tmp, sizeof tmp);
+  return path_looks_like_image_ext(tmp);
+}
+
+/**
+ * One image (local path or http(s) image URL): print one JSON object to stdout, stderr for logs.
+ * Frees nothing on json_path_heap / logo_path_heap (caller frees).
+ */
+static int run_single_frame_probe(const char *frame_input, const char *channel_id, const char *json_path,
+                                  const char *logo_path_default, double match_threshold, double search_pad_frac,
+                                  const char *logo_jpg_override, const char **alt_logo_jpg, int n_alt_logo) {
+  char *err = NULL;
+  char *jtext = NULL;
+  if (read_file_all(json_path, &jtext, &err) != 0) {
+    fprintf(stderr, "JSON %s: %s\n", json_path, err ? err : "?");
+    free(err);
+    return 1;
+  }
+  free(err);
+  err = NULL;
+
+  int bx, by, bw, bh;
+  if (ld_parse_logo_bbox(jtext, &bx, &by, &bw, &bh) != 0) {
+    fprintf(stderr, "Invalid or missing logo_bbox in %s\n", json_path);
+    free(jtext);
+    return 1;
+  }
+
+  int ref_w, ref_h;
+  if (ld_get_ref_dimensions(jtext, bx, by, bw, bh, &ref_w, &ref_h) != 0) {
+    fprintf(stderr,
+            "Add reference_frame to detector JSON or ensure logo_bbox fits detection.proc_size.\n");
+    free(jtext);
+    return 1;
+  }
+
+  uint8_t *frame = NULL;
+  int fw = 0, fh = 0;
+  if (load_image_bgr_via_ffmpeg(frame_input, &fw, &fh, &frame, &err) != 0) {
+    fprintf(stderr, "Frame %s: %s\n", frame_input, err ? err : "?");
+    free(err);
+    free(jtext);
+    return 1;
+  }
+  free(err);
+  err = NULL;
+
+  int ox, oy, ow, oh;
+  scale_bbox(bx, by, bw, bh, ref_w, ref_h, fw, fh, &ox, &oy, &ow, &oh);
+  int sx, sy, sw, sh;
+  expand_roi(ox, oy, ow, oh, fw, fh, search_pad_frac, &sx, &sy, &sw, &sh);
+
+  const char *primary_logo_path = logo_jpg_override ? logo_jpg_override : logo_path_default;
+  const char *tpl_src[MAX_LOGO_VARIANTS];
+  int n_tpl_src = 0;
+  tpl_src[n_tpl_src++] = primary_logo_path;
+  for (int a = 0; a < n_alt_logo; a++) {
+    int dup = 0;
+    for (int j = 0; j < n_tpl_src; j++)
+      if (strcmp(alt_logo_jpg[a], tpl_src[j]) == 0) {
+        dup = 1;
+        break;
+      }
+    if (!dup && n_tpl_src < MAX_LOGO_VARIANTS) tpl_src[n_tpl_src++] = alt_logo_jpg[a];
+  }
+
+  LogoVariant variants[MAX_LOGO_VARIANTS];
+  int n_variants = 0;
+  for (int ti = 0; ti < n_tpl_src; ti++) {
+    if (load_logo_variant(tpl_src[ti], ow, oh, &variants[n_variants], &err) != 0) {
+      fprintf(stderr, "Logo image %s: %s\n", tpl_src[ti], err ? err : "?");
+      free(err);
+      for (int j = 0; j < n_variants; j++) logo_variant_free(&variants[j]);
+      free(frame);
+      free(jtext);
+      return 1;
+    }
+    n_variants++;
+    ltm_log("probe: loaded template variant %d/%d: %s\n", n_variants, n_tpl_src, tpl_src[ti]);
+  }
+
+  int tw0 = ow;
+  int th0 = oh;
+  uint8_t *roi_gray = malloc((size_t)sw * sh);
+  uint8_t *roi_edge = malloc((size_t)sw * sh);
+  if (!roi_gray || !roi_edge) {
+    fprintf(stderr, "malloc roi\n");
+    free(roi_gray);
+    free(roi_edge);
+    for (int j = 0; j < n_variants; j++) logo_variant_free(&variants[j]);
+    free(frame);
+    free(jtext);
+    return 1;
+  }
+
+  roi_bgr_to_gray(frame, fw, fh, sx, sy, sw, sh, roi_gray);
+  gray_to_sobel_mag_u8(roi_gray, sw, sh, roi_edge);
+
+  double best = 0;
+  int best_vi = 0;
+  double best_luma = 0, best_sobel = 0;
+  int skipped = (tw0 >= sw || th0 >= sh);
+  if (!skipped) {
+    for (int vi = 0; vi < n_variants; vi++) {
+      double vg = match_max_ccoeff_normed_gray(roi_gray, sw, sh, variants[vi].gray, tw0, th0);
+      double ve = match_max_ccoeff_normed_gray(roi_edge, sw, sh, variants[vi].edge, tw0, th0);
+      double v = vg > ve ? vg : ve;
+      if (v > best) {
+        best = v;
+        best_vi = vi;
+        best_luma = vg;
+        best_sobel = ve;
+      }
+    }
+  }
+
+  int logo_present = (!skipped && best >= match_threshold) ? 1 : 0;
+  double conf_pct = best * 100.0;
+
+  ltm_log("probe: match=%.4f threshold=%.2f logo_present=%d ROI %dx%d tpl %dx%d\n", best, match_threshold,
+          logo_present, sw, sh, tw0, th0);
+
+  FILE *out = stdout;
+  fprintf(out, "{\n");
+  fprintf(out, "  \"mode\": \"single_frame\",\n");
+  fprintf(out, "  \"channel_id\": ");
+  jesc(channel_id, out);
+  fprintf(out, ",\n  \"source\": ");
+  jesc(frame_input, out);
+  fprintf(out, ",\n  \"logo\": %s,\n", logo_present ? "true" : "false");
+  fprintf(out, "  \"logo_present\": %s,\n", logo_present ? "true" : "false");
+  fprintf(out, "  \"match_score\": %.6f,\n", best);
+  fprintf(out, "  \"confidence_percent\": %.4f,\n", conf_pct);
+  fprintf(out, "  \"match_threshold\": %.6f,\n", match_threshold);
+  fprintf(out, "  \"best_variant_index\": %d,\n", best_vi);
+  fprintf(out, "  \"luma_score\": %.6f,\n", best_luma);
+  fprintf(out, "  \"sobel_score\": %.6f,\n", best_sobel);
+  fprintf(out, "  \"match_skipped\": %s,\n", skipped ? "true" : "false");
+  fprintf(out, "  \"frame_width\": %d,\n  \"frame_height\": %d,\n", fw, fh);
+  fprintf(out, "  \"search_roi_xywh\": [ %d, %d, %d, %d ],\n", sx, sy, sw, sh);
+  fprintf(out, "  \"logo_bbox_on_stream_xywh\": [ %d, %d, %d, %d ],\n", ox, oy, ow, oh);
+  fprintf(out, "  \"match_method\": \"max_variant_max_luma_or_Sobel_TM_CCOEFF_NORMED\"\n");
+  fprintf(out, "}\n");
+  fflush(out);
+
+  free(roi_gray);
+  free(roi_edge);
+  for (int j = 0; j < n_variants; j++) logo_variant_free(&variants[j]);
+  free(frame);
+  free(jtext);
+  return 0;
+}
+
 /* HH:MM:SS from media seconds (floored). For large timelines hours are not limited to two digits. */
 static void fmt_hhmmss(double sec, char *buf, size_t nbuf) {
   if (nbuf < 12) {
@@ -776,16 +970,21 @@ static int ffmpeg_one_frame_bgr(const char *url, int t_sec, int fw, int fh, uint
 
 static void print_usage(const char *prog) {
   fprintf(stderr,
-          "Usage: %s <m3u8_url> <channel_id> [options]\n"
+          "Usage:\n"
+          "  %s <m3u8_url> <channel_id> [options]     - HLS/VOD; writes output/ads/<id>.json\n"
+          "  %s <image.jpg|image.png|https://.../x.jpg> <channel_id> [options] - one frame; JSON on stdout\n"
+          "Options:\n"
           "  --max-seconds N\n"
-          "  --detector-output DIR\n"
+          "  --detector-output DIR\n",
+          prog, prog);
+  fprintf(stderr,
           "  --threshold 0..1   (default %.2f; lower = more permissive logo-present)\n"
           "  --search-pad-frac F  ROI padding around bbox as fraction of w/h (default %.2f)\n"
           "  --logo-jpg PATH    (replace output/<id>_logo.jpg; use a crop from the SAME encoder you scan)\n"
           "  --alt-logo-jpg PATH (extra template; repeat up to %d×; score = max over variants × max(luma, Sobel))\n"
           "  Reads ../logo-detector-features/output/<channel_id>.json and <channel_id>_logo.jpg (or DIR).\n"
-          "  Writes ./output/ads/<channel_id>.json\n",
-          prog, kDefaultMatchThreshold, kDefaultSearchPadFrac, MAX_LOGO_VARIANTS - 1);
+          "  Writes ./output/ads/<channel_id>.json (HLS only); single-frame mode writes JSON to stdout.\n",
+          kDefaultMatchThreshold, kDefaultSearchPadFrac, MAX_LOGO_VARIANTS - 1);
 }
 
 int main(int argc, char **argv) {
@@ -885,6 +1084,15 @@ int main(int argc, char **argv) {
     return 1;
   }
   const char *json_path = json_path_heap;
+
+  if (input_is_single_frame_probe(m3u8)) {
+    int pr = run_single_frame_probe(m3u8, channel_id, json_path, logo_path_heap, match_threshold,
+                                    search_pad_frac, logo_jpg_override, alt_logo_jpg, n_alt_logo);
+    free(json_path_heap);
+    free(logo_path_heap);
+    free(detector_root_alloc);
+    return pr;
+  }
 
   curl_global_init(CURL_GLOBAL_DEFAULT);
 

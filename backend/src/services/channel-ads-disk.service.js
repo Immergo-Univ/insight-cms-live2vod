@@ -120,6 +120,32 @@ export async function readChannelSnapshotById(channelId) {
 }
 
 /**
+ * Shallow merge into the channel snapshot (creates a minimal doc if missing).
+ * @param {string} channelId
+ * @param {Record<string, unknown>} patch
+ */
+export async function mergeChannelSnapshotFields(channelId, patch) {
+  const cur = await readChannelSnapshotById(channelId);
+  const base =
+    cur && typeof cur === "object"
+      ? cur
+      : {
+          version: 1,
+          channelId,
+          tenantId: patch.tenantId ?? "",
+          hlsBaseUrl: typeof patch.hlsBaseUrl === "string" ? patch.hlsBaseUrl : "",
+          ads: [],
+        };
+  const next = {
+    ...base,
+    ...patch,
+    channelId: base.channelId || channelId,
+    updatedAt: new Date().toISOString(),
+  };
+  await writeJsonAtomic(channelFilePath(channelId), next);
+}
+
+/**
  * @param {string} hlsStream full or base URL with path
  * @returns {Promise<object | null>}
  */
