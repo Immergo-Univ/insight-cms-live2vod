@@ -129,7 +129,9 @@ export async function loadFromDisk() {
       for (const [k, set] of Object.entries(migrated)) {
         processedSlotsByChannel.set(k, set);
       }
-      console.log("[logo-scan-state] Migrated processed hours → matcher-sized slots");
+      if (config.logoScan.verbose) {
+        console.log("[logo-scan-state] Migrated processed hours → matcher-sized slots");
+      }
     }
     if (data.backfill && typeof data.backfill === "object") {
       for (const [k, v] of Object.entries(data.backfill)) {
@@ -150,10 +152,12 @@ export async function loadFromDisk() {
         if (!Number.isNaN(n)) detectorSuccessAtMsByChannel.set(k, n);
       }
     }
-    console.log(
-      `[logo-scan-state] Loaded state: ${processedSlotsByChannel.size} channel(s), ${fragmentsByKey.size} fragment(s), ` +
-        `detectorCache=${detectorSuccessAtMsByChannel.size}`,
-    );
+    if (config.logoScan.verbose) {
+      console.log(
+        `[logo-scan-state] Loaded state: ${processedSlotsByChannel.size} channel(s), ${fragmentsByKey.size} fragment(s), ` +
+          `detectorCache=${detectorSuccessAtMsByChannel.size}`,
+      );
+    }
   } catch (e) {
     if (e.code !== "ENOENT") {
       console.warn("[logo-scan-state] Could not load state file:", e.message);

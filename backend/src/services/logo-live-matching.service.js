@@ -19,11 +19,67 @@ import {
 import { mergeChannelSnapshotFields, resolveHlsBaseUrl } from "./channel-ads-disk.service.js";
 
 /** Consecutive live samples without logo before an ad window opens (1 sample ~= 1s). */
-const MIN_ABSENT_TO_OPEN = 5;
+const MIN_ABSENT_TO_OPEN = 10;
+/** Seconds to rewind ad start from confirm time (logo was absent during hysteresis but not yet confirmed). */
+const AD_START_LOOKBACK_SEC = 10;
 const MIN_PRESENT_TO_CLOSE = 2;
 
 const detectorInFlight = new Map();
 const detectorRetryAfterEpoch = new Map();
+
+/** channelId -> { kind: 'ok'|'absent'|'error', count } — consecutive log streak per channel */
+const logoLiveLogStreak = new Map();
+
+/** Max code points for channel title in probe logs (Hebrew / long names truncated). */
+const LOGO_LIVE_PROBE_LABEL_MAX_CP = 22;
+
+/**
+ * @param {string} text
+ * @param {number} maxCp
+ */
+function truncateUnicodeCodePoints(text, maxCp) {
+  const chars = [...String(text)];
+  if (chars.length <= maxCp) return chars.join("");
+  return chars.slice(0, maxCp - 1).join("") + "\u2026";
+}
+
+/**
+ * Truncate then pad with spaces to maxCp so log lines stay aligned (monospace-friendly).
+ * @param {string} text
+ * @param {number} maxCp
+ */
+function formatLogoLiveProbeLabelSlot(text, maxCp) {
+  const t = truncateUnicodeCodePoints(text, maxCp);
+  const n = [...t].length;
+  return n < maxCp ? t + " ".repeat(maxCp - n) : t;
+}
+
+/**
+ * @param {LiveChannelState} st
+ * @param {string} channelId
+ */
+function logoLiveLabelSlot(st, channelId) {
+  const raw =
+    typeof st.title === "string" && st.title.trim() !== "" ? st.title.trim() : channelId;
+  return formatLogoLiveProbeLabelSlot(raw, LOGO_LIVE_PROBE_LABEL_MAX_CP);
+}
+
+/**
+ * @param {"ok" | "absent" | "error"} kind
+ * @param {{ adOpened?: boolean, adClosed?: boolean }} [flags] hysteresis: mark when ad window opens/closes
+ */
+function logLogoLiveStatus(st, channelId, kind, flags = {}) {
+  const prev = logoLiveLogStreak.get(channelId);
+  const count = prev && prev.kind === kind ? prev.count + 1 : 1;
+  logoLiveLogStreak.set(channelId, { kind, count });
+
+  const label = logoLiveLabelSlot(st, channelId);
+  const sym = kind === "ok" ? "✅" : kind === "absent" ? "❌" : "⚠️";
+  let line = `[logo-live] ${label}:  ${sym} (${count})`;
+  if (flags.adOpened) line += " -- AD start --";
+  if (flags.adClosed) line += " -- AD end --";
+  console.log(line);
+}
 
 /** Channel IDs that should keep probing (refreshed from API). */
 const liveChannelWanted = new Set();
@@ -144,7 +200,7 @@ function applyHysteresisSample(st, logoPresent, nowSec) {
     st.trueStreak = 0;
     if (!st.inAd && st.falseStreak >= MIN_ABSENT_TO_OPEN) {
       st.inAd = true;
-      st.adWindowStartEpoch = nowSec - (MIN_ABSENT_TO_OPEN - 1);
+      st.adWindowStartEpoch = Math.max(0, nowSec - AD_START_LOOKBACK_SEC);
       st.falseStreak = 0;
     }
   }
@@ -246,17 +302,13 @@ async function ensureDetectorArtifacts(channelId, hlsStream, st) {
 
   const run = (async () => {
     try {
-      console.log(
-        `[logo-live] logo-detector RUN channel=${channelId} (no template on disk; archive window for bbox only)`,
-      );
       const ok = await runLogoDetector(detectorUrl, channelId);
       if (!ok) {
         detectorRetryAfterEpoch.set(channelId, Math.floor(Date.now() / 1000) + 120);
         st.lastError = "logo_detector_failed";
-        console.error(`[logo-live] logo-detector FAILED channel=${channelId} — retry in ~120s`);
+        logLogoLiveStatus(st, channelId, "error");
       } else {
         detectorRetryAfterEpoch.delete(channelId);
-        console.log(`[logo-live] logo-detector DONE channel=${channelId}`);
       }
     } finally {
       detectorInFlight.delete(channelId);
@@ -309,13 +361,16 @@ async function tickChannel(channelId, st, tmpFramePath) {
     await grabOneFrameToFile(st.hlsStream, tmpFramePath, ffMs);
   } catch (e) {
     st.lastError = e.message;
-    console.warn(`[logo-live] ffmpeg ${channelId}: ${e.message}`);
+    logLogoLiveStatus(st, channelId, "error");
     return;
   }
 
-  const probe = await runProbeTemplateMatch(tmpFramePath, channelId);
+  const probe = await runProbeTemplateMatch(tmpFramePath, channelId, {
+    channelLabel: st.title,
+  });
   if (!probe) {
     st.lastError = "probe_failed";
+    logLogoLiveStatus(st, channelId, "error");
     return;
   }
 
@@ -323,7 +378,15 @@ async function tickChannel(channelId, st, tmpFramePath) {
   const score = typeof probe.match_score === "number" ? probe.match_score : 0;
   st.lastMatchScore = score;
   const logoPresent = skipped ? false : probe.logo === true || probe.logo_present === true;
+  const wasInAd = st.inAd;
   applyHysteresisSample(st, logoPresent, nowSec);
+  const adOpened = !wasInAd && st.inAd;
+  const adClosed = wasInAd && !st.inAd;
+  if (logoPresent) {
+    logLogoLiveStatus(st, channelId, "ok", { adClosed });
+  } else {
+    logLogoLiveStatus(st, channelId, "absent", { adOpened });
+  }
 
   await mergeChannelSnapshotFields(channelId, {
     tenantId: st.tenantId,
@@ -470,11 +533,6 @@ export function startLogoLiveMatchingService() {
   serviceRunning = true;
   loopPromise = discoveryLoop();
   loopPromise.catch((e) => console.error("[logo-live] fatal:", e));
-  console.log(
-    `[logo-live] Started per-channel loops intervalMs=${config.logoLiveMatching.intervalMs} ` +
-      `ffmpegTimeoutMs=${config.logoLiveMatching.ffmpegFrameTimeoutMs} discoveryMs=${config.logoLiveMatching.discoveryIntervalMs} ` +
-      `state=${config.logoLiveMatching.stateFilePath}`,
-  );
 }
 
 export function stopLogoLiveMatchingService() {

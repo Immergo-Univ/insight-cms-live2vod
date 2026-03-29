@@ -13,7 +13,9 @@ export async function ensureSession() {
 
   const { username, password } = validateCredentials();
 
-  console.log("[auth] Logging in to Insight API…");
+  if (process.env.INSIGHT_AUTH_VERBOSE === "true") {
+    console.log("[auth] Logging in to Insight API…");
+  }
 
   const response = await axios.post(
     `${config.insightApiBase}/cms/login`,
@@ -42,10 +44,12 @@ export async function ensureSession() {
 
   lastLoginAt = Date.now();
 
-  console.log(
-    `[auth] Session obtained — ${cachedSession.accounts.length} accounts, ` +
-      `${cachedSession.customers.length} customers. Next refresh in 10 min.`
-  );
+  if (process.env.INSIGHT_AUTH_VERBOSE === "true") {
+    console.log(
+      `[auth] Session obtained — ${cachedSession.accounts.length} accounts, ` +
+        `${cachedSession.customers.length} customers. Next refresh in 10 min.`
+    );
+  }
 
   return cachedSession;
 }

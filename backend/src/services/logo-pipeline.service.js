@@ -129,18 +129,21 @@ export async function runLogoDetector(m3u8Url, channelId) {
     console.error(`[logo-scan] Missing binary: ${bin} (build logo-detector-features)`);
     return false;
   }
-  console.log(
-    `[logo-scan] STAGE logo-detector RUNNING channel=${channelId} cwd=${cwd}\n` +
-      `[logo-scan]   argv: ${bin} <m3u8> ${channelId}`,
-  );
+  if (config.logoScan.verbose) {
+    console.log(
+      `[logo-scan] STAGE logo-detector RUNNING channel=${channelId} cwd=${cwd}\n` +
+        `[logo-scan]   argv: ${bin} <m3u8> ${channelId}`,
+    );
+  }
   try {
     await runExecutable(bin, [m3u8Url, channelId], {
       cwd,
       timeoutMs: config.logoScan.detectorTimeoutMs,
-      stdoutPrefix: "[logo-detector]",
-      stderrPrefix: "[logo-detector]",
+      /* stdout: optional progress; stderr is mostly ffmpeg/libav noise (e.g. HTTP connection reuse). */
+      stdoutPrefix: config.logoScan.verbose ? "[logo-detector]" : null,
+      stderrPrefix: null,
     });
-    console.log(`[logo-scan] STAGE logo-detector DONE channel=${channelId}`);
+    if (config.logoScan.verbose) console.log(`[logo-scan] STAGE logo-detector DONE channel=${channelId}`);
     return true;
   } catch (e) {
     console.error(`[logo-scan] STAGE logo-detector FAILED channel=${channelId}: ${e.message}`);
@@ -179,12 +182,14 @@ export async function runTemplateMatcher(m3u8Url, channelId, ctx = {}) {
       ? `tenant=${ctx.tenantId} channel=${channelId} slotUTC=${ctx.slotStartEpoch}`
       : `channel=${channelId}`;
   const label = ctx.label ? `${ctx.label} ` : "";
-  console.log(
-    `[logo-scan] STAGE logo-template-matching RUNNING ${label}${scope}\n` +
-      `[logo-scan]   cwd=${cwd}\n` +
-      `[logo-scan]   (live progress below — one line per sample from the tool)\n` +
-      `[logo-scan]   playlist: ${m3u8Url.slice(0, 120)}${m3u8Url.length > 120 ? "…" : ""}`,
-  );
+  if (config.logoScan.verbose) {
+    console.log(
+      `[logo-scan] STAGE logo-template-matching RUNNING ${label}${scope}\n` +
+        `[logo-scan]   cwd=${cwd}\n` +
+        `[logo-scan]   (live progress below — one line per sample from the tool)\n` +
+        `[logo-scan]   playlist: ${m3u8Url.slice(0, 120)}${m3u8Url.length > 120 ? "…" : ""}`,
+    );
+  }
   try {
     await runExecutable(bin, args, {
       cwd,
@@ -195,10 +200,12 @@ export async function runTemplateMatcher(m3u8Url, channelId, ctx = {}) {
     const outJson = path.join(cwd, "output", "ads", `${channelId}.json`);
     const raw = await fs.readFile(outJson, "utf8");
     const data = JSON.parse(raw);
-    console.log(
-      `[logo-scan] STAGE logo-template-matching DONE ${label}${scope} ` +
-        `scanned_s=${data.scanned_duration_seconds ?? "?"} ad_segments=${(data.ad_segments || []).length}`,
-    );
+    if (config.logoScan.verbose) {
+      console.log(
+        `[logo-scan] STAGE logo-template-matching DONE ${label}${scope} ` +
+          `scanned_s=${data.scanned_duration_seconds ?? "?"} ad_segments=${(data.ad_segments || []).length}`,
+      );
+    }
     const pdt = data.media_timeline_zero_epoch_utc;
     const mediaTimelineZeroEpochUtc =
       pdt != null && Number.isFinite(Number(pdt)) ? Number(pdt) : null;
@@ -215,16 +222,22 @@ export async function runTemplateMatcher(m3u8Url, channelId, ctx = {}) {
 
 /**
  * Single-frame probe: local path or image URL + channel_id. Parses JSON from stdout.
+ * @param {{ channelLabel?: string }} [options] channelLabel = human name for logs (e.g. API title); falls back to channelId
  * @returns {Promise<Record<string, unknown> | null>}
  */
-export async function runProbeTemplateMatch(framePathOrUrl, channelId) {
+export async function runProbeTemplateMatch(framePathOrUrl, channelId, options = {}) {
+  const rawLabel = options.channelLabel;
+  const logName =
+    typeof rawLabel === "string" && rawLabel.trim() !== "" ? rawLabel.trim() : channelId;
+
   const bin = config.logoScan.logoMatcherBin;
   const cwd = config.logoScan.logoMatcherDir;
   if (!(await fileExists(bin))) {
-    console.error(`[logo-live] Missing binary: ${bin} (build logo-template-matching)`);
+    console.error(`[logo-live] probe ${JSON.stringify(logName)} error: missing matcher binary`);
     return null;
   }
   const detectorOutputDir = path.join(config.logoScan.logoDetectorDir, "output");
+  /* Matcher is stderr-silent by default (--verbose to enable progress). stderrPrefix null avoids double tags. */
   const args = [
     framePathOrUrl,
     channelId,
@@ -240,7 +253,7 @@ export async function runProbeTemplateMatch(framePathOrUrl, channelId) {
       cwd,
       timeoutMs: config.logoLiveMatching.probeTimeoutMs,
       stdoutPrefix: null,
-      stderrPrefix: "[logo-template-matching]",
+      stderrPrefix: null,
     });
     if (stderr && process.env.LOGO_LIVE_DEBUG === "true") {
       console.error(stderr.slice(-2000));
@@ -249,12 +262,13 @@ export async function runProbeTemplateMatch(framePathOrUrl, channelId) {
     const start = raw.indexOf("{");
     const end = raw.lastIndexOf("}");
     if (start < 0 || end <= start) {
-      console.error(`[logo-live] probe: no JSON in stdout for channel=${channelId}`);
+      console.error(`[logo-live] probe ${JSON.stringify(logName)} error: no JSON`);
       return null;
     }
-    return JSON.parse(raw.slice(start, end + 1));
+    const probe = JSON.parse(raw.slice(start, end + 1));
+    return probe;
   } catch (e) {
-    console.error(`[logo-live] probe failed channel=${channelId}: ${e.message}`);
+    console.error(`[logo-live] probe ${JSON.stringify(logName)} error: ${e.message}`);
     return null;
   }
 }

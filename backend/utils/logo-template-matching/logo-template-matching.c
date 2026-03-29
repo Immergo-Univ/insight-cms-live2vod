@@ -3,7 +3,9 @@
  *
  * - Resolves master playlist (highest BANDWIDTH) via libcurl.
  * - Loads logo-detector-features output: output/<channel_id>.json + <channel_id>_logo.jpg
- * - One frame every 10 s; ffmpeg uses -i then -ss for accurate timeline (not keyframe-only input seek).
+ * - VOD: one frame every 10 s; ffmpeg uses -i then -ss for accurate timeline (not keyframe-only input seek).
+ * - Live / no format duration: if ffprobe has no duration and --max-seconds is not set, decodes exactly one
+ *   frame from the HLS live edge (last segment in the playlist at fetch time; -live_start_index -1).
  * - Template match = max( TM_CCOEFF_NORMED on luma , same on Sobel magnitude ) per variant; best over variants.
  * - Use --logo-jpg / --alt-logo-jpg when the on-air bug differs from detector output/<id>_logo.jpg.
  * - Ads = hysteresis on samples where logo is absent.
@@ -14,7 +16,8 @@
  *   gcc -O2 -std=c11 -Wall -Wextra logo-template-matching.c -o logo-template-matching -lcurl -lm
  *
  * Usage:
- *   HLS/VOD: ./logo-template-matching <m3u8_url> <channel_id> [--max-seconds N] ...
+ *   HLS/VOD: ./logo-template-matching <m3u8_url> <channel_id> [--max-seconds N] [--debug] [--verbose] ...
+ *   --debug writes JPEG(s) of each decoded scan frame to output/debug/; if logo present, draws red box on match
  *   Single frame (stdout JSON): ./logo-template-matching <image.jpg|https://.../x.png> <channel_id> ...
  *     (not .m3u8); uses same detector JSON + template as HLS mode.
  *
@@ -39,12 +42,15 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
 
 static const int kSampleIntervalSec = 10;
-static const int kMinAbsentToOpen = 5;
+static const int kMinAbsentToOpen = 10;
 static const int kMinPresentToClose = 2;
+/* Media seconds to extend ad start earlier once N consecutive absent samples confirm an ad. */
+static const double kAdStartLookbackSec = 10.0;
 /* Lower threshold => more samples classified as logo present (fewer false “ad” gaps). */
 static const double kDefaultMatchThreshold = 0.40;
 /* Extra margin around scaled logo_bbox for sliding-window search (fraction of bbox w/h). */
@@ -58,7 +64,11 @@ typedef struct {
   size_t cap;
 } DynBuf;
 
+/** Default 1: no progress on stderr. Cleared by --verbose or --debug; set by --quiet. */
+static int g_ltm_quiet = 1;
+
 static void ltm_log(const char *fmt, ...) {
+  if (g_ltm_quiet) return;
   va_list ap;
   va_start(ap, fmt);
   fprintf(stderr, "[logo-template-matching] ");
@@ -78,9 +88,10 @@ static void dyn_free(DynBuf *b) {
 static int dyn_app(DynBuf *b, const void *p, size_t n) {
   if (!n) return 0;
   size_t need = b->len + n;
-  while (need > b->cap) {
+  /* Reserve +1 for trailing NUL — writing b->data[need] must stay inside allocation. */
+  while (need + 1 > b->cap) {
     size_t nc = b->cap ? b->cap * 2 : 4096;
-    if (nc < need) nc = need;
+    if (nc < need + 1) nc = need + 1;
     char *nb = realloc(b->data, nc);
     if (!nb) return -1;
     b->data = nb;
@@ -288,7 +299,7 @@ static int ffprobe_wh(const char *url, int *w, int *h, char **err) {
   *err = NULL;
   char cmd[PATH_MAX + 512];
   snprintf(cmd, sizeof cmd,
-           "ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of json '%s' 2>/dev/null",
+           "ffprobe -v quiet -select_streams v:0 -show_entries stream=width,height -of json '%s' 2>/dev/null",
            url);
   FILE *fp = popen(cmd, "r");
   if (!fp) {
@@ -311,6 +322,10 @@ static int ffprobe_wh(const char *url, int *w, int *h, char **err) {
     *err = sdup("ffprobe missing width/height");
     return -1;
   }
+  if (*w < 1 || *h < 1 || *w > 8192 || *h > 8192) {
+    *err = sdup("ffprobe implausible width/height");
+    return -1;
+  }
   return 0;
 }
 
@@ -320,7 +335,7 @@ static int ffprobe_duration_sec(const char *url, double *dur, char **err) {
   *dur = 0;
   char cmd[PATH_MAX + 512];
   snprintf(cmd, sizeof cmd,
-           "ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 '%s' "
+           "ffprobe -v quiet -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 '%s' "
            "2>/dev/null",
            url);
   FILE *fp = popen(cmd, "r");
@@ -397,11 +412,17 @@ static void roi_bgr_to_gray(const uint8_t *frame_bgr, int fw, int fh, int rx, in
     }
 }
 
-/* TM_CCOEFF_NORMED on single-channel ROI (template tw x th slides inside rw x rh). */
+/* TM_CCOEFF_NORMED on single-channel ROI (template tw x th slides inside rw x rh).
+ * If out_rx/out_ry non-NULL, set to top-left of best-scoring placement in ROI coords. */
 static double match_max_ccoeff_normed_gray(const uint8_t *roi, int rw, int rh, const uint8_t *tpl, int tw,
-                                           int th) {
-  if (tw >= rw || th >= rh) return 0;
+                                           int th, int *out_rx, int *out_ry) {
+  if (tw >= rw || th >= rh) {
+    if (out_rx) *out_rx = 0;
+    if (out_ry) *out_ry = 0;
+    return 0;
+  }
   double best = -1;
+  int bx = 0, by = 0;
   int n = tw * th;
   for (int y = 0; y + th <= rh; y++)
     for (int x = 0; x + tw <= rw; x++) {
@@ -426,8 +447,14 @@ static double match_max_ccoeff_normed_gray(const uint8_t *roi, int rw, int rh, c
       double den_i = sum_i2 - nch * mean_i * mean_i;
       if (den_t <= 1e-9 || den_i <= 1e-9) continue;
       double corr = num / sqrt(den_t * den_i);
-      if (corr > best) best = corr;
+      if (corr > best) {
+        best = corr;
+        bx = x;
+        by = y;
+      }
     }
+  if (out_rx) *out_rx = bx;
+  if (out_ry) *out_ry = by;
   return best < 0 ? 0 : best;
 }
 
@@ -536,7 +563,7 @@ static int load_image_bgr_via_ffmpeg(const char *path, int *w, int *h, uint8_t *
   *err = NULL;
   char cmd0[PATH_MAX + 256];
   snprintf(cmd0, sizeof cmd0,
-           "ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of json '%s' 2>/dev/null",
+           "ffprobe -v quiet -select_streams v:0 -show_entries stream=width,height -of json '%s' 2>/dev/null",
            path);
   FILE *pf = popen(cmd0, "r");
   if (!pf) {
@@ -556,7 +583,7 @@ static int load_image_bgr_via_ffmpeg(const char *path, int *w, int *h, uint8_t *
   dyn_free(&jb);
   char cmd1[PATH_MAX + 256];
   snprintf(cmd1, sizeof cmd1,
-           "ffmpeg -nostdin -hide_banner -loglevel error -i '%s' -f rawvideo -pix_fmt bgr24 -", path);
+           "ffmpeg -nostdin -hide_banner -loglevel quiet -i '%s' -f rawvideo -pix_fmt bgr24 -", path);
   FILE *fp = popen(cmd1, "r");
   if (!fp) {
     *err = sdup("ffmpeg image");
@@ -655,6 +682,86 @@ static int load_logo_variant(const char *path, int ow, int oh, LogoVariant *dst,
   return 0;
 }
 
+/* Best score over variants; v = vg when vg>=ve else ve (tie favors luma). out_rx/ry = template top-left in ROI. */
+static double match_logo_variants_best(const uint8_t *roi_gray, const uint8_t *roi_edge, int sw, int sh,
+                                       const LogoVariant *variants, int n_variants, int tw0, int th0,
+                                       int *out_rx, int *out_ry) {
+  double best = 0;
+  int rx = 0, ry = 0;
+  if (tw0 >= sw || th0 >= sh) {
+    if (out_rx) *out_rx = 0;
+    if (out_ry) *out_ry = 0;
+    return 0;
+  }
+  for (int vi = 0; vi < n_variants; vi++) {
+    int gx, gy, ex, ey;
+    double vg = match_max_ccoeff_normed_gray(roi_gray, sw, sh, variants[vi].gray, tw0, th0, &gx, &gy);
+    double ve = match_max_ccoeff_normed_gray(roi_edge, sw, sh, variants[vi].edge, tw0, th0, &ex, &ey);
+    double v = vg >= ve ? vg : ve;
+    if (v > best) {
+      best = v;
+      rx = vg >= ve ? gx : ex;
+      ry = vg >= ve ? gy : ey;
+    }
+  }
+  if (out_rx) *out_rx = rx;
+  if (out_ry) *out_ry = ry;
+  return best;
+}
+
+static void bgr_draw_rect_outline(uint8_t *bgr, int fw, int fh, int x, int y, int rw, int rh, int thick) {
+  uint8_t bb = 0, gg = 0, rr = 255; /* red in BGR */
+  if (thick < 1) thick = 1;
+  if (rw < 1 || rh < 1) return;
+  int x0 = x;
+  int y0 = y;
+  int x1 = x + rw - 1;
+  int y1 = y + rh - 1;
+  if (x0 >= fw || y0 >= fh || x1 < 0 || y1 < 0) return;
+  if (x0 < 0) x0 = 0;
+  if (y0 < 0) y0 = 0;
+  if (x1 >= fw) x1 = fw - 1;
+  if (y1 >= fh) y1 = fh - 1;
+  if (x1 < x0 || y1 < y0) return;
+  for (int t = 0; t < thick; t++) {
+    int yt = y0 + t;
+    int yb = y1 - t;
+    int xl = x0 + t;
+    int xr = x1 - t;
+    if (yt > yb || xl > xr) break;
+    for (int xi = xl; xi <= xr; xi++) {
+      if (xi < 0 || xi >= fw) continue;
+      if (yt >= 0 && yt < fh) {
+        int j = (yt * fw + xi) * 3;
+        bgr[j] = bb;
+        bgr[j + 1] = gg;
+        bgr[j + 2] = rr;
+      }
+      if (yb >= 0 && yb < fh) {
+        int j = (yb * fw + xi) * 3;
+        bgr[j] = bb;
+        bgr[j + 1] = gg;
+        bgr[j + 2] = rr;
+      }
+    }
+    for (int yi = yt; yi <= yb; yi++) {
+      if (yi < 0 || yi >= fh) continue;
+      if (xl >= 0 && xl < fw) {
+        int jL = (yi * fw + xl) * 3;
+        bgr[jL] = bb;
+        bgr[jL + 1] = gg;
+        bgr[jL + 2] = rr;
+      }
+      if (xr >= 0 && xr < fw) {
+        int jR = (yi * fw + xr) * 3;
+        bgr[jR] = bb;
+        bgr[jR + 1] = gg;
+        bgr[jR + 2] = rr;
+      }
+    }
+  }
+}
+
 static void find_ad_windows(const uint8_t *present, int n, int min_a, int min_p, int *nwin, int **starts,
                             int **ends) {
   *nwin = 0;
@@ -743,6 +850,9 @@ static int path_looks_like_image_ext(const char *path_no_query) {
          ends_with_ignore_case(path_no_query, ".bmp");
 }
 
+static int ensure_dir(const char *path);
+static int save_bgr_frame_jpeg(const char *path, int w, int h, const uint8_t *bgr, char **err);
+
 /* True => first positional is an image file/URL, not an HLS playlist. */
 static int input_is_single_frame_probe(const char *s) {
   if (strcasestr(s, ".m3u8") != NULL) return 0;
@@ -764,7 +874,8 @@ static int input_is_single_frame_probe(const char *s) {
  */
 static int run_single_frame_probe(const char *frame_input, const char *channel_id, const char *json_path,
                                   const char *logo_path_default, double match_threshold, double search_pad_frac,
-                                  const char *logo_jpg_override, const char **alt_logo_jpg, int n_alt_logo) {
+                                  const char *logo_jpg_override, const char **alt_logo_jpg, int n_alt_logo,
+                                  int debug_save_frames) {
   char *err = NULL;
   char *jtext = NULL;
   if (read_file_all(json_path, &jtext, &err) != 0) {
@@ -852,26 +963,46 @@ static int run_single_frame_probe(const char *frame_input, const char *channel_i
   roi_bgr_to_gray(frame, fw, fh, sx, sy, sw, sh, roi_gray);
   gray_to_sobel_mag_u8(roi_gray, sw, sh, roi_edge);
 
+  int win_rx = 0, win_ry = 0;
   double best = 0;
   int best_vi = 0;
   double best_luma = 0, best_sobel = 0;
   int skipped = (tw0 >= sw || th0 >= sh);
   if (!skipped) {
     for (int vi = 0; vi < n_variants; vi++) {
-      double vg = match_max_ccoeff_normed_gray(roi_gray, sw, sh, variants[vi].gray, tw0, th0);
-      double ve = match_max_ccoeff_normed_gray(roi_edge, sw, sh, variants[vi].edge, tw0, th0);
-      double v = vg > ve ? vg : ve;
+      int gx, gy, ex, ey;
+      double vg = match_max_ccoeff_normed_gray(roi_gray, sw, sh, variants[vi].gray, tw0, th0, &gx, &gy);
+      double ve = match_max_ccoeff_normed_gray(roi_edge, sw, sh, variants[vi].edge, tw0, th0, &ex, &ey);
+      double v = vg >= ve ? vg : ve;
       if (v > best) {
         best = v;
         best_vi = vi;
         best_luma = vg;
         best_sobel = ve;
+        win_rx = vg >= ve ? gx : ex;
+        win_ry = vg >= ve ? gy : ey;
       }
     }
   }
 
   int logo_present = (!skipped && best >= match_threshold) ? 1 : 0;
   double conf_pct = best * 100.0;
+
+  if (debug_save_frames) {
+    if (ensure_dir("output") == 0 && ensure_dir("output/debug") == 0) {
+      char dbgpath[PATH_MAX];
+      snprintf(dbgpath, sizeof dbgpath, "output/debug/%s_probe.jpg", channel_id);
+      if (logo_present && !skipped)
+        bgr_draw_rect_outline(frame, fw, fh, sx + win_rx, sy + win_ry, tw0, th0, 3);
+      if (save_bgr_frame_jpeg(dbgpath, fw, fh, frame, &err) != 0) {
+        ltm_log("debug: could not save %s: %s\n", dbgpath, err ? err : "?");
+        free(err);
+        err = NULL;
+      } else
+        ltm_log("debug: wrote %s%s\n", dbgpath, logo_present && !skipped ? " (red box = match)" : "");
+    } else
+      ltm_log("debug: mkdir output/debug failed\n");
+  }
 
   ltm_log("probe: match=%.4f threshold=%.2f logo_present=%d ROI %dx%d tpl %dx%d\n", best, match_threshold,
           logo_present, sw, sh, tw0, th0);
@@ -950,7 +1081,7 @@ static int ffmpeg_one_frame_bgr(const char *url, int t_sec, int fw, int fh, uint
   /* -ss AFTER -i: timeline-accurate frame for VOD/HLS. -ss before -i jumps to keyframes and can land
    * before the target (e.g. always pre-logo in a short GOP clip). Slower but correct for ad detection. */
   snprintf(cmd, sizeof cmd,
-           "ffmpeg -nostdin -hide_banner -loglevel error -i '%s' -ss %d -frames:v 1 -f rawvideo -pix_fmt "
+           "ffmpeg -nostdin -hide_banner -loglevel quiet -i '%s' -ss %d -frames:v 1 -f rawvideo -pix_fmt "
            "bgr24 -",
            url, t_sec);
   FILE *fp = popen(cmd, "r");
@@ -968,14 +1099,70 @@ static int ffmpeg_one_frame_bgr(const char *url, int t_sec, int fw, int fh, uint
   return 0;
 }
 
+/**
+ * One BGR frame from the current end of an HLS playlist (live / sliding window).
+ * Uses the HLS demuxer live_start_index -1 (last segment listed when the playlist was read).
+ */
+static int ffmpeg_hls_last_frame_bgr(const char *url, int fw, int fh, uint8_t *frame, char **err) {
+  *err = NULL;
+  char cmd[FFMPEG_CMD_CAP];
+  snprintf(cmd, sizeof cmd,
+           "ffmpeg -nostdin -hide_banner -loglevel quiet -live_start_index -1 -flags low_delay "
+           "-fflags nobuffer -i '%s' -an -sn -dn -frames:v 1 -f rawvideo -pix_fmt bgr24 -",
+           url);
+  FILE *fp = popen(cmd, "r");
+  if (!fp) {
+    *err = sdup("popen ffmpeg hls last frame");
+    return -1;
+  }
+  size_t need = (size_t)fw * fh * 3;
+  size_t n = fread(frame, 1, need, fp);
+  pclose(fp);
+  if (n != need) {
+    *err = sdup("short frame (hls live edge)");
+    return -1;
+  }
+  return 0;
+}
+
+/** Write one BGR24 full frame to a JPEG via ffmpeg (path should be safe for shell single quotes). */
+static int save_bgr_frame_jpeg(const char *path, int w, int h, const uint8_t *bgr, char **err) {
+  *err = NULL;
+  char cmd[FFMPEG_CMD_CAP];
+  snprintf(cmd, sizeof cmd,
+           "ffmpeg -y -nostdin -hide_banner -loglevel quiet -f rawvideo -pixel_format bgr24 "
+           "-video_size %dx%d -i - -frames:v 1 -q:v 2 '%s'",
+           w, h, path);
+  FILE *fp = popen(cmd, "w");
+  if (!fp) {
+    *err = sdup("popen ffmpeg save debug frame");
+    return -1;
+  }
+  size_t need = (size_t)w * h * 3;
+  size_t nw = fwrite(bgr, 1, need, fp);
+  int pc = pclose(fp);
+  if (nw != need) {
+    *err = sdup("short write to ffmpeg (debug jpeg)");
+    return -1;
+  }
+  if (pc == -1 || !WIFEXITED(pc) || WEXITSTATUS(pc) != 0) {
+    *err = sdup("ffmpeg jpeg encode failed");
+    return -1;
+  }
+  return 0;
+}
+
 static void print_usage(const char *prog) {
   fprintf(stderr,
           "Usage:\n"
           "  %s <m3u8_url> <channel_id> [options]     - HLS/VOD; writes output/ads/<id>.json\n"
           "  %s <image.jpg|image.png|https://.../x.jpg> <channel_id> [options] - one frame; JSON on stdout\n"
           "Options:\n"
-          "  --max-seconds N\n"
-          "  --detector-output DIR\n",
+          "  --max-seconds N  (optional; if format has no duration, omit for last-HLS-frame-only scan)\n"
+          "  --detector-output DIR\n"
+          "  --debug            save JPEG(s) under output/debug/; red outline = winning template location if logo\n"
+          "  --verbose          progress logs on stderr ([logo-template-matching] lines; default is silent)\n"
+          "  --quiet            suppress progress logs (default; JSON on stdout unchanged)\n",
           prog, prog);
   fprintf(stderr,
           "  --threshold 0..1   (default %.2f; lower = more permissive logo-present)\n"
@@ -1001,9 +1188,16 @@ int main(int argc, char **argv) {
   char *detector_root_alloc = NULL;
   char *json_path_heap = NULL;
   char *logo_path_heap = NULL;
+  int debug_save_frames = 0;
 
   for (int i = 1; i < argc; i++) {
-    if (strcmp(argv[i], "--max-seconds") == 0 && i + 1 < argc) {
+    if (strcmp(argv[i], "--quiet") == 0) {
+      g_ltm_quiet = 1;
+    } else if (strcmp(argv[i], "--verbose") == 0) {
+      g_ltm_quiet = 0;
+    } else if (strcmp(argv[i], "--debug") == 0) {
+      debug_save_frames = 1;
+    } else if (strcmp(argv[i], "--max-seconds") == 0 && i + 1 < argc) {
       max_seconds = strtod(argv[++i], NULL);
       have_max = 1;
     } else if (strcmp(argv[i], "--detector-output") == 0 && i + 1 < argc) {
@@ -1050,6 +1244,8 @@ int main(int argc, char **argv) {
     return 1;
   }
 
+  if (debug_save_frames) g_ltm_quiet = 0;
+
   const char *detector_root = detector_dir_opt;
   if (!detector_root) {
     const char *env = getenv("LOGO_TM_DETECTOR_OUTPUT");
@@ -1087,7 +1283,8 @@ int main(int argc, char **argv) {
 
   if (input_is_single_frame_probe(m3u8)) {
     int pr = run_single_frame_probe(m3u8, channel_id, json_path, logo_path_heap, match_threshold,
-                                    search_pad_frac, logo_jpg_override, alt_logo_jpg, n_alt_logo);
+                                    search_pad_frac, logo_jpg_override, alt_logo_jpg, n_alt_logo,
+                                    debug_save_frames);
     free(json_path_heap);
     free(logo_path_heap);
     free(detector_root_alloc);
@@ -1137,22 +1334,18 @@ int main(int argc, char **argv) {
   free(err);
 
   double dur = 0;
+  int live_last_frame_only = 0;
   if (ffprobe_duration_sec(resolved, &dur, &err) != 0) {
     free(err);
     err = NULL;
-    if (!have_max || max_seconds <= 0) {
-      fprintf(stderr,
-              "Could not read duration; pass --max-seconds for live/open-ended HLS.\n");
-      free(json_path_heap);
-      free(logo_path_heap);
-      free(detector_root_alloc);
-      free(resolved);
-      dyn_free(&pl);
-      curl_global_cleanup();
-      return 1;
+    if (have_max && max_seconds > 0) {
+      dur = max_seconds;
+      ltm_log("using --max-seconds=%.0f (no format duration)\n", dur);
+    } else {
+      live_last_frame_only = 1;
+      dur = 0;
+      ltm_log("no format duration: logo check on HLS live edge only (last segment in playlist)\n");
     }
-    dur = max_seconds;
-    ltm_log("using --max-seconds=%.0f (no format duration)\n", dur);
   } else {
     if (have_max && max_seconds > 0 && max_seconds < dur) dur = max_seconds;
   }
@@ -1242,8 +1435,13 @@ int main(int argc, char **argv) {
   int th0 = oh;
 
   int interval = kSampleIntervalSec;
-  int num_samples = (int)ceil(dur / (double)interval);
-  if (num_samples < 1) num_samples = 1;
+  int num_samples;
+  if (live_last_frame_only) {
+    num_samples = 1;
+  } else {
+    num_samples = (int)ceil(dur / (double)interval);
+    if (num_samples < 1) num_samples = 1;
+  }
 
   uint8_t *present = calloc((size_t)num_samples, 1);
   uint8_t *frame = malloc((size_t)fw * fh * 3);
@@ -1266,10 +1464,15 @@ int main(int argc, char **argv) {
     return 1;
   }
   for (int i = 0; i < num_samples; i++) present[i] = 1;
+  double last_frame_match_score = 0;
 
-  ltm_log("video %dx%d ref %dx%d ROI %d,%d %dx%d tpl %dx%d variants=%d samples=%d every %ds threshold=%.2f "
-          "(max luma/Sobel per variant, accurate seek)\n",
-          fw, fh, ref_w, ref_h, sx, sy, sw, sh, tw0, th0, n_variants, num_samples, interval, match_threshold);
+  if (live_last_frame_only)
+    ltm_log("video %dx%d ref %dx%d ROI %d,%d %dx%d tpl %dx%d variants=%d mode=live_last_frame threshold=%.2f\n",
+            fw, fh, ref_w, ref_h, sx, sy, sw, sh, tw0, th0, n_variants, match_threshold);
+  else
+    ltm_log("video %dx%d ref %dx%d ROI %d,%d %dx%d tpl %dx%d variants=%d samples=%d every %ds threshold=%.2f "
+            "(max luma/Sobel per variant, accurate seek)\n",
+            fw, fh, ref_w, ref_h, sx, sy, sw, sh, tw0, th0, n_variants, num_samples, interval, match_threshold);
 
   /* Log wall_utc from playlist URL startTime + media_t only (ingest still may use PDT in JSON). */
   int64_t wall_time_anchor_utc = url_start_unix;
@@ -1277,9 +1480,20 @@ int main(int argc, char **argv) {
   if (have_wall_time_utc)
     ltm_log("per-sample wall_utc = url startTime + media_t\n");
 
+  if (debug_save_frames && (ensure_dir("output") != 0 || ensure_dir("output/debug") != 0))
+    ltm_log("debug: could not mkdir output/debug — frame JPEG saves may fail\n");
+
   for (int i = 0; i < num_samples; i++) {
     int t = i * interval;
-    if (ffmpeg_one_frame_bgr(resolved, t, fw, fh, frame, &err) != 0) {
+    if (live_last_frame_only) {
+      if (ffmpeg_hls_last_frame_bgr(resolved, fw, fh, frame, &err) != 0) {
+        ltm_log("live_edge decode failed: %s — marking absent\n", err ? err : "?");
+        free(err);
+        err = NULL;
+        present[i] = 0;
+        continue;
+      }
+    } else if (ffmpeg_one_frame_bgr(resolved, t, fw, fh, frame, &err) != 0) {
       ltm_log("t=%ds decode failed: %s — marking absent\n", t, err ? err : "?");
       if (have_wall_time_utc) {
         char wbuf[48];
@@ -1294,20 +1508,39 @@ int main(int argc, char **argv) {
     }
     roi_bgr_to_gray(frame, fw, fh, sx, sy, sw, sh, roi_gray);
     gray_to_sobel_mag_u8(roi_gray, sw, sh, roi_edge);
-    double best = 0;
-    for (int vi = 0; vi < n_variants; vi++) {
-      double vg = match_max_ccoeff_normed_gray(roi_gray, sw, sh, variants[vi].gray, tw0, th0);
-      double ve = match_max_ccoeff_normed_gray(roi_edge, sw, sh, variants[vi].edge, tw0, th0);
-      double v = vg > ve ? vg : ve;
-      if (v > best) best = v;
-    }
+    int win_rx = 0, win_ry = 0;
+    double best =
+        match_logo_variants_best(roi_gray, roi_edge, sw, sh, variants, n_variants, tw0, th0, &win_rx, &win_ry);
+    int tpl_skip = (tw0 >= sw || th0 >= sh);
     present[i] = (best >= match_threshold) ? 1 : 0;
-    ltm_log("t=%6ds match=%.3f present=%d\n", t, best, (int)present[i]);
-    if (have_wall_time_utc) {
-      char wbuf[48];
-      int64_t we = wall_time_anchor_utc + (int64_t)t;
-      format_unix_utc_iso(we, wbuf, sizeof wbuf);
-      ltm_log("       wall_utc=%s epoch=%lld\n", wbuf, (long long)we);
+    if (debug_save_frames) {
+      char dbgpath[PATH_MAX];
+      if (live_last_frame_only)
+        snprintf(dbgpath, sizeof dbgpath, "output/debug/%s_live_edge.jpg", channel_id);
+      else
+        snprintf(dbgpath, sizeof dbgpath, "output/debug/%s_t%ds.jpg", channel_id, t);
+      if (present[i] && !tpl_skip)
+        bgr_draw_rect_outline(frame, fw, fh, sx + win_rx, sy + win_ry, tw0, th0, 3);
+      if (save_bgr_frame_jpeg(dbgpath, fw, fh, frame, &err) != 0) {
+        ltm_log("debug: could not save %s: %s\n", dbgpath, err ? err : "?");
+        free(err);
+        err = NULL;
+      } else
+        ltm_log("debug: wrote %s%s\n", dbgpath,
+                present[i] && !tpl_skip ? " (red box = match)" : "");
+    }
+    if (live_last_frame_only) {
+      last_frame_match_score = best;
+      ltm_log("live_edge match=%.3f present=%d\n", best, (int)present[i]);
+    }
+    else {
+      ltm_log("t=%6ds match=%.3f present=%d\n", t, best, (int)present[i]);
+      if (have_wall_time_utc) {
+        char wbuf[48];
+        int64_t we = wall_time_anchor_utc + (int64_t)t;
+        format_unix_utc_iso(we, wbuf, sizeof wbuf);
+        ltm_log("       wall_utc=%s epoch=%lld\n", wbuf, (long long)we);
+      }
     }
   }
 
@@ -1376,13 +1609,25 @@ int main(int argc, char **argv) {
   fprintf(fp, "  \"video_size_wh\": [ %d, %d ],\n", fw, fh);
   fprintf(fp, "  \"search_roi_xywh\": [ %d, %d, %d, %d ],\n", sx, sy, sw, sh);
   fprintf(fp, "  \"logo_bbox_on_stream_xywh\": [ %d, %d, %d, %d ],\n", ox, oy, ow, oh);
-  fprintf(fp, "  \"sample_interval_seconds\": %d,\n", interval);
+  fprintf(fp, "  \"scan_mode\": \"%s\",\n", live_last_frame_only ? "hls_last_frame" : "vod_samples");
+  if (live_last_frame_only) {
+    fprintf(fp, "  \"sample_interval_seconds\": null,\n");
+    fprintf(fp, "  \"last_frame_logo_present\": %s,\n", present[0] ? "true" : "false");
+    fprintf(fp, "  \"last_frame_match_score\": %g,\n", last_frame_match_score);
+  } else {
+    fprintf(fp, "  \"sample_interval_seconds\": %d,\n", interval);
+  }
   fprintf(fp, "  \"match_threshold\": %g,\n", match_threshold);
-  fprintf(fp,
-          "  \"match_method\": \"C_max_variant_max_luma_or_Sobel_TM_CCOEFF_NORMED_accurate_ffmpeg_seek\",\n");
+  fprintf(fp, "  \"match_method\": \"%s\",\n",
+          live_last_frame_only ? "C_max_variant_max_luma_or_Sobel_TM_CCOEFF_NORMED_hls_live_edge"
+                               : "C_max_variant_max_luma_or_Sobel_TM_CCOEFF_NORMED_accurate_ffmpeg_seek");
   fprintf(fp, "  \"min_consecutive_absent_samples_to_open_ad\": %d,\n", kMinAbsentToOpen);
+  fprintf(fp, "  \"ad_start_lookback_seconds\": %g,\n", kAdStartLookbackSec);
   fprintf(fp, "  \"min_consecutive_present_samples_to_close_ad\": %d,\n", kMinPresentToClose);
-  fprintf(fp, "  \"scanned_duration_seconds\": %g,\n", dur);
+  if (live_last_frame_only)
+    fprintf(fp, "  \"scanned_duration_seconds\": null,\n");
+  else
+    fprintf(fp, "  \"scanned_duration_seconds\": %g,\n", dur);
   if (have_pdt_anchor)
     fprintf(fp, "  \"media_timeline_zero_epoch_utc\": %lld,\n", (long long)media_timeline_zero_epoch_utc);
   else
@@ -1390,9 +1635,11 @@ int main(int argc, char **argv) {
   fprintf(fp, "  \"ad_segments\": [\n");
   for (int i = 0; i < nwin; i++) {
     int a = ws[i], b = we[i];
-    double start_s = a * (double)interval;
+    double raw_start_s = a * (double)interval;
+    double start_s = raw_start_s - kAdStartLookbackSec;
+    if (start_s < 0) start_s = 0;
     double end_inc = b * (double)interval;
-    double durs = (b - a + 1) * (double)interval;
+    double durs = (b - a + 1) * (double)interval + (raw_start_s - start_s);
     fprintf(fp, "    {\n");
     fprintf(fp, "      \"start_media_seconds\": %g,\n", start_s);
     fprintf(fp, "      \"end_media_seconds_inclusive\": %g,\n", end_inc);
@@ -1410,7 +1657,11 @@ int main(int argc, char **argv) {
   fprintf(fp, "  ]\n}\n");
   fclose(fp);
 
-  ltm_log("wrote %s (%d ad segment(s))\n", out_path, nwin);
+  if (live_last_frame_only)
+    ltm_log("wrote %s (hls_last_frame logo=%d score=%.3f; ad_segments=%d)\n", out_path, (int)present[0],
+            last_frame_match_score, nwin);
+  else
+    ltm_log("wrote %s (%d ad segment(s))\n", out_path, nwin);
 
   free(ws);
   free(we);

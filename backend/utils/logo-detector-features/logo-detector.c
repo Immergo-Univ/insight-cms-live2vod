@@ -58,7 +58,9 @@ constexpr int kProcCell = 32;
 constexpr int kProcH = (720 / kProcCell) * kProcCell; /* 704, multiple of cell */
 constexpr double kPreBlurSigma = 1.0;
 constexpr double kStableVarPercentile = 0.20;
-constexpr double kMinLogoAreaPx = 500.0;
+/** Minimum logo width and height in reference (full) frame pixels; area filter uses side^2 at proc scale. */
+constexpr int kMinLogoSideFullPx = 100;
+constexpr double kMinLogoAreaPx = static_cast<double>(kMinLogoSideFullPx * kMinLogoSideFullPx);
 constexpr double kMaxLogoAreaFrac = 0.15;
 constexpr int kBboxPadPx = 10;
 
@@ -1072,6 +1074,27 @@ static double position_prior_rect(cv::Rect roi, int pw, int ph) {
   return std::max(0.0, std::min(1.0, 0.08 + 0.92 * m));
 }
 
+/** If refined bbox maps to < min_side in full frame, grow rect (centered, clipped to frame). */
+static void enforce_min_logo_bbox_full(cv::Rect& r, int frame_w, int frame_h, int min_side) {
+  if (frame_w < 1 || frame_h < 1 || min_side < 1) {
+    return;
+  }
+  int tw = std::max(min_side, r.width);
+  int th = std::max(min_side, r.height);
+  tw = std::min(tw, frame_w);
+  th = std::min(th, frame_h);
+  const int cx = r.x + r.width / 2;
+  const int cy = r.y + r.height / 2;
+  int nx = cx - tw / 2;
+  int ny = cy - th / 2;
+  nx = std::clamp(nx, 0, frame_w - tw);
+  ny = std::clamp(ny, 0, frame_h - th);
+  r.x = nx;
+  r.y = ny;
+  r.width = tw;
+  r.height = th;
+}
+
 static double area_penalty_score(int area_px, int frame_px) {
   const double f = static_cast<double>(area_px) / static_cast<double>(frame_px + 1);
   if (f <= kMaxLogoAreaFrac) {
@@ -1443,6 +1466,12 @@ int main(int argc, char** argv) {
   mean_gray_acc.convertTo(mean_gray_u8, CV_8UC1);
 
   const int frame_px = PW * PH;
+  const double scale_x_ref = static_cast<double>(ref_w) / static_cast<double>(PW);
+  const double scale_y_ref = static_cast<double>(ref_h) / static_cast<double>(PH);
+  const int min_w_proc =
+      std::max(8, static_cast<int>(std::ceil(static_cast<double>(kMinLogoSideFullPx) / scale_x_ref)));
+  const int min_h_proc =
+      std::max(8, static_cast<int>(std::ceil(static_cast<double>(kMinLogoSideFullPx) / scale_y_ref)));
   const double v95_cap = std::max(1e-6, static_cast<double>(percentile_from_mat(var_map, 0.95)));
 
   int best_lbl = -1;
@@ -1467,7 +1496,7 @@ int main(int argc, char** argv) {
     const int bh = bh_cells * kProcCell;
     cv::Rect roi(x0, y0, bw, bh);
     roi &= cv::Rect(0, 0, PW, PH);
-    if (roi.width < 8 || roi.height < 8) {
+    if (roi.width < min_w_proc || roi.height < min_h_proc) {
       continue;
     }
 
@@ -1536,6 +1565,7 @@ int main(int argc, char** argv) {
       static_cast<int>(std::floor(logo_proc.y * sy)), static_cast<int>(std::ceil(logo_proc.width * sx)),
       static_cast<int>(std::ceil(logo_proc.height * sy)));
   logo_rect_full &= cv::Rect(0, 0, ref_w, ref_h);
+  enforce_min_logo_bbox_full(logo_rect_full, ref_w, ref_h, kMinLogoSideFullPx);
 
   double orb_score = 0.0;
   if (ns >= 2 && logo_rect_full.width >= 16 && logo_rect_full.height >= 16) {
@@ -1563,6 +1593,7 @@ int main(int argc, char** argv) {
     cv::resize(out_bgr, out_bgr, cv::Size(ref_w, ref_h), 0, 0, cv::INTER_AREA);
   }
   logo_rect_full &= cv::Rect(0, 0, out_bgr.cols, out_bgr.rows);
+  enforce_min_logo_bbox_full(logo_rect_full, out_bgr.cols, out_bgr.rows, kMinLogoSideFullPx);
 
   cv::Mat logo_crop = out_bgr(logo_rect_full).clone();
   char out_logo[512];

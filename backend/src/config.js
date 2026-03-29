@@ -60,7 +60,7 @@ export const config = {
     /** UTC hour size for logo-detector multi-hour window alignment only. */
     hourSeconds: 3600,
     /** Archive window (wall-clock UTC hours) fed to logo-detector for bbox/template extraction. */
-    detectorArchiveHours: parseInt(process.env.LOGO_SCAN_DETECTOR_ARCHIVE_HOURS || "3", 10),
+    detectorArchiveHours: parseInt(process.env.LOGO_SCAN_DETECTOR_ARCHIVE_HOURS || "1", 10),
     stateFilePath:
       process.env.LOGO_SCAN_STATE_FILE ||
       path.join(backendRoot, "data", "logo-scan-state.json"),
@@ -72,6 +72,8 @@ export const config = {
     matcherTimeoutMs: parseInt(process.env.LOGO_SCAN_MATCHER_TIMEOUT_MS || "900000", 10),
     /** Reuse logo-detector JSON/JPG without re-running the binary while cache is fresh (ms). */
     detectorCacheTtlMs: parseInt(process.env.LOGO_SCAN_DETECTOR_CACHE_MS || String(24 * 3600 * 1000), 10),
+    /** STAGE/catch-up/ingest progress (default off). Set LOGO_SCAN_VERBOSE=true to restore. */
+    verbose: process.env.LOGO_SCAN_VERBOSE === "true",
   },
 
   /**

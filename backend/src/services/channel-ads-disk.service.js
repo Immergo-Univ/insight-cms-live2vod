@@ -108,7 +108,9 @@ export async function saveChannelProcessingSnapshot(payload) {
   index.byBaseUrl[hlsBaseUrl] = channelId;
   await saveIndex(index.byBaseUrl);
 
-  console.log(`[channel-ads-disk] saved ${filePath} ads=${doc.ads.length}`);
+  if (config.logoScan.verbose) {
+    console.log(`[channel-ads-disk] saved ${filePath} ads=${doc.ads.length}`);
+  }
 }
 
 /**
