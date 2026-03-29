@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight, Trash01 } from "@untitledui/icons";
 import {
   COLUMN_WIDTH_PX,
@@ -7,6 +7,10 @@ import {
   buildThumbnailUrl,
 } from "./editor-constants";
 import type { EditorAdMarker, EditorSubClip } from "@/types/editor";
+
+const TIMELINE_SCRUB_HEIGHT_PX = 24;
+const TIMELINE_FILMSTRIP_HEIGHT_PX = 120;
+const TIMELINE_RAIL_HEIGHT_PX = 10;
 
 export function formatTime(seconds: number): string {
   const h = Math.floor(seconds / 3600);
@@ -59,7 +63,15 @@ export function EditorTimeline({
   onResizeAd,
 }: EditorTimelineProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
+  /** Thin horizontal scrollbar below thumbnails, synced with scrollRef */
+  const railRef = useRef<HTMLDivElement>(null);
+  const prevZoomIndexRef = useRef<number | null>(null);
+  const playheadTimeForZoomRef = useRef(currentTimeSeconds);
+  playheadTimeForZoomRef.current = currentTimeSeconds;
+  /** Full-width track (scrub strip + filmstrip) for time ↔ x mapping */
+  const trackRef = useRef<HTMLDivElement>(null);
   const innerRef = useRef<HTMLDivElement>(null);
+  const [scrubHoverX, setScrubHoverX] = useState<number | null>(null);
   const [hoverClipId, setHoverClipId] = useState<string | null>(null);
   const [dragging, setDragging] = useState<{
     clipId: string;
@@ -82,22 +94,53 @@ export function EditorTimeline({
 
   const pixelToTime = useCallback(
     (clientX: number) => {
-      const inner = innerRef.current;
-      if (!inner || durationSeconds <= 0) return 0;
-      const cols = Math.max(1, Math.ceil(durationSeconds / zoomSeconds));
-      const width = cols * COLUMN_WIDTH_PX;
-      const rect = inner.getBoundingClientRect();
+      const track = trackRef.current;
+      if (!track || durationSeconds <= 0) return 0;
+      const rect = track.getBoundingClientRect();
       const x = clientX - rect.left;
-      const fraction = Math.max(0, Math.min(1, width > 0 ? x / width : 0));
+      const fraction = Math.max(0, Math.min(1, rect.width > 0 ? x / rect.width : 0));
       return fraction * durationSeconds;
     },
-    [durationSeconds, zoomSeconds]
+    [durationSeconds],
   );
 
   const playheadPx =
     durationSeconds > 0
       ? (currentTimeSeconds / durationSeconds) * totalWidthPx
       : 0;
+
+  useEffect(() => {
+    const content = scrollRef.current;
+    const rail = railRef.current;
+    if (!content || !rail) return;
+
+    let syncing = false;
+    const syncRailFromContent = () => {
+      if (syncing) return;
+      syncing = true;
+      rail.scrollLeft = content.scrollLeft;
+      queueMicrotask(() => {
+        syncing = false;
+      });
+    };
+    const syncContentFromRail = () => {
+      if (syncing) return;
+      syncing = true;
+      content.scrollLeft = rail.scrollLeft;
+      queueMicrotask(() => {
+        syncing = false;
+      });
+    };
+
+    content.addEventListener("scroll", syncRailFromContent, { passive: true });
+    rail.addEventListener("scroll", syncContentFromRail, { passive: true });
+    rail.scrollLeft = content.scrollLeft;
+
+    return () => {
+      content.removeEventListener("scroll", syncRailFromContent);
+      rail.removeEventListener("scroll", syncContentFromRail);
+    };
+  }, [totalWidthPx]);
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -127,6 +170,30 @@ export function EditorTimeline({
     const el = scrollRef.current;
     if (el) el.scrollBy({ left: scrollStep, behavior: "smooth" });
   }, []);
+
+  // After zoom change, keep the playhead (seek line) centered in the viewport
+  useLayoutEffect(() => {
+    const content = scrollRef.current;
+    const rail = railRef.current;
+    if (!content || durationSeconds <= 0) return;
+
+    const prev = prevZoomIndexRef.current;
+    const zoomChanged = prev !== null && prev !== zoomIndex;
+
+    if (zoomChanged) {
+      const t = playheadTimeForZoomRef.current;
+      const playheadPxNow = (t / durationSeconds) * totalWidthPx;
+      const target = playheadPxNow - content.clientWidth / 2;
+      const maxScroll = Math.max(0, content.scrollWidth - content.clientWidth);
+      const next = Math.max(0, Math.min(target, maxScroll));
+      content.scrollLeft = next;
+      if (rail) rail.scrollLeft = next;
+    } else if (rail) {
+      rail.scrollLeft = content.scrollLeft;
+    }
+
+    prevZoomIndexRef.current = zoomIndex;
+  }, [zoomIndex, totalWidthPx, durationSeconds]);
 
   useEffect(() => {
     if (!dragging || !onResizeClip) return;
@@ -196,22 +263,31 @@ export function EditorTimeline({
     };
   }, [adDragging, durationSeconds, onResizeAd, onSeek, pixelToTime]);
 
+  const seekFromClientX = useCallback(
+    (clientX: number) => {
+      if (!trackRef.current || durationSeconds <= 0) return;
+      const time = pixelToTime(clientX);
+      if (onTrackClick) onTrackClick(time);
+      else onSeek(time);
+    },
+    [durationSeconds, onSeek, onTrackClick, pixelToTime],
+  );
+
   const handleTimelineClick = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
       const target = e.target as HTMLElement;
       if (target.closest("[data-clip-overlay]") || target.closest("[data-resize-handle]")) return;
-      const inner = innerRef.current;
-      if (!inner || durationSeconds <= 0) return;
-      const cols = Math.max(1, Math.ceil(durationSeconds / zoomSeconds));
-      const width = cols * COLUMN_WIDTH_PX;
-      const rect = inner.getBoundingClientRect();
-      const x = e.clientX - rect.left;
-      const fraction = Math.max(0, Math.min(1, width > 0 ? x / width : 0));
-      const time = fraction * durationSeconds;
-      if (onTrackClick) onTrackClick(time);
-      else onSeek(time);
+      seekFromClientX(e.clientX);
     },
-    [durationSeconds, zoomSeconds, onSeek, onTrackClick]
+    [seekFromClientX],
+  );
+
+  const handleScrubStripClick = useCallback(
+    (e: React.MouseEvent<HTMLDivElement>) => {
+      e.stopPropagation();
+      seekFromClientX(e.clientX);
+    },
+    [seekFromClientX],
   );
 
   if (durationSeconds <= 0) {
@@ -262,17 +338,49 @@ export function EditorTimeline({
         >
           <ChevronLeft className="size-5" />
         </button>
+        <div className="flex min-w-0 flex-1 flex-col overflow-hidden border border-secondary bg-secondary">
         <div
           ref={scrollRef}
-          className="scrollbar-hide relative min-w-0 flex-1 overflow-x-auto overflow-y-hidden border border-secondary bg-secondary"
-          style={{ height: 120, scrollBehavior: "smooth" }}
+          id="editor-timeline-scroll"
+          className="scrollbar-hide relative overflow-x-auto overflow-y-hidden"
+          style={{
+            height: TIMELINE_SCRUB_HEIGHT_PX + TIMELINE_FILMSTRIP_HEIGHT_PX,
+          }}
         >
           <div
-            ref={innerRef}
-            className="relative flex h-full cursor-pointer flex-row"
+            ref={trackRef}
+            className="relative flex min-w-full flex-col"
             style={{ width: totalWidthPx, minWidth: "100%" }}
-            onClick={handleTimelineClick}
           >
+            <div
+              className="relative z-[15] shrink-0 cursor-crosshair border-b border-secondary bg-secondary_alt/90"
+              style={{ height: TIMELINE_SCRUB_HEIGHT_PX }}
+              onMouseMove={(e) => {
+                const el = e.currentTarget;
+                const r = el.getBoundingClientRect();
+                setScrubHoverX(Math.max(0, Math.min(r.width, e.clientX - r.left)));
+              }}
+              onMouseLeave={() => setScrubHoverX(null)}
+              onClick={handleScrubStripClick}
+              aria-label="Seek — click to jump playhead; hover shows preview line"
+            >
+              {scrubHoverX !== null && (
+                <div
+                  className="pointer-events-none absolute top-0 bottom-0 z-20 w-px bg-brand-secondary"
+                  style={{ left: scrubHoverX, boxShadow: "0 0 0 1px rgb(0 0 0 / 0.15)" }}
+                  aria-hidden
+                />
+              )}
+            </div>
+            <div
+              ref={innerRef}
+              className="relative flex shrink-0 cursor-pointer flex-row overflow-visible"
+              style={{
+                width: totalWidthPx,
+                height: TIMELINE_FILMSTRIP_HEIGHT_PX,
+              }}
+              onClick={handleTimelineClick}
+            >
             {Array.from({ length: columnCount }, (_, i) => {
               const timeSec = i * zoomSeconds;
               const thumbUrl = buildThumbnailUrl(clipUrl, timeSec, channelId);
@@ -452,26 +560,38 @@ export function EditorTimeline({
               </div>
             );
           })}
-          <div
-            className="pointer-events-none absolute top-0 bottom-0 z-20 flex flex-col items-center"
-            style={{
-              left: playheadPx,
-              transform: "translateX(-50%)",
-            }}
-          >
+            </div>
             <div
-              className="border-x-[5px] border-t-[6px] border-x-transparent border-t-red-500"
-              style={{ width: 0, height: 0 }}
-              aria-hidden
-            />
-            <div className="w-0.5 flex-1 shrink-0 bg-red-500" />
-            <div
-              className="border-x-[5px] border-b-[6px] border-x-transparent border-b-red-500"
-              style={{ width: 0, height: 0 }}
-              aria-hidden
-            />
+              className="pointer-events-none absolute top-0 z-[22] flex flex-col items-center"
+              style={{
+                left: playheadPx,
+                height: TIMELINE_SCRUB_HEIGHT_PX + TIMELINE_FILMSTRIP_HEIGHT_PX,
+                transform: "translateX(-50%)",
+              }}
+            >
+              <div
+                className="border-x-[5px] border-t-[6px] border-x-transparent border-t-red-500"
+                style={{ width: 0, height: 0 }}
+                aria-hidden
+              />
+              <div className="w-0.5 flex-1 min-h-0 shrink bg-red-500" />
+              <div
+                className="border-x-[5px] border-b-[6px] border-x-transparent border-b-red-500"
+                style={{ width: 0, height: 0 }}
+                aria-hidden
+              />
+            </div>
           </div>
-          </div>
+        </div>
+        <div
+          ref={railRef}
+          className="scrollbar-thin shrink-0 overflow-x-auto overflow-y-hidden border-t border-secondary bg-secondary"
+          style={{ height: TIMELINE_RAIL_HEIGHT_PX }}
+          aria-label="Timeline horizontal scroll"
+          aria-controls="editor-timeline-scroll"
+        >
+          <div style={{ width: totalWidthPx, height: 1 }} aria-hidden />
+        </div>
         </div>
         <button
           type="button"

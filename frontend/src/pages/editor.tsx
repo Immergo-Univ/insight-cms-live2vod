@@ -11,7 +11,7 @@ import {
 } from "@/components/editor";
 import { FRAME_DURATION_SEC } from "@/components/editor/editor-constants";
 import type { EditorPlayerRef } from "@/components/editor";
-import { detectAds } from "@/services/ads.service";
+import { detectAds, getPrecalculatedAds } from "@/services/ads.service";
 import type {
   EditorAdMarker,
   EditorClipState,
@@ -52,23 +52,53 @@ export function EditorPage() {
     adsTriggeredRef.current = true;
 
     const corner = clipState.logoCorner || "br";
+    const { startTime: winStart, endTime: winEnd, channelId, sourceM3u8 } = clipState;
+    const hlsBase =
+      sourceM3u8 ||
+      (() => {
+        try {
+          const u = new URL(clipState.clipUrl);
+          u.search = "";
+          return u.toString();
+        } catch {
+          return clipState.clipUrl;
+        }
+      })();
+
     setAdsLoading(true);
-    detectAds(clipState.clipUrl, corner)
-      .then((result) => {
-        setAds(
-          result.ads.map((ad, i) => ({
+
+    const mapPrecalcToMarkers = () =>
+      getPrecalculatedAds(hlsBase, winStart, winEnd, channelId).then((result) => {
+        const markers: EditorAdMarker[] = [];
+        for (const ad of result.ads) {
+          const lo = Math.max(winStart, ad.startEpoch);
+          const hi = Math.min(winEnd, ad.endEpoch);
+          if (hi <= lo) continue;
+          markers.push({
             id: crypto.randomUUID(),
-            index: i + 1,
-            startTime:
-              new Date(ad.startProgramDateTime).getTime() / 1000 -
-              clipState.startTime,
-            endTime:
-              new Date(ad.endProgramDateTime).getTime() / 1000 -
-              clipState.startTime,
-          })),
-        );
+            index: markers.length + 1,
+            startTime: lo - winStart,
+            endTime: hi - winStart,
+          });
+        }
+        setAds(markers.map((m, i) => ({ ...m, index: i + 1 })));
+      });
+
+    mapPrecalcToMarkers()
+      .catch((err) => {
+        console.warn("Precalculated ads unavailable, falling back to detect:", err);
+        return detectAds(clipState.clipUrl, corner).then((result) => {
+          setAds(
+            result.ads.map((ad, i) => ({
+              id: crypto.randomUUID(),
+              index: i + 1,
+              startTime: ad.startOffsetSec,
+              endTime: ad.endOffsetSec,
+            })),
+          );
+        });
       })
-      .catch((err) => console.error("Ads detection failed:", err))
+      .catch((err) => console.error("Ads load failed:", err))
       .finally(() => setAdsLoading(false));
   }, [clipState]);
 
@@ -327,6 +357,13 @@ export function EditorPage() {
   const effectiveDuration = duration > 0 ? duration : durationSeconds;
   const channelId = clipState.channelId ?? "";
 
+  const absEpochToIso = (absSec: number) => {
+    const t = Number(absSec);
+    if (!Number.isFinite(t)) return "";
+    const d = new Date(t * 1000);
+    return Number.isFinite(d.getTime()) ? d.toISOString() : "";
+  };
+
   const stateJson: EditorStateJson = {
     clipUrl: clipState.clipUrl,
     sourceM3u8: clipState.sourceM3u8,
@@ -338,12 +375,8 @@ export function EditorPage() {
       index: a.index,
       startTime: a.startTime,
       endTime: a.endTime,
-      startProgramDateTime: new Date(
-        (clipState.startTime + a.startTime) * 1000,
-      ).toISOString(),
-      endProgramDateTime: new Date(
-        (clipState.startTime + a.endTime) * 1000,
-      ).toISOString(),
+      startProgramDateTime: absEpochToIso(clipState.startTime + a.startTime),
+      endProgramDateTime: absEpochToIso(clipState.startTime + a.endTime),
     })),
   };
 

@@ -1,7 +1,7 @@
 import { httpClient } from "./http-client";
 
-// Ads segments are served from the backend in-memory precalc store (POST/GET below).
-// Until an ingestion job or external detector fills that store, responses are empty arrays.
+// Ads for the Live2VOD vertical timeline: backend serves merged in-memory state or
+// per-channel JSON under backend/data/channels/<channelId>.json (see GET /ads/precalculated).
 
 export interface DetectedAd {
   startOffsetSec: number;
@@ -50,10 +50,16 @@ export async function getPrecalculatedAds(
   hlsStream: string,
   startTime: number,
   endTime: number,
+  channelId?: string,
 ): Promise<PreCalcAdsResult> {
   const bffClient = httpClient.getBffClient();
   const response = await bffClient.get<PreCalcAdsResult>("/ads/precalculated", {
-    params: { hlsStream, startTime, endTime },
+    params: {
+      hlsStream,
+      startTime,
+      endTime,
+      ...(channelId ? { channelId } : {}),
+    },
   });
   return response.data;
 }

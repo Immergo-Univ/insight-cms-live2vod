@@ -78,6 +78,7 @@ export function Live2VodPage() {
                   dateRange={dateRange}
                   epgEvents={selectedChannel.epgEvents}
                   hlsStream={selectedChannel.hlsStream}
+                  channelId={selectedChannel.id}
                   onTimeWindowChange={setTimeWindow}
                 />
               ) : (

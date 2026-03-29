@@ -1,6 +1,57 @@
+import path from "path";
+import { fileURLToPath } from "url";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const backendRoot = path.join(__dirname, "..");
+
 export const config = {
   insightApiBase: process.env.INSIGHT_API_BASE || "https://insight-api-frankly.univtec.com",
   port: process.env.PORT || 3001,
   insightApiUsername: process.env.INSIGHT_API_USERNAME,
   insightApiPassword: process.env.INSIGHT_API_PASSWORD,
+  /** Tenants scanned by the logo/archive pipeline (same IDs as x-tenant-id / frontend). */
+  tenants: ["rjr"],
+
+  logoScan: {
+    enabled: process.env.LOGO_SCAN_ENABLED === "true",
+    /** Pause between full scheduler cycles (ms). */
+    cyclePauseMs: parseInt(process.env.LOGO_SCAN_CYCLE_PAUSE_MS || "45000", 10),
+    /** How far back to request archive windows (hours). Ads older than this are dropped from memory. */
+    archiveHours: parseInt(process.env.LOGO_SCAN_ARCHIVE_HOURS || "72", 10),
+    /**
+     * Deepest wall-clock history the matcher walks per channel (hours). Use the real DVR/archive depth
+     * on the CDN (e.g. 12). Loop uses max(retentionCutoff, now - this) so it stays within retention too.
+     */
+    matcherArchiveHours: parseInt(
+      process.env.LOGO_SCAN_MATCHER_ARCHIVE_HOURS || process.env.LOGO_SCAN_ARCHIVE_HOURS || "72",
+      10,
+    ),
+    /**
+     * During backfill, max successful matcher runs per channel per cycle (0 = no limit — one channel
+     * pass may scan the whole matcherArchiveHours range in a single cycle).
+     */
+    matcherMaxRunsPerChannelPerCycle: parseInt(
+      process.env.LOGO_SCAN_MATCHER_MAX_RUNS_PER_CHANNEL_PER_CYCLE || "0",
+      10,
+    ),
+    /** Logical fragment size for processed / logo-presence bookkeeping (seconds). Matcher samples every 10s. */
+    fragmentSeconds: parseInt(process.env.LOGO_SCAN_FRAGMENT_SEC || "600", 10),
+    /** logo-template-matching archive window length (seconds); default 2 min per run. Override with LOGO_SCAN_MATCHER_WINDOW_SEC. */
+    matcherWindowSeconds: parseInt(process.env.LOGO_SCAN_MATCHER_WINDOW_SEC || "120", 10),
+    /** UTC hour size for logo-detector multi-hour window alignment only. */
+    hourSeconds: 3600,
+    /** Archive window (wall-clock UTC hours) fed to logo-detector for bbox/template extraction. */
+    detectorArchiveHours: parseInt(process.env.LOGO_SCAN_DETECTOR_ARCHIVE_HOURS || "3", 10),
+    stateFilePath:
+      process.env.LOGO_SCAN_STATE_FILE ||
+      path.join(backendRoot, "data", "logo-scan-state.json"),
+    logoDetectorDir: path.join(backendRoot, "utils", "logo-detector-features"),
+    logoDetectorBin: path.join(backendRoot, "utils", "logo-detector-features", "logo-detector"),
+    logoMatcherDir: path.join(backendRoot, "utils", "logo-template-matching"),
+    logoMatcherBin: path.join(backendRoot, "utils", "logo-template-matching", "logo-template-matching"),
+    detectorTimeoutMs: parseInt(process.env.LOGO_SCAN_DETECTOR_TIMEOUT_MS || "900000", 10),
+    matcherTimeoutMs: parseInt(process.env.LOGO_SCAN_MATCHER_TIMEOUT_MS || "900000", 10),
+    /** Reuse logo-detector JSON/JPG without re-running the binary while cache is fresh (ms). */
+    detectorCacheTtlMs: parseInt(process.env.LOGO_SCAN_DETECTOR_CACHE_MS || String(24 * 3600 * 1000), 10),
+  },
 };

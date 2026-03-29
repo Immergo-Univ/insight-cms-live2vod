@@ -3,22 +3,24 @@ import { queryAdsByM3u8Url, queryAdsForTimeline } from "../services/ads-precalc.
 
 export const adsRouter = Router();
 
-adsRouter.get("/precalculated", (req, res) => {
+adsRouter.get("/precalculated", async (req, res) => {
   try {
-    const { hlsStream, startTime, endTime } = req.query;
+    const { hlsStream, startTime, endTime, channelId } = req.query;
 
     if (!hlsStream || !startTime || !endTime) {
       return res.status(400).json({ error: "Missing required query params: hlsStream, startTime, endTime" });
     }
 
-    const result = queryAdsForTimeline(
+    const result = await queryAdsForTimeline(
       hlsStream,
       parseInt(startTime, 10),
       parseInt(endTime, 10),
+      { channelId: channelId ? String(channelId) : undefined },
     );
 
     console.log(
-      `[ads] Timeline query: ${result.ads.length} pre-calculated ad(s) for ${hlsStream}`,
+      `[ads] Timeline query: ${result.ads.length} ad(s) hls=${hlsStream.slice(0, 80)}` +
+        (channelId ? ` channelId=${channelId}` : ""),
     );
 
     res.json(result);

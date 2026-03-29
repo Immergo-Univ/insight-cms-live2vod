@@ -19,10 +19,18 @@ interface TimelinePanelProps {
   dateRange: RangeValue<DateValue>;
   epgEvents?: EpgEvent[];
   hlsStream?: string;
+  /** CMS channel id — used to load per-channel ad snapshot from backend/data/channels. */
+  channelId?: string;
   onTimeWindowChange?: (tw: TimeWindow) => void;
 }
 
-export function TimelinePanel({ dateRange, epgEvents = [], hlsStream, onTimeWindowChange }: TimelinePanelProps) {
+export function TimelinePanel({
+  dateRange,
+  epgEvents = [],
+  hlsStream,
+  channelId,
+  onTimeWindowChange,
+}: TimelinePanelProps) {
   const tz = useTimezone();
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -51,10 +59,10 @@ export function TimelinePanel({ dateRange, epgEvents = [], hlsStream, onTimeWind
     const startEpoch = Math.floor(startDate.getTime() / 1000);
     const endEpoch = Math.floor(endDate.getTime() / 1000);
 
-    getPrecalculatedAds(hlsStream, startEpoch, endEpoch)
+    getPrecalculatedAds(hlsStream, startEpoch, endEpoch, channelId)
       .then((result) => setPrecalcAds(result.ads))
       .catch(() => setPrecalcAds([]));
-  }, [hlsStream, startDate, endDate]);
+  }, [hlsStream, channelId, startDate, endDate]);
 
   const [selTop, setSelTop] = useState(0);
   const [selBottom, setSelBottom] = useState(60);

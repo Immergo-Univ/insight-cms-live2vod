@@ -1,24 +1,34 @@
 # Logo recognition (`backend/utils`)
 
-Herramientas **CLI** para estimar la posición de un logo desde HLS (`logo_detector`) y detectar tramos sin logo en un VOD (`template_match`). **No** están integradas en la API Node.js.
+Herramientas **CLI** para (1) detectar la región del logo en un HLS y exportar plantilla + metadatos, y (2) marcar tramos donde el logo **no** aparece en otro HLS (útil como proxy de publicidad). **No** están integradas en la API Node.js por defecto.
 
-En **stderr** imprimen trazas de progreso con prefijo `[logo_detector]` o `[template_match]` (HTTP, playlist, ffprobe, ffmpeg, workers). El detector nuevo escribe la ruta del JSON principal en **stdout** (una línea).
+En **stderr** suelen imprimirse trazas con prefijo `[logo-template-matching]` o mensajes de progreso del detector.
+
+---
+
+## Resumen: qué produce cada script al ejecutarse
+
+| Script | Directorio | Artefactos principales (respecto al **cwd** al lanzar el binario) |
+|--------|------------|-------------------------------------------------------------------|
+| **`logo-detector`** | `logo-detector-features/` | Ver tabla detallada abajo: JSON, JPG de logo, JPG de debug, muestras temporales. |
+| **`logo-template-matching`** | `logo-template-matching/` | Un JSON de segmentos “sin logo” / anuncios en `output/ads/<channel_id>.json`. |
 
 ---
 
 ## Prerrequisitos (sistema)
 
-| Uso | Paquetes / herramientas |
-|-----|-------------------------|
-| **`logo_detector`** (compilar) | `build-essential`, `pkg-config`, **OpenCV 4** (`libopencv-dev` o equivalente), `libcurl4-openssl-dev` |
-| **`template_match`** (compilar) | `build-essential`, `libcurl4-openssl-dev` |
-| **Ejecutar** | `ffmpeg`, `ffprobe` en `PATH` |
+| Herramienta | Compilar / ejecutar |
+|-------------|---------------------|
+| **`logo-detector`** | `g++` C++17, **OpenCV 4**, **libcurl**, **FFmpeg** (pkg-config: `libavformat`, `libavcodec`, `libswscale`, `libavutil`) |
+| **`logo-template-matching`** | `gcc` C11, **libcurl** |
+| **Ejecutar ambos** | `ffmpeg`, `ffprobe` en `PATH` |
 
 **Debian / Ubuntu (ejemplo):**
 
 ```bash
 sudo apt update
-sudo apt install -y build-essential pkg-config libopencv-dev libcurl4-openssl-dev ffmpeg
+sudo apt install -y build-essential pkg-config libopencv-dev libcurl4-openssl-dev \
+  libavformat-dev libavcodec-dev libswscale-dev libavutil-dev ffmpeg
 ```
 
 **Comprobar:**
@@ -32,157 +42,113 @@ command -v ffmpeg ffprobe
 
 ---
 
-## Build (desde la raíz del repo)
+## Build
 
-Los comandos siguientes asumen el directorio del repo (ajustá el `cd`).
-
-### 1) `logo_detector` (C++17 + OpenCV)
+### 1) `logo-detector`
 
 ```bash
 cd backend/utils/logo-detector-features
 make
 ```
 
-Equivale a compilar `logo_detector.cpp` con `pkg-config` para OpenCV (`opencv4` u `opencv`), `-lcurl` y `-pthread`.
+Genera el binario **`./logo-detector`** (fuente: `logo-detector.c`, compilado como C++ por OpenCV).
 
-**Comprobar:** `test -x ./logo_detector && echo OK`
-
-### 2) `template_match`
+### 2) `logo-template-matching`
 
 ```bash
 cd backend/utils/logo-template-matching
-gcc -O2 -std=c11 -Wall -Wextra template_match.c -o template_match -lcurl -lpthread -lm
+make
 ```
 
-**Comprobar:** `test -x ./template_match && echo OK`
+O manualmente:
+
+```bash
+gcc -O2 -std=c11 -Wall -Wextra logo-template-matching.c -o logo-template-matching -lcurl -lm
+```
+
+Genera **`./logo-template-matching`** (sin hilos; no hace falta `-lpthread`).
+
+### 3) Opcional: `template_match` (legacy)
+
+En la misma carpeta existe **`template_match.c`**: otro matcher (muestreo ~5 s, **pthread**, formato de export antiguo `bbox_frame_xywh` + PNG en un directorio `logos/`). El flujo recomendado con el detector actual es **`logo-template-matching`**, no este binario.
 
 ---
 
-## 1. Detector — `logo-detector-features/logo_detector`
+## 1. Detector — `logo-detector-features/logo-detector`
 
-**Binario:** `./logo_detector` (compilar con `make` en esa carpeta).
-
-### Estrategia
-
-1. **HLS** — Igual que antes: descarga con **libcurl**, playlist **master** → variante con mayor `BANDWIDTH`, parseo de segmentos y duración total por `#EXTINF`, **ffprobe** para **WxH** (primer segmento o URL de media).
-2. **Muestreo temporal** — Por defecto, constante en código **`kTimelineSampleIntervalFraction`** (p. ej. **0,10** ⇒ **10** fotogramas, un centro de bin cada ~**10 %** de la duración: \((i + 0{,}5) \cdot dur / N\)). Límites **`kMinNumTimelineSamples`** / **`kMaxNumTimelineSamples`** (2–200). **`--sample-percent PCT`** (opcional) sustituye ese criterio por \(N = \mathrm{round}(100/\mathrm{PCT})\) con los mismos límites.
-3. **Decodificación en paralelo (acotada)** — Varios hilos, pero el número de **ffmpeg concurrentes** se limita con **`--decode-jobs`** (por defecto **3**) para no saturar el CDN (muchas conexiones TLS a la vez suelen provocar *connection reset*). Cada trabajo usa **ffmpeg** con **`-rw_timeout`** (microsegundos) antes de **`-i`** para no quedarse colgado indefinidamente si el servidor corta la lectura HLS. Tras cada muestra se escribe en stderr **`decode start` / `decode done` OK o FAIL** con duración en ms.
-4. **Barrido 100×100** — Ventana cuadrada **100×100** con paso configurable en código (`kDefaultStride`, por defecto **50**). Por cada subimagen se arma un descriptor **normalizado L2** (para usar **coseno = producto escalar**):
-   - **Histograma** — BGR, **16** bins por canal.
-   - **Contornos** — Canny, `findContours`, conteo (log), área relativa del mayor contorno, **momentos de Hu** (7) en escala log.
-   - **Energía** — media de **Laplaciano²** en gris.
-   Cada patch guarda **índice de imagen**, **x, y, w, h**.
-5. **Agrupación por coseno** — Para cada par de patches, si el coseno ≥ umbral (**~0,88**), se unen en una **estructura DSU** (componentes conexas). Los pares que superan el umbral se mantienen en memoria como lista `(i, j)`.
-6. **Elección de cluster** — Se prioriza la componente más grande con al menos **8** patches y patches en **≥ 3** imágenes distintas; si no hay, se usa la componente más grande como *fallback*.
-7. **Salida** — **`logos.json`** en **`<output-dir>/logos.json`**: `average_bbox_xywh` (promedio de **x** e **y** de los miembros; **w** y **h** = 100), lista **`members`** con `image_index` y bbox por patch, metadatos de canal y URLs.
-
-**Nota sobre `template_match`:** el matcher sigue esperando un JSON **antiguo** en `logos-dir` con `bbox_frame_xywh`, `reference_frame_wh` y `png_filename` (recorte PNG junto al JSON). El detector OpenCV **no** genera ese formato ni el PNG de plantilla; el pipeline detector → template_match **no está alineado** hasta que se adapte uno de los dos lados.
-
-### Argumentos
-
-| Argumento | Obligatorio | Descripción |
-|-----------|-------------|-------------|
-| `<m3u8_url>` | **Sí** | URL o ruta a playlist **master** o **media** (`.m3u8`). El argumento que no empieza por `-`. |
-| `--channel <id>` | **Sí** | Identificador del canal (metadato en JSON; ej. `tvj`). |
-| `--output-dir <DIR>` | No (default: `./output`) | Directorio base: **`samples/`** y **`logos.json`**. |
-| `--sample-percent <PCT>` | No | Sin flag: \(N\) sale de **`kTimelineSampleIntervalFraction`** en `logo_detector.cpp`. Con flag: \(N \approx 100/\mathrm{PCT}\). |
-| `--decode-jobs <N>` | No (default: `3`) | Máximo de procesos **ffmpeg** en paralelo (rango 1–32). Bajar a **1–2** si ves errores TLS o *reset by peer*. |
-| `--verbose-ffmpeg` | No | Pone el loglevel de ffmpeg en **info** (sale por stderr del proceso hijo, útil para depurar). |
-
-### Salida
-
-- **`<DIR>/samples/`** — Durante el run se escriben `sample_XXX.png` y luego se **borran** al finalizar.
-- **`<DIR>/logos/`** — Recorte y preview con bbox (ver estrategia anterior).
-- **`<DIR>/logos.json`** — Incluye `num_samples`, `timeline_sample_interval_fraction` (si aplica), `timeline_bin_width_fraction`, `sample_percent` (solo si usaste el flag), etc.
-
-**stdout:** una línea con la ruta absoluta o relativa de **`logos.json`** (según cómo se pasó `--output-dir`).
-
-### Ejemplo
+**Uso:**
 
 ```bash
 cd backend/utils/logo-detector-features
-
-make
-
-./logo_detector \
-  'https://ejemplo.cdn/live/channel.m3u8' \
-  --channel tvj
-
-./logo_detector \
-  --channel tvj \
-  --output-dir ./mi_salida \
-  --sample-percent 2 \
-  'https://ejemplo.cdn/live/channel.m3u8'
+./logo-detector '<m3u8_url_or_path>' <channel_id>
 ```
 
-Con `--sample-percent 2` se piden ~**50** fotogramas en lugar de 100.
+Ejemplo: `./logo-detector 'https://cdn/.../index.m3u8' tvj`
+
+### Qué produce al ejecutarse
+
+Todo se escribe bajo el **directorio de trabajo actual** (típicamente `logo-detector-features/`):
+
+| Ruta | Descripción |
+|------|-------------|
+| **`output/<channel_id>.json`** | Metadatos: `channel_id`, `logo_bbox` `{x,y,width,height}` en coordenadas del **reference_frame**, `reference_frame` `{width,height}`, `confidence_score`, `orb_fallback_score`, `samples_used`, bloque `detection` (método, `proc_size`, umbrales, etc.). |
+| **`output/<channel_id>_logo.jpg`** | Recorte BGR del logo desde una muestra aleatoria, tamaño acorde al bbox — **plantilla** para el paso de template matching. |
+| **`output/<channel_id>_debug.jpg`** | Misma muestra que el logo, con el rectángulo del bbox dibujado (depuración visual). |
+| **`samples/<channel_id>_sample_<n>.jpg`** | Durante el run se guardan las muestras usadas para la detección. **Al terminar con éxito se eliminan** estos JPEG del canal (el código limpia `samples/` para ese `channel_id`). Si el proceso falla antes, pueden quedar archivos sueltos. |
+
+**stdout:** una línea tipo `ok: <channel_id> bbox=(...) conf=... -> output/<channel_id>.json` con la ruta del JSON generado.
+
+**stderr:** mensajes de error si falla la descodificación HLS, OpenCV, escritura, etc.
 
 ---
 
-## 2. Template matching — `logo-template-matching/template_match`
+## 2. Template matching / anuncios — `logo-template-matching/logo-template-matching`
 
-**Binario:** `./template_match` (compilar en esa carpeta).
-
-**Requisito previo:** debe existir al menos un par de export **compatible** (`*.json` con `bbox_frame_xywh`, `reference_frame_wh`, `png_filename` + PNG) en `--logos-dir`. Ese formato corresponde al **detector legacy**; el **`logo_detector` actual (OpenCV)** no lo produce (ver nota arriba).
-
-### Estrategia
-
-Toma el **último** export del canal (por *mtime*): lee el **JSON** del detector (bbox y `reference_frame_wh`) y carga el **PNG** del logo con ffmpeg a **BGR**. Reescala la plantilla al bbox expresado en la resolución del VOD actual y define un **ROI de búsqueda** ampliado con un *padding* porcentual alrededor de ese rectángulo. Resuelve el HLS igual que el detector (master → variante), parsea segmentos (incl. **PROGRAM-DATE-TIME** cuando aplica) y obtiene **WxH** con ffprobe. **Parte la línea de tiempo** en trozos (~120 s) y lanza **varios ffmpeg en paralelo** (pthread): cada uno decodifica su tramo con un filtro **fps** alineado al intervalo de muestreo (p. ej. 1 frame cada 5 s). En cada muestra calcula la mejor **correlación normalizada** estilo **TM_CCOEFF_NORMED** entre plantilla y ROI (implementación en C, sin OpenCV). Sobre la serie binaria logo presente / ausente aplica **histéresis** (N muestras seguidas sin match para abrir una ventana “sin logo”, N con match para cerrarla). Escribe un **JSON** con ventanas, umbrales usados y referencias al export del detector.
-
-### Argumentos
-
-| Argumento | Obligatorio | Descripción |
-|-----------|-------------|-------------|
-| `<canal>` | **Sí** | Mismo criterio que `--channel` del detector (ej. `tvj`). Se usa para elegir el **último** JSON `tvj-*.json` por fecha de modificación en el directorio de logos. |
-| `<m3u8_url>` | **Sí** | Playlist HLS del VOD a analizar (master o media). |
-| `-o <archivo.json>` | No | Escribe el resultado en ese archivo. Si **omitís** `-o`, el JSON va a **stdout**. |
-| `--logos-dir <DIR>` | No | Carpeta donde están los exports del detector (`*.json` / `*.png`). **Default:** `../logo-detector-features/output/logos` relativo al **directorio de trabajo actual** (`cwd`), no al binario. |
-
-**Orden recomendado:** `./template_match <canal> <m3u8_url> [opciones]`  
-(Las opciones `-o` y `--logos-dir` pueden mezclarse; los dos argumentos “sueltos” se asignan en orden: primero → canal, segundo → URL.)
-
-### Parámetros fijos (sin CLI)
-
-Definidos en código; para cambiarlos hay que editar `template_match.c` y recompilar:
-
-- Muestreo: **cada 5 s**  
-- Abrir ventana “sin logo”: **5** muestras consecutivas sin match  
-- Cerrar ventana: **5** muestras consecutivas con logo  
-- Umbral de correlación: **0,72**  
-- Trozos de timeline para `ffmpeg` / paralelismo: lógica interna (~120 s por trozo, hasta 512 trozos)
-
-### Ejemplo (ejecutivo)
-
-Desde la carpeta del matcher, con logos por defecto en la ruta relativa esperada:
+**Uso (orden: URL primero, luego id de canal):**
 
 ```bash
 cd backend/utils/logo-template-matching
-
-./template_match tvj 'https://ejemplo.cdn/vod/stream.m3u8?startTime=1&endTime=2' -o ./resultado.json
+./logo-template-matching '<m3u8_url>' <channel_id> [opciones]
 ```
 
-Logos en otra ruta:
+Lee por defecto:
 
-```bash
-./template_match tvj 'https://ejemplo.cdn/vod/stream.m3u8' \
-  --logos-dir /ruta/absoluta/a/output/logos \
-  -o ./resultado.json
-```
+- `../logo-detector-features/output/<channel_id>.json` (bbox + `reference_frame`)
+- `../logo-detector-features/output/<channel_id>_logo.jpg`
 
-Solo stdout (sin `-o`):
+(Se puede cambiar con `--detector-output` o `LOGO_TM_DETECTOR_OUTPUT`.)
 
-```bash
-./template_match tvj 'https://ejemplo.cdn/vod/stream.m3u8' | jq .
-```
+### Qué produce al ejecutarse
+
+| Ruta | Descripción |
+|------|-------------|
+| **`output/ads/<channel_id>.json`** | Resultado del análisis: URLs de entrada y media playlist, rutas al JSON del detector y a la(s) plantilla(s), tamaños de vídeo y ROI de búsqueda, `sample_interval_seconds`, `match_threshold`, `match_method`, histéresis, `scanned_duration_seconds`, y la lista **`ad_segments`**: tramos donde el logo se considera ausente (cada ítem con tiempos en segundos, índices de muestra, y **`start_hhmmss` / `end_hhmmss`** en formato `HH:MM:SS`; el fin es **exclusivo** en el sentido `start + duration`). |
+
+Campos útiles en el JSON:
+
+- **`logo_template_path`**: primera plantilla usada.
+- **`logo_template_paths`**: todas las rutas (si usás `--logo-jpg` / `--alt-logo-jpg`).
+- **`ad_segments`**: segmentos “sin logo” tras histéresis (no equivalen a detección de publicidad por audio/metadata; solo ausencia de match con la plantilla).
+
+**stdout:** no hay salida estructurada; el resultado va al archivo anterior.
+
+**stderr:** líneas `[logo-template-matching]` con playlist resuelta, ROI, umbral, y por cada muestra temporal el valor de match y si el logo se considera presente.
+
+**Opciones relevantes** (ver también `--help` implícito vía `print_usage` en el fuente):
+
+- `--threshold 0..1` — sensibilidad del match (por defecto **0.72**).
+- `--max-seconds N` — si no hay duración en el contenedor (p. ej. live).
+- `--detector-output DIR` — carpeta donde están `<id>.json` y `<id>_logo.jpg`.
+- `--logo-jpg PATH` / `--alt-logo-jpg PATH` — plantillas extra o sustituto cuando el bug en aire difiere del `*_logo.jpg` del detector.
 
 ---
 
 ## 3. Pipeline típico
 
-1. **Build** del detector (`make` en `logo-detector-features`) y del matcher (`gcc` en `logo-template-matching`).  
-2. **`logo_detector`** con el `m3u8` y `--channel` → revisá **`logos.json`** y las muestras en **`samples/`**.  
-3. **`template_match`** solo si tenés un export **compatible** (JSON + PNG en el formato que el matcher lee); con el detector OpenCV actual puede ser necesario **generar la plantilla por otro medio** o **adaptar** el matcher / el JSON de salida.  
-4. Ingestar los JSON en tu backend si aplica (la API actual no lo hace sola).
+1. **`make`** en `logo-detector-features` y en `logo-template-matching`.
+2. Ejecutar **`./logo-detector`** con el `m3u8` y el `channel_id` **desde** `logo-detector-features/` → revisar **`output/<id>.json`**, **`output/<id>_logo.jpg`** y **`output/<id>_debug.jpg`**.
+3. Ejecutar **`./logo-template-matching`** con el `m3u8` a analizar y el **mismo** `channel_id` **desde** `logo-template-matching/` → leer **`output/ads/<id>.json`**.
+4. Opcional: ingestar esos JSON en el backend (p. ej. controladores propios).
 
 ---
 
@@ -190,5 +156,5 @@ Solo stdout (sin `-o`):
 
 | Fecha | Cambio |
 |------|--------|
-| 2026-03-28 | Detector reemplazado por **`logo_detector.cpp`**: OpenCV, muestreo paralelo, ventanas 100×100, clustering por coseno, salida **`logos.json`** + **`samples/`**. Eliminado el fuente C monolítico legacy. |
-| 2026-03-28 | Eliminada la implementación Python; documentación histórica refería solo C. |
+| 2026-03-29 | Documentación alineada con **`logo-detector`** (`logo-detector.c` + `make`) y **`logo-template-matching`** (C, salida `output/ads/<id>.json`). Añadida descripción de **artefactos al ejecutar** cada script. |
+| 2026-03-28 | Evoluciones previas del detector y del matcher (iteraciones OpenCV / Python / C); ver historial de git para detalle. |

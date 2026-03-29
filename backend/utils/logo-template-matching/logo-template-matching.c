@@ -7,6 +7,8 @@
  * - Template match = max( TM_CCOEFF_NORMED on luma , same on Sobel magnitude ) per variant; best over variants.
  * - Use --logo-jpg / --alt-logo-jpg when the on-air bug differs from detector output/<id>_logo.jpg.
  * - Ads = hysteresis on samples where logo is absent.
+ * - JSON includes media_timeline_zero_epoch_utc from the first #EXT-X-PROGRAM-DATE-TIME when present,
+ *   so wall times = that epoch + start_media_seconds (URL startTime alone can drift vs FFmpeg demuxer t=0).
  *
  * Build:
  *   gcc -O2 -std=c11 -Wall -Wextra logo-template-matching.c -o logo-template-matching -lcurl -lm
@@ -35,6 +37,7 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <time.h>
 #include <unistd.h>
 
 static const int kSampleIntervalSec = 10;
@@ -203,6 +206,48 @@ static int resolve_playlist(const char *start, DynBuf *text, char **resolved, ch
   free(*resolved);
   *resolved = best_uri;
   return 0;
+}
+
+/* First EXT-X-PROGRAM-DATE-TIME in media playlist → Unix UTC (demuxer t=0 aligns with this instant). */
+static int parse_iso8601_utc_unix(const char *s, int64_t *out) {
+  struct tm tmv;
+  memset(&tmv, 0, sizeof tmv);
+  const char *rest = strptime(s, "%Y-%m-%dT%H:%M:%S", &tmv);
+  if (!rest) return -1;
+  if (*rest == '.') {
+    rest++;
+    while (isdigit((unsigned char)*rest)) rest++;
+  }
+  if (*rest == 'Z')
+    rest++;
+  else if (strncmp(rest, "+00:00", 6) == 0)
+    rest += 6;
+  else
+    return -1;
+  if (*rest != '\0' && *rest != '\r' && *rest != '\n') return -1;
+  tmv.tm_isdst = 0;
+  time_t t = timegm(&tmv);
+  if (t == (time_t)-1) return -1;
+  *out = (int64_t)t;
+  return 0;
+}
+
+static int m3u8_first_program_date_time_unix(const DynBuf *pl, int64_t *unix_out) {
+  if (!pl || !pl->data || !unix_out) return -1;
+  const char *tag = "#EXT-X-PROGRAM-DATE-TIME:";
+  for (const char *p = pl->data; (p = strstr(p, tag)) != NULL;) {
+    p += strlen(tag);
+    const char *eol = strchr(p, '\n');
+    size_t n = eol ? (size_t)(eol - p) : strlen(p);
+    char buf[128];
+    if (n >= sizeof buf) n = sizeof buf - 1;
+    memcpy(buf, p, n);
+    buf[n] = '\0';
+    trim(buf);
+    if (parse_iso8601_utc_unix(buf, unix_out) == 0) return 0;
+    p = eol ? eol + 1 : p + strlen(p);
+  }
+  return -1;
 }
 
 static int ffprobe_json_int(const char *j, const char *needle, int *v) {
@@ -815,6 +860,12 @@ int main(int argc, char **argv) {
 
   ltm_log("media playlist: %s\n", resolved);
 
+  int64_t media_timeline_zero_epoch_utc = 0;
+  int have_pdt_anchor = m3u8_first_program_date_time_unix(&pl, &media_timeline_zero_epoch_utc) == 0;
+  if (have_pdt_anchor)
+    ltm_log("timeline anchor: first EXT-X-PROGRAM-DATE-TIME → unix_utc=%lld\n",
+            (long long)media_timeline_zero_epoch_utc);
+
   int fw, fh;
   if (ffprobe_wh(resolved, &fw, &fh, &err) != 0) {
     fprintf(stderr, "%s\n", err ? err : "ffprobe");
@@ -1058,6 +1109,10 @@ int main(int argc, char **argv) {
   fprintf(fp, "  \"min_consecutive_absent_samples_to_open_ad\": %d,\n", kMinAbsentToOpen);
   fprintf(fp, "  \"min_consecutive_present_samples_to_close_ad\": %d,\n", kMinPresentToClose);
   fprintf(fp, "  \"scanned_duration_seconds\": %g,\n", dur);
+  if (have_pdt_anchor)
+    fprintf(fp, "  \"media_timeline_zero_epoch_utc\": %lld,\n", (long long)media_timeline_zero_epoch_utc);
+  else
+    fprintf(fp, "  \"media_timeline_zero_epoch_utc\": null,\n");
   fprintf(fp, "  \"ad_segments\": [\n");
   for (int i = 0; i < nwin; i++) {
     int a = ws[i], b = we[i];
