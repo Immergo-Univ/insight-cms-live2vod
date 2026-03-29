@@ -11,7 +11,7 @@
  * then multi-sample Sobel + low temporal-variance mask to tighten the bbox.
  *
  * Outputs:
- *   ./samples/<channel_id>_sample_<n>.jpg
+ *   ./samples/<channel_id>_sample_<n>.jpg (written then deleted after a successful run)
  *   ./output/<channel_id>_logo.jpg
  *   ./output/<channel_id>_debug.jpg (random sample among saved frames)
  *   ./output/<channel_id>.json
@@ -1252,6 +1252,17 @@ static void json_escape(const char* s, std::string& out) {
   }
 }
 
+static void remove_channel_sample_jpegs(const char* channel_id) {
+  if (!channel_id) {
+    return;
+  }
+  for (int i = 0; i < kSamples; ++i) {
+    char path[512];
+    std::snprintf(path, sizeof(path), "samples/%s_sample_%d.jpg", channel_id, i);
+    (void)::remove(path);
+  }
+}
+
 }  /* namespace */
 
 static void curl_cleanup_atexit() {
@@ -1579,6 +1590,8 @@ int main(int argc, char** argv) {
   std::fprintf(fp, "  }\n");
   std::fprintf(fp, "}\n");
   std::fclose(fp);
+
+  remove_channel_sample_jpegs(channel_id);
 
   std::printf("ok: %s bbox=(%d,%d,%d,%d) conf=%.4f -> %s\n", channel_id, logo_rect_full.x,
       logo_rect_full.y, logo_rect_full.width, logo_rect_full.height, conf, out_json);
