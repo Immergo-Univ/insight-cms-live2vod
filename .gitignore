@@ -1,9 +1,12 @@
 # Optional local native/third_party bundles under backend utils (legacy or future tools)
 backend/utils/third_party/
 
-# Python venv for logo-detector-features
-backend/utils/logo-detector-features/.venv/
-
-# Generated logo/plot PNGs (keep directory via .gitkeep)
+# Generated logo detector samples / outputs (keep dirs via .gitkeep)
+backend/utils/logo-detector-features/samples/*
+!backend/utils/logo-detector-features/samples/.gitkeep
 backend/utils/logo-detector-features/output/*
 !backend/utils/logo-detector-features/output/.gitkeep
+!backend/utils/logo-detector-features/output/logos/
+backend/utils/logo-detector-features/output/logos/*
+!backend/utils/logo-detector-features/output/logos/.gitkeep
+
