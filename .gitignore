@@ -19,3 +19,6 @@ backend/utils/logo-detector-features/output/logos/*
 # Scheduler persistence (rebuilt at runtime)
 backend/data/*.json
 backend/data/channels/*.json
+
+backend/.env*
+*.env*
