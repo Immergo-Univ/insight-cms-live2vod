@@ -13,7 +13,7 @@
  * Outputs:
  *   ./samples/<channel_id>_sample_<n>.jpg (written then deleted after a successful run)
  *   ./output/<channel_id>_logo.jpg
- *   ./output/<channel_id>_debug.jpg (random sample among saved frames)
+ *   ./output/<channel_id>_debug.jpg (same full-frame sample as logo crop)
  *   ./output/<channel_id>.json
  */
 
@@ -25,7 +25,6 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <random>
 #include <sstream>
 #include <string>
 #include <thread>
@@ -995,6 +994,31 @@ static double persistence_in_roi(const std::vector<cv::Mat>& work_gray, const cv
   return cv::mean(acc)[0];
 }
 
+/**
+ * Index of the sample whose logo ROI (proc resolution) is closest to the temporal mean gray.
+ * Avoids exporting a logo crop from a frame where the ROI is an outlier (e.g. logo occluded).
+ */
+static int best_sample_idx_near_temporal_mean(const std::vector<cv::Mat>& work_gray,
+    const cv::Mat& mean_gray_u8, cv::Rect roi_proc) {
+  roi_proc &= cv::Rect(0, 0, mean_gray_u8.cols, mean_gray_u8.rows);
+  if (work_gray.empty() || roi_proc.width < 1 || roi_proc.height < 1) {
+    return 0;
+  }
+  const cv::Mat mean_patch = mean_gray_u8(roi_proc);
+  int best_i = 0;
+  double best_l1 = 1e300;
+  for (int i = 0; i < static_cast<int>(work_gray.size()); ++i) {
+    cv::Mat diff;
+    cv::absdiff(work_gray[static_cast<size_t>(i)](roi_proc), mean_patch, diff);
+    const double l1 = cv::sum(diff)[0];
+    if (l1 < best_l1) {
+      best_l1 = l1;
+      best_i = i;
+    }
+  }
+  return best_i;
+}
+
 static double edge_density_canny(const cv::Mat& gray_roi_u8) {
   if (gray_roi_u8.empty()) {
     return 0.0;
@@ -1526,11 +1550,8 @@ int main(int argc, char** argv) {
     }
   }
 
-  /* Reload one sample for debug/crop (disk) — random index so debug is not always the same frame. */
-  std::random_device rd;
-  std::mt19937 gen(rd());
-  std::uniform_int_distribution<int> pick(0, std::max(0, ns - 1));
-  const int dbg_idx = pick(gen);
+  /* Reload sample for debug/crop: frame whose logo ROI best matches temporal mean (proc gray). */
+  const int dbg_idx = best_sample_idx_near_temporal_mean(work_gray, mean_gray_u8, logo_proc);
   char sample_path[512];
   std::snprintf(sample_path, sizeof(sample_path), "samples/%s_sample_%d.jpg", channel_id, dbg_idx);
   cv::Mat out_bgr = cv::imread(sample_path, cv::IMREAD_COLOR);
