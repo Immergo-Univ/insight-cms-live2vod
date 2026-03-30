@@ -1,312 +1,167 @@
 /**
- * Single-threaded in-memory scheduler: one tenant → one archive channel at a time.
- * Uses config.tenants, logo CLIs, logo-scan-state (with JSON persistence), and ads-precalc ingestion.
+ * Periodic archive-window probe using logo-detector (no legacy template-matching binary).
+ * Opt-in: LOGO_SCAN_ENABLED=true. Skips any channel without uploaded logo templates.
  */
 
+import fs from "node:fs/promises";
+import path from "node:path";
 import { config } from "../config.js";
-
-function logoScanVerboseLog(...args) {
-  if (config.logoScan.verbose) logoScanVerboseLog(...args);
-}
 import { resolveTenant } from "./auth.service.js";
 import { fetchChannelsWithArchive } from "./channels.service.js";
 import {
-  loadFromDisk,
-  isMatcherSlotProcessed,
-  markMatcherSlotProcessed,
-  recordMatcherSlotFragments,
-  isBackfillComplete,
-  setBackfillComplete,
-  pruneFragmentsOlderThan,
-  persistToDisk,
-  getStateSummary,
-  isDetectorCacheFresh,
-  markDetectorSuccessful,
-  getDetectorCacheExpiryIso,
-  getFragmentsForChannel,
-  retentionCutoffEpoch,
-  matcherScanCutoffEpoch,
-  hasFullMatcherArchiveCoverage,
-} from "./logo-scan-state.service.js";
-import { ingestMatcherAds, pruneAdsOlderThan } from "./ads-precalc.service.js";
-import { saveChannelProcessingSnapshot, resolveHlsBaseUrl } from "./channel-ads-disk.service.js";
-import { matcherSegmentsToIngestAds } from "./matcher-time-map.service.js";
-import {
-  runLogoDetector,
-  runTemplateMatcher,
   buildArchiveM3u8,
-  buildDetectorArchiveM3u8,
-  hasDetectorArtifacts,
+  resolveChannelLogoPathsForMatching,
+  runLogoDetectorOnStream,
 } from "./logo-pipeline.service.js";
+import {
+  mergeChannelSnapshotFields,
+  readChannelSnapshotById,
+  resolveHlsBaseUrl,
+} from "./channel-ads-disk.service.js";
 
 let schedulerRunning = false;
-let runPromise = null;
 
 function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-function matcherWindowSec() {
-  return config.logoScan.matcherWindowSeconds;
+async function loadScanState() {
+  try {
+    const raw = await fs.readFile(config.logoArchiveScan.stateFilePath, "utf8");
+    const o = JSON.parse(raw);
+    if (o && typeof o === "object" && o.lastSlotByChannel && typeof o.lastSlotByChannel === "object") {
+      return { lastSlotByChannel: o.lastSlotByChannel };
+    }
+  } catch (e) {
+    if (e.code !== "ENOENT") console.warn("[logo-archive] state read:", e.message);
+  }
+  return { lastSlotByChannel: {} };
 }
 
-/**
- * After each matcher slot: merge ads, write channel JSON for the timeline, persist scan state immediately.
- * `slotStart` / window end are the same values passed as URL `startTime` / `endTime` to streamPlaylist.
- */
-async function applyMatcherSlotResults(tenantId, channelId, hlsBase, slotStart, result) {
-  const playlistStartTimeEpoch = slotStart;
-  const playlistEndTimeEpoch = slotStart + matcherWindowSec();
-  const adSegments = result.ad_segments || [];
-  const timeMapOpts = {
-    mediaTimelineZeroEpochUtc: result.mediaTimelineZeroEpochUtc,
+async function saveScanState(doc) {
+  await fs.mkdir(path.dirname(config.logoArchiveScan.stateFilePath), { recursive: true });
+  const tmp = `${config.logoArchiveScan.stateFilePath}.tmp`;
+  const out = {
+    version: 1,
+    savedAt: new Date().toISOString(),
+    lastSlotByChannel: doc.lastSlotByChannel,
   };
-  recordMatcherSlotFragments(
-    tenantId,
-    channelId,
-    playlistStartTimeEpoch,
-    playlistEndTimeEpoch,
-    adSegments,
-    timeMapOpts,
-  );
-  const abs = matcherSegmentsToIngestAds(
-    playlistStartTimeEpoch,
-    playlistEndTimeEpoch,
-    adSegments,
-    timeMapOpts,
-  );
-  const snap = ingestMatcherAds(
-    hlsBase,
-    playlistStartTimeEpoch,
-    playlistEndTimeEpoch,
-    abs,
-    { channelId, tenantId },
-  );
-  await saveChannelProcessingSnapshot({
-    tenantId,
-    channelId,
-    hlsBaseUrl: resolveHlsBaseUrl(hlsBase),
-    ads: snap.ads,
-    processedEarliest: snap.processedEarliest,
-    processedLatest: snap.processedLatest,
-    fragments: getFragmentsForChannel(tenantId, channelId),
-  });
-  markMatcherSlotProcessed(tenantId, channelId, slotStart);
-  await persistToDisk();
+  await fs.writeFile(tmp, `${JSON.stringify(out, null, 2)}\n`, "utf8");
+  await fs.rename(tmp, config.logoArchiveScan.stateFilePath);
+}
+
+function channelKey(tenantId, channelId) {
+  return `${tenantId}::${channelId}`;
 }
 
 /**
- * Refresh only the current matcher window slot (detector still uses multi-hour UTC archive).
+ * @param {string} channelId
+ * @param {string} tenantId
+ * @param {string} hlsBaseUrl
+ * @param {number} startEpoch
+ * @param {number} endEpoch
  */
-async function refreshLatestMatcherSlot(tenantId, channelId, hlsBase, latestHourStart, latestSlotStart) {
-  const hourSec = config.logoScan.hourSeconds;
-  const slotSec = matcherWindowSec();
-  const detHours = config.logoScan.detectorArchiveHours;
-  const detStart = latestHourStart - (detHours - 1) * hourSec;
-  logoScanVerboseLog(
-    `[logo-scan] ── Channel refresh tenant=${tenantId} channel=${channelId} ` +
-      `matcher_UTC=[${latestSlotStart}, ${latestSlotStart + slotSec}) ` +
-      `detector_UTC=[${detStart}, ${latestHourStart + hourSec}) (${detHours}h)`,
-  );
-  const detectorUrl = buildDetectorArchiveM3u8(hlsBase, latestHourStart);
-  if (!(await ensureDetectorForChannel(tenantId, channelId, detectorUrl))) {
-    logoScanVerboseLog(`[logo-scan] refresh aborted (detector not available) ${tenantId}/${channelId}`);
-    return;
-  }
-  const matchUrl = buildArchiveM3u8(hlsBase, latestSlotStart, latestSlotStart + slotSec);
-  const result = await runTemplateMatcher(matchUrl, channelId, {
-    tenantId,
-    slotStartEpoch: latestSlotStart,
-    label: "refresh",
+async function mergeArchiveAdSegment(channelId, tenantId, hlsBaseUrl, startEpoch, endEpoch) {
+  const cur = await readChannelSnapshotById(channelId);
+  const ads = Array.isArray(cur?.ads) ? [...cur.ads] : [];
+  const dup = ads.some((a) => a.startEpoch === startEpoch && a.endEpoch === endEpoch);
+  if (dup) return;
+  ads.push({
+    startEpoch,
+    endEpoch,
+    startProgramDateTime: "",
+    endProgramDateTime: "",
   });
-  if (!result) {
-    logoScanVerboseLog(`[logo-scan] refresh aborted (matcher failed) ${tenantId}/${channelId}`);
-    return;
-  }
-  logoScanVerboseLog(`[logo-scan] STAGE ingest START tenant=${tenantId} channel=${channelId} slot=${latestSlotStart}`);
-  await applyMatcherSlotResults(tenantId, channelId, hlsBase, latestSlotStart, result);
-  logoScanVerboseLog(
-    `[logo-scan] STAGE ingest DONE refresh tenant=${tenantId} channel=${channelId} ` +
-      `ads_segments=${adSegmentsCount(result)} scanned_s=${result.scanned_duration_seconds}`,
-  );
+  ads.sort((a, b) => a.startEpoch - b.startEpoch);
+  await mergeChannelSnapshotFields(channelId, {
+    tenantId,
+    hlsBaseUrl,
+    ads,
+  });
 }
 
-function adSegmentsCount(result) {
-  return result.ad_segments?.length ?? 0;
-}
-
-/**
- * Runs logo-detector only if JSON/JPG missing or cache older than 24h (configurable).
- */
-async function ensureDetectorForChannel(tenantId, channelId, detectorUrl) {
-  const artifacts = await hasDetectorArtifacts(channelId);
-  const fresh = isDetectorCacheFresh(tenantId, channelId);
-  if (artifacts && fresh) {
-    const until = getDetectorCacheExpiryIso(tenantId, channelId);
-    logoScanVerboseLog(
-      `[logo-scan] STAGE logo-detector SKIP — reusing bbox+template on disk (valid until ${until}) ` +
-        `tenant=${tenantId} channel=${channelId}`,
-    );
+async function fileExists(p) {
+  try {
+    await fs.access(p);
     return true;
-  }
-  if (!artifacts && fresh) {
-    logoScanVerboseLog(
-      `[logo-scan] STAGE logo-detector RUN — detector files missing, ignoring stale cache entry ` +
-        `tenant=${tenantId} channel=${channelId}`,
-    );
-  } else if (artifacts && !fresh) {
-    logoScanVerboseLog(
-      `[logo-scan] STAGE logo-detector RUN — cache expired (>${config.logoScan.detectorCacheTtlMs / 3600000}h) ` +
-        `tenant=${tenantId} channel=${channelId}`,
-    );
-  } else {
-    logoScanVerboseLog(
-      `[logo-scan] STAGE logo-detector RUN — no prior successful detector in cache ` +
-        `tenant=${tenantId} channel=${channelId}`,
-    );
-  }
-  const ok = await runLogoDetector(detectorUrl, channelId);
-  if (ok) markDetectorSuccessful(tenantId, channelId);
-  return ok;
-}
-
-async function backfillChannel(tenantId, channelId, hlsBase, latestHourStart, latestSlotStart, nowSec) {
-  const hourSec = config.logoScan.hourSeconds;
-  const slotSec = matcherWindowSec();
-  const detHours = config.logoScan.detectorArchiveHours;
-  const detStart = latestHourStart - (detHours - 1) * hourSec;
-  const detectorUrl = buildDetectorArchiveM3u8(hlsBase, latestHourStart);
-  logoScanVerboseLog(
-    `[logo-scan] ── Channel archive catch-up START tenant=${tenantId} channel=${channelId} ` +
-      `(newest→oldest until full window or run budget) ` +
-      `detector_window_UTC=[${detStart}, ${latestHourStart + hourSec}) (${detHours}h) ` +
-      `matcher_slot_sec=${slotSec}`,
-  );
-  if (!(await ensureDetectorForChannel(tenantId, channelId, detectorUrl))) {
-    logoScanVerboseLog(`[logo-scan] backfill deferred (detector not available), retry later ${tenantId}/${channelId}`);
-    return;
-  }
-
-  const scanCutoff = matcherScanCutoffEpoch(nowSec);
-  const retentionCut = retentionCutoffEpoch(nowSec);
-  const maxRuns = config.logoScan.matcherMaxRunsPerChannelPerCycle;
-  let matcherFailed = false;
-  let stoppedByBudget = false;
-  let runsExecuted = 0;
-
-  logoScanVerboseLog(
-    `[logo-scan] backfill scan window oldest_slot_UTC>=${scanCutoff} ` +
-      `(matcherArchiveHours=${config.logoScan.matcherArchiveHours} retentionCutoff=${retentionCut}) ` +
-      `maxRunsPerCycle=${maxRuns || "∞"}`,
-  );
-
-  for (let s = latestSlotStart; s >= scanCutoff; s -= slotSec) {
-    if (isMatcherSlotProcessed(tenantId, channelId, s)) {
-      logoScanVerboseLog(
-        `[logo-scan] STAGE template-matching SKIP (slot already processed) ` +
-          `tenant=${tenantId} channel=${channelId} slotUTC=[${s}, ${s + slotSec})`,
-      );
-      continue;
-    }
-    if (maxRuns > 0 && runsExecuted >= maxRuns) {
-      stoppedByBudget = true;
-      logoScanVerboseLog(
-        `[logo-scan] backfill paused (matcherMaxRunsPerChannelPerCycle=${maxRuns}) ` +
-          `tenant=${tenantId} channel=${channelId} — will resume next cycle`,
-      );
-      break;
-    }
-    const url = buildArchiveM3u8(hlsBase, s, s + slotSec);
-    logoScanVerboseLog(
-      `[logo-scan] STAGE queue template-matching newest→oldest ` +
-        `tenant=${tenantId} channel=${channelId} next_slotUTC=[${s}, ${s + slotSec})`,
-    );
-    const result = await runTemplateMatcher(url, channelId, {
-      tenantId,
-      slotStartEpoch: s,
-      label: "backfill",
-    });
-    if (!result) {
-      matcherFailed = true;
-      logoScanVerboseLog(
-        `[logo-scan] backfill chain stopped at slot=${s} (playlist or tool error) ` +
-          `tenant=${tenantId} channel=${channelId}`,
-      );
-      break;
-    }
-    logoScanVerboseLog(`[logo-scan] STAGE ingest START tenant=${tenantId} channel=${channelId} slot=${s}`);
-    await applyMatcherSlotResults(tenantId, channelId, hlsBase, s, result);
-    runsExecuted++;
-    logoScanVerboseLog(
-      `[logo-scan] STAGE ingest DONE tenant=${tenantId} channel=${channelId} slot=${s} ` +
-        `ads_segments=${adSegmentsCount(result)} scanned_s=${result.scanned_duration_seconds}`,
-    );
-  }
-
-  if (!matcherFailed && !stoppedByBudget) {
-    setBackfillComplete(tenantId, channelId, true);
-    logoScanVerboseLog(`[logo-scan] backfill marked COMPLETE ${tenantId}/${channelId}`);
-  } else if (matcherFailed) {
-    logoScanVerboseLog(
-      `[logo-scan] backfill stays INCOMPLETE (matcher error) ${tenantId}/${channelId} — fix CDN/window or retry`,
-    );
-  } else {
-    logoScanVerboseLog(
-      `[logo-scan] backfill INCOMPLETE (run budget) ${tenantId}/${channelId} — more slots next cycle`,
-    );
+  } catch {
+    return false;
   }
 }
 
 async function runOneCycle() {
+  if (!(await fileExists(config.logoDetector.bin))) {
+    console.error(
+      `[logo-archive] Skipping cycle: missing ${config.logoDetector.bin} (make -C utils/logo-detector)`,
+    );
+    return;
+  }
+
   const nowSec = Math.floor(Date.now() / 1000);
-  const cutoff = retentionCutoffEpoch(nowSec);
-  pruneFragmentsOlderThan(cutoff);
-  await pruneAdsOlderThan(cutoff);
+  const w = Math.max(30, config.logoArchiveScan.windowSeconds);
+  const slotStart = Math.floor(nowSec / w) * w;
+  const slotEnd = slotStart + w;
 
-  const latestHourStart = Math.floor(nowSec / config.logoScan.hourSeconds) * config.logoScan.hourSeconds;
-  const slotSec = matcherWindowSec();
-  const latestSlotStart = Math.floor(nowSec / slotSec) * slotSec;
-  const tenants = config.tenants;
+  const state = await loadScanState();
+  const map = state.lastSlotByChannel;
 
-  logoScanVerboseLog(
-    `[logo-scan] —— cycle start ${new Date().toISOString()} latestHourUTC=${latestHourStart} ` +
-      `latestMatcherSlotUTC=${latestSlotStart} matcherWindowSec=${slotSec} ` +
-      `retentionCutoff=${cutoff} summary=${JSON.stringify(getStateSummary())}`,
-  );
+  for (const tenantId of config.tenants) {
+    let accountId;
+    try {
+      const t = await resolveTenant(tenantId);
+      accountId = t.accountId;
+    } catch (e) {
+      console.error(`[logo-archive] tenant ${tenantId}: ${e.message}`);
+      continue;
+    }
 
-  for (const tenantId of tenants) {
-    logoScanVerboseLog(`[logo-scan] STAGE tenant START tenant=${tenantId} (resolve + list archive channels)`);
-    const { accountId } = await resolveTenant(tenantId);
-    const rawChannels = await fetchChannelsWithArchive({ accountId, tenantId });
-    logoScanVerboseLog(`[logo-scan] STAGE tenant channels loaded tenant=${tenantId} count=${rawChannels.length}`);
+    let rows;
+    try {
+      rows = await fetchChannelsWithArchive({ accountId, tenantId });
+    } catch (e) {
+      console.error(`[logo-archive] channels ${tenantId}: ${e.message}`);
+      continue;
+    }
 
-    for (let i = 0; i < rawChannels.length; i++) {
-      const ch = rawChannels[i];
-      const channelId = String(ch._id);
-      const title = ch.title || "";
-      const hlsBase = ch.hlsStream || ch.hlsMaster;
-      if (!hlsBase) {
-        logoScanVerboseLog(`[logo-scan] STAGE channel SKIP ${i + 1}/${rawChannels.length} id=${channelId} (no HLS URL)`);
+    for (const row of rows) {
+      const channelId = String(row._id);
+      const hls = row.hlsStream || row.hlsMaster || "";
+      if (!hls) continue;
+
+      const paths = await resolveChannelLogoPathsForMatching(channelId);
+      if (paths.length === 0) {
         continue;
       }
 
-      const archiveCovered = hasFullMatcherArchiveCoverage(tenantId, channelId, nowSec, latestSlotStart);
-      logoScanVerboseLog(
-        `[logo-scan] STAGE channel ${i + 1}/${rawChannels.length} id=${channelId} title="${title}" ` +
-          `archiveCoverage=${archiveCovered} backfillFlag=${isBackfillComplete(tenantId, channelId)}`,
-      );
-      if (!archiveCovered) {
-        await backfillChannel(tenantId, channelId, hlsBase, latestHourStart, latestSlotStart, nowSec);
-      } else {
-        await refreshLatestMatcherSlot(tenantId, channelId, hlsBase, latestHourStart, latestSlotStart);
+      const ck = channelKey(tenantId, channelId);
+      if (map[ck] === slotStart) {
+        continue;
       }
-      logoScanVerboseLog(`[logo-scan] STAGE channel END ${i + 1}/${rawChannels.length} id=${channelId}`);
-    }
-    logoScanVerboseLog(`[logo-scan] STAGE tenant END tenant=${tenantId}`);
-  }
 
-  await persistToDisk();
-  logoScanVerboseLog(`[logo-scan] —— cycle end persisted state`);
+      const m3u8 = buildArchiveM3u8(hls, slotStart, slotEnd);
+      const probe = await runLogoDetectorOnStream(m3u8, paths, {
+        timeoutMs: config.logoDetector.runTimeoutMs,
+      });
+
+      if (!probe) {
+        console.warn(`[logo-archive] detector failed tenant=${tenantId} channel=${channelId} slot=${slotStart}`);
+        continue;
+      }
+
+      const logoPresent = probe.logo === true || probe.logo_present === true;
+      if (!logoPresent) {
+        const base = resolveHlsBaseUrl(hls);
+        await mergeArchiveAdSegment(channelId, tenantId, base, slotStart, slotEnd);
+        console.log(
+          `[logo-archive] slot [${slotStart},${slotEnd}) no logo match → ad segment ` +
+            `tenant=${tenantId} channel=${channelId}`,
+        );
+      }
+
+      map[ck] = slotStart;
+      await saveScanState({ lastSlotByChannel: map });
+    }
+  }
 }
 
 async function schedulerLoop() {
@@ -314,36 +169,24 @@ async function schedulerLoop() {
     try {
       await runOneCycle();
     } catch (e) {
-      console.error(`[logo-scan] cycle error: ${e.message}`);
+      console.error(`[logo-archive] cycle error: ${e.message}`);
     }
     if (!schedulerRunning) break;
-    logoScanVerboseLog(`[logo-scan] sleeping ${config.logoScan.cyclePauseMs}ms before next cycle`);
-    await sleep(config.logoScan.cyclePauseMs);
+    await sleep(Math.max(5000, config.logoArchiveScan.cyclePauseMs));
   }
 }
 
 /**
- * Starts the loop (idempotent). Requires LOGO_SCAN_ENABLED=true and Insight credentials for tenants.
+ * Starts the archive scan loop (idempotent). Uses logo-detector + uploaded logos only.
  */
 export function startLogoScanScheduler() {
-  if (!config.logoScan.enabled) {
-    logoScanVerboseLog("[logo-scan] Archive/history scan disabled (optional: LOGO_SCAN_ENABLED=true)");
+  if (!config.logoArchiveScan.enabled) {
+    console.log("[logo-archive] Disabled (set LOGO_SCAN_ENABLED=true to enable archive window probe)");
     return;
   }
   if (schedulerRunning) return;
   schedulerRunning = true;
-  runPromise = (async () => {
-    await loadFromDisk();
-    logoScanVerboseLog(
-      `[logo-scan] Scheduler started — tenants=${JSON.stringify(config.tenants)} ` +
-        `archiveHours=${config.logoScan.archiveHours} matcherArchiveHours=${config.logoScan.matcherArchiveHours} ` +
-        `matcherWindowSec=${config.logoScan.matcherWindowSeconds} ` +
-        `matcherMaxRunsPerChannelPerCycle=${config.logoScan.matcherMaxRunsPerChannelPerCycle || "∞"} ` +
-        `fragmentSec=${config.logoScan.fragmentSeconds}`,
-    );
-    await schedulerLoop();
-  })();
-  runPromise.catch((e) => console.error("[logo-scan] scheduler fatal:", e));
+  schedulerLoop().catch((e) => console.error("[logo-archive] fatal:", e));
 }
 
 export function stopLogoScanScheduler() {

@@ -1,0 +1,16 @@
+{
+  "channel_id": "66e0a4ff7e61ef0023b6e9e8",
+  "logo_bbox": {
+    "x": 1825,
+    "y": 989,
+    "width": 84,
+    "height": 80
+  },
+  "reference_frame": {
+    "width": 1920,
+    "height": 1080
+  },
+  "manual_template": true,
+  "template_file": "TVJ-br.jpg",
+  "template_position": "br"
+}

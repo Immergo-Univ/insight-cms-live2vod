@@ -1,0 +1,16 @@
+{
+  "channel_id": "63a2edcb4343c600125cdbb6",
+  "logo_bbox": {
+    "x": 1793,
+    "y": 11,
+    "width": 116,
+    "height": 103
+  },
+  "reference_frame": {
+    "width": 1920,
+    "height": 1080
+  },
+  "manual_template": true,
+  "template_file": "ערוץ 14-tr.jpg",
+  "template_position": "tr"
+}

@@ -1,13 +1,14 @@
 /**
- * Per-channel processing snapshot on disk under backend/data/channels/<channelId>.json
- * (ads for timeline + optional 10-minute fragments metadata).
+ * Per-channel snapshot on disk under backend/data/channels/<channelId>.json
+ * (precalculated ads + live stream probe fields).
  */
 
 import fs from "fs/promises";
 import path from "path";
+import { randomBytes } from "node:crypto";
 import { config } from "../config.js";
 
-const __channelsDir = path.join(path.dirname(config.logoScan.stateFilePath), "channels");
+const __channelsDir = config.channelsDataDir;
 const __indexPath = path.join(__channelsDir, "_index.json");
 
 function safeChannelFileBase(channelId) {
@@ -23,94 +24,67 @@ function resolveBaseUrl(hlsStream) {
   return `${url.origin}${url.pathname}`;
 }
 
+function isJsonSyntaxError(e) {
+  return e instanceof SyntaxError || (typeof e?.name === "string" && e.name === "SyntaxError");
+}
+
 async function readJsonIfExists(filePath) {
   try {
     const raw = await fs.readFile(filePath, "utf8");
     return JSON.parse(raw);
   } catch (e) {
     if (e.code === "ENOENT") return null;
+    if (isJsonSyntaxError(e)) {
+      console.warn(`[channel-ads-disk] Invalid JSON ignored (will rebuild on merge): ${filePath}`);
+      return null;
+    }
     throw e;
   }
 }
 
+/**
+ * Atomic write with a unique temp name so concurrent merges (many logo-live channels) do not
+ * clobber the same ".tmp" and break rename with ENOENT.
+ */
 async function writeJsonAtomic(filePath, obj) {
-  await fs.mkdir(path.dirname(filePath), { recursive: true });
-  const tmp = `${filePath}.tmp`;
-  await fs.writeFile(tmp, JSON.stringify(obj, null, 2), "utf8");
-  await fs.rename(tmp, filePath);
+  const dir = path.dirname(filePath);
+  await fs.mkdir(dir, { recursive: true });
+  const tmp = path.join(
+    dir,
+    `.${path.basename(filePath)}.${process.pid}.${Date.now()}.${randomBytes(4).toString("hex")}.tmp`,
+  );
+  try {
+    await fs.writeFile(tmp, JSON.stringify(obj, null, 2), "utf8");
+    await fs.rename(tmp, filePath);
+  } catch (e) {
+    try {
+      await fs.unlink(tmp);
+    } catch {
+      /* ignore */
+    }
+    throw e;
+  }
+}
+
+/** Serialize HLS → channelId index updates (read-modify-write) across parallel channel merges. */
+let indexWriteChain = Promise.resolve();
+
+function withIndexLock(fn) {
+  const next = indexWriteChain.then(() => fn());
+  indexWriteChain = next.catch(() => {});
+  return next;
 }
 
 async function loadIndex() {
   const data = await readJsonIfExists(__indexPath);
-  if (!data || typeof data.byBaseUrl !== "object") return { byBaseUrl: {} };
+  if (!data || typeof data !== "object") return { byBaseUrl: {} };
+  const bb = data.byBaseUrl;
+  if (!bb || typeof bb !== "object" || Array.isArray(bb)) return { ...data, byBaseUrl: {} };
   return data;
 }
 
 async function saveIndex(byBaseUrl) {
   await writeJsonAtomic(__indexPath, { version: 1, updatedAt: new Date().toISOString(), byBaseUrl });
-}
-
-/**
- * Persist full snapshot after pipeline ingest (scheduler).
- * @param {{
- *   tenantId: string,
- *   channelId: string,
- *   hlsBaseUrl: string,
- *   ads: Array<{ startEpoch: number, endEpoch: number, startProgramDateTime?: string, endProgramDateTime?: string }>,
- *   processedEarliest: number,
- *   processedLatest: number,
- *   fragments?: unknown[],
- * }} payload
- */
-export async function saveChannelProcessingSnapshot(payload) {
-  const {
-    tenantId,
-    channelId,
-    hlsBaseUrl,
-    ads,
-    processedEarliest,
-    processedLatest,
-    fragments,
-  } = payload;
-
-  const hasValidRange =
-    Array.isArray(ads) &&
-    ads.length > 0 &&
-    Number.isFinite(processedEarliest) &&
-    Number.isFinite(processedLatest) &&
-    processedEarliest !== Infinity &&
-    processedLatest !== -Infinity;
-
-  const processedRange = hasValidRange
-    ? {
-        earliestEpoch: processedEarliest,
-        latestEpoch: processedLatest,
-        earliest: new Date(processedEarliest * 1000).toISOString(),
-        latest: new Date(processedLatest * 1000).toISOString(),
-      }
-    : null;
-
-  const doc = {
-    version: 1,
-    tenantId,
-    channelId,
-    hlsBaseUrl,
-    updatedAt: new Date().toISOString(),
-    ads: ads ?? [],
-    processedRange,
-    fragments: fragments ?? undefined,
-  };
-
-  const filePath = channelFilePath(channelId);
-  await writeJsonAtomic(filePath, doc);
-
-  const index = await loadIndex();
-  index.byBaseUrl[hlsBaseUrl] = channelId;
-  await saveIndex(index.byBaseUrl);
-
-  if (config.logoScan.verbose) {
-    console.log(`[channel-ads-disk] saved ${filePath} ads=${doc.ads.length}`);
-  }
 }
 
 /**
@@ -145,6 +119,14 @@ export async function mergeChannelSnapshotFields(channelId, patch) {
     updatedAt: new Date().toISOString(),
   };
   await writeJsonAtomic(channelFilePath(channelId), next);
+
+  if (typeof next.hlsBaseUrl === "string" && next.hlsBaseUrl) {
+    await withIndexLock(async () => {
+      const index = await loadIndex();
+      index.byBaseUrl[next.hlsBaseUrl] = channelId;
+      await saveIndex(index.byBaseUrl);
+    });
+  }
 }
 
 /**

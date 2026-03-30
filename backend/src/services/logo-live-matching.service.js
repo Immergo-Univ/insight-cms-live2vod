@@ -1,21 +1,14 @@
 /**
- * Live HLS: ~1 FPS probe per channel, independent loops (one slow stream cannot block others).
+ * Live HLS: ~1 FPS probe per channel via logo-detector (OpenCV) on the stream URL.
  * Persists state to logo-live-matching-state.json and merges liveStream* into data/channels/<id>.json.
  */
 
 import fs from "fs/promises";
-import os from "os";
 import path from "path";
-import { spawn } from "child_process";
 import { config } from "../config.js";
 import { resolveTenant } from "./auth.service.js";
 import { fetchChannelsWithArchive } from "./channels.service.js";
-import {
-  hasDetectorArtifacts,
-  runProbeTemplateMatch,
-  runLogoDetector,
-  buildDetectorArchiveM3u8,
-} from "./logo-pipeline.service.js";
+import { resolveChannelLogoPathsForMatching, runLogoDetectorOnStream } from "./logo-pipeline.service.js";
 import { mergeChannelSnapshotFields, resolveHlsBaseUrl } from "./channel-ads-disk.service.js";
 
 /** Consecutive live samples without logo before an ad window opens (1 sample ~= 1s). */
@@ -24,8 +17,9 @@ const MIN_ABSENT_TO_OPEN = 10;
 const AD_START_LOOKBACK_SEC = 10;
 const MIN_PRESENT_TO_CLOSE = 2;
 
-const detectorInFlight = new Map();
-const detectorRetryAfterEpoch = new Map();
+/** Throttle stderr logs when a channel has no uploaded logos yet (paths re-checked every loop). */
+const lastMissingLogoLogMs = new Map();
+const MISSING_LOGO_LOG_INTERVAL_MS = 60_000;
 
 /** channelId -> { kind: 'ok'|'absent'|'error', count } — consecutive log streak per channel */
 const logoLiveLogStreak = new Map();
@@ -96,63 +90,18 @@ function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+async function fileExistsBin(p) {
+  try {
+    await fs.access(p);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function tenantsForLive() {
   const extra = config.logoLiveMatching.tenantIds;
   return extra.length > 0 ? extra : config.tenants;
-}
-
-/**
- * @param {string} hlsUrl
- * @param {string} outPath
- * @param {number} timeoutMs
- */
-function grabOneFrameToFile(hlsUrl, outPath, timeoutMs) {
-  return new Promise((resolve, reject) => {
-    let settled = false;
-    let timer;
-
-    const finish = (err) => {
-      if (settled) return;
-      settled = true;
-      if (timer) clearTimeout(timer);
-      if (err) reject(err);
-      else resolve();
-    };
-
-    const child = spawn(
-      "ffmpeg",
-      [
-        "-nostdin",
-        "-hide_banner",
-        "-loglevel",
-        "error",
-        "-y",
-        "-i",
-        hlsUrl,
-        "-frames:v",
-        "1",
-        "-q:v",
-        "3",
-        outPath,
-      ],
-      { stdio: "ignore" },
-    );
-
-    timer = setTimeout(() => {
-      try {
-        child.kill("SIGKILL");
-      } catch {
-        /* ignore */
-      }
-      finish(new Error(`ffmpeg frame timeout ${timeoutMs}ms`));
-    }, timeoutMs);
-
-    child.on("error", (err) => finish(err));
-    child.on("close", (code) => {
-      if (code === 0) finish();
-      else finish(new Error(`ffmpeg exit ${code}`));
-    });
-  });
 }
 
 /** @param {{ hlsStream?: string, hlsMaster?: string }} row */
@@ -274,50 +223,24 @@ function persistLiveRow(channelId, st) {
 }
 
 /**
- * Ensures detector JSON+JPG exist on disk. Reuses them if present; otherwise runs logo-detector once
- * against a short archive window (bbox extraction only).
+ * Requires at least one uploaded logo in channel settings (see Channel settings UI).
+ * @returns {Promise<{ ok: boolean, paths: string[] }>}
  */
-async function ensureDetectorArtifacts(channelId, hlsStream, st) {
-  if (await hasDetectorArtifacts(channelId)) {
-    detectorRetryAfterEpoch.delete(channelId);
-    return true;
+async function ensureLogoSourcesForChannel(channelId, st) {
+  const paths = await resolveChannelLogoPathsForMatching(channelId);
+  if (paths.length > 0) {
+    lastMissingLogoLogMs.delete(channelId);
+    return { ok: true, paths };
   }
 
-  const nowSec = Math.floor(Date.now() / 1000);
-  const retryAfter = detectorRetryAfterEpoch.get(channelId);
-  if (retryAfter != null && nowSec < retryAfter) {
-    st.lastError = "detector_cooldown";
-    return false;
+  st.lastError = "logo_assets_missing";
+  const nowMs = Date.now();
+  const lastLog = lastMissingLogoLogMs.get(channelId) ?? 0;
+  if (nowMs - lastLog >= MISSING_LOGO_LOG_INTERVAL_MS) {
+    logLogoLiveStatus(st, channelId, "error");
+    lastMissingLogoLogMs.set(channelId, nowMs);
   }
-
-  const pending = detectorInFlight.get(channelId);
-  if (pending) {
-    await pending;
-    return hasDetectorArtifacts(channelId);
-  }
-
-  const latestHourStart =
-    Math.floor(nowSec / config.logoScan.hourSeconds) * config.logoScan.hourSeconds;
-  const detectorUrl = buildDetectorArchiveM3u8(hlsStream, latestHourStart);
-
-  const run = (async () => {
-    try {
-      const ok = await runLogoDetector(detectorUrl, channelId);
-      if (!ok) {
-        detectorRetryAfterEpoch.set(channelId, Math.floor(Date.now() / 1000) + 120);
-        st.lastError = "logo_detector_failed";
-        logLogoLiveStatus(st, channelId, "error");
-      } else {
-        detectorRetryAfterEpoch.delete(channelId);
-      }
-    } finally {
-      detectorInFlight.delete(channelId);
-    }
-  })();
-
-  detectorInFlight.set(channelId, run);
-  await run;
-  return hasDetectorArtifacts(channelId);
+  return { ok: false, paths: [] };
 }
 
 /**
@@ -350,26 +273,23 @@ function ensureChannelRow(channels, channelId, meta) {
   return channels[channelId];
 }
 
-async function tickChannel(channelId, st, tmpFramePath) {
+async function tickChannel(channelId, st, logoPaths) {
   const nowSec = Math.floor(Date.now() / 1000);
   st.lastProbeAt = new Date().toISOString();
   st.lastError = null;
 
-  const ffMs = Math.max(5000, config.logoLiveMatching.ffmpegFrameTimeoutMs);
-
-  try {
-    await grabOneFrameToFile(st.hlsStream, tmpFramePath, ffMs);
-  } catch (e) {
-    st.lastError = e.message;
+  if (!(await fileExistsBin(config.logoDetector.bin))) {
+    st.lastError = "logo_detector_binary_missing";
     logLogoLiveStatus(st, channelId, "error");
     return;
   }
 
-  const probe = await runProbeTemplateMatch(tmpFramePath, channelId, {
-    channelLabel: st.title,
+  const probe = await runLogoDetectorOnStream(st.hlsStream, logoPaths, {
+    timeoutMs: config.logoLiveMatching.probeTimeoutMs,
   });
+
   if (!probe) {
-    st.lastError = "probe_failed";
+    st.lastError = "logo_detector_failed";
     logLogoLiveStatus(st, channelId, "error");
     return;
   }
@@ -402,7 +322,6 @@ async function tickChannel(channelId, st, tmpFramePath) {
 }
 
 async function runOneChannelLoop(channelId) {
-  const tmpFramePath = path.join(os.tmpdir(), `logo-live-${channelId}.jpg`);
   const interval = Math.max(200, config.logoLiveMatching.intervalMs);
 
   while (serviceRunning && liveChannelWanted.has(channelId)) {
@@ -415,9 +334,17 @@ async function runOneChannelLoop(channelId) {
         continue;
       }
 
-      const ready = await ensureDetectorArtifacts(channelId, st.hlsStream, st);
-      if (ready) {
-        await tickChannel(channelId, st, tmpFramePath);
+      const ready = await ensureLogoSourcesForChannel(channelId, st);
+      if (ready.ok) {
+        await tickChannel(channelId, st, ready.paths);
+      } else {
+        st.lastProbeAt = new Date().toISOString();
+        await mergeChannelSnapshotFields(channelId, {
+          tenantId: st.tenantId,
+          hlsBaseUrl: resolveHlsBaseUrl(st.hlsStream),
+          liveStreamLastError: st.lastError,
+          liveStreamLastProbeAt: st.lastProbeAt,
+        });
       }
       await persistLiveRow(channelId, st);
     } catch (e) {

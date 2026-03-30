@@ -9,6 +9,7 @@ import { TimelineSelection } from "./timeline-selection";
 import { useTimezone } from "@/hooks/use-timezone";
 import { getPrecalculatedAds, type PreCalcAd } from "@/services/ads.service";
 import type { EpgEvent } from "@/types/channel";
+import { ChannelTimelineSettings } from "@/components/live2vod/channel-timeline-settings";
 
 export interface TimeWindow {
   startTime: number;
@@ -129,7 +130,7 @@ export function TimelinePanel({
         />
       </div>
 
-      <div ref={scrollRef} className="flex-1 overflow-y-auto">
+      <div ref={scrollRef} className="relative flex-1 overflow-y-auto">
         <div className="relative ml-14" style={{ height: totalHeight }}>
           <TimelineRuler
             totalMinutes={totalMinutes}
@@ -160,6 +161,7 @@ export function TimelinePanel({
             onChange={handleSelectionChange}
           />
         </div>
+        {channelId ? <ChannelTimelineSettings channelId={channelId} /> : null}
       </div>
     </div>
   );

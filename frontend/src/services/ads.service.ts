@@ -1,7 +1,6 @@
 import { httpClient } from "./http-client";
 
-// Ads for the Live2VOD vertical timeline: backend serves merged in-memory state or
-// per-channel JSON under backend/data/channels/<channelId>.json (see GET /ads/precalculated).
+// Ads for the Live2VOD vertical timeline: backend reads per-channel JSON under backend/data/channels/<channelId>.json.
 
 export interface DetectedAd {
   startOffsetSec: number;

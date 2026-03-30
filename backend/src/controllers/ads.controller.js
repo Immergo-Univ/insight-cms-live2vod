@@ -30,7 +30,7 @@ adsRouter.get("/precalculated", async (req, res) => {
   }
 });
 
-adsRouter.post("/detect", (req, res) => {
+adsRouter.post("/detect", async (req, res) => {
   try {
     const { m3u8Url } = req.body;
 
@@ -38,7 +38,7 @@ adsRouter.post("/detect", (req, res) => {
       return res.status(400).json({ error: "Missing required field: m3u8Url" });
     }
 
-    const result = queryAdsByM3u8Url(m3u8Url);
+    const result = await queryAdsByM3u8Url(m3u8Url);
 
     if (!result) {
       return res.json({
