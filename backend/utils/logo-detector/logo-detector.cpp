@@ -8,7 +8,7 @@
  * Grabs one frame via ffmpeg, runs TM_CCOEFF_NORMED matchTemplate at multiple template scales.
  *
  * Env (optional):
- *   LOGO_DETECTOR_THRESHOLD   — min score to count as matched (default 0.48)
+ *   LOGO_DETECTOR_THRESHOLD   — min score to count as matched (default 0.78)
  *   LOGO_DETECTOR_SCALE_MIN   — default 0.72
  *   LOGO_DETECTOR_SCALE_MAX   — default 1.28
  *   LOGO_DETECTOR_SCALE_STEPS — default 17
@@ -203,7 +203,7 @@ int main(int argc, char **argv) {
   std::vector<std::string> logos;
   for (int i = 1; i < argc - 1; i++) logos.emplace_back(argv[i]);
 
-  const double thr = env_double("LOGO_DETECTOR_THRESHOLD", 0.48);
+  const double thr = env_double("LOGO_DETECTOR_THRESHOLD", 0.80);
   const double smin = env_double("LOGO_DETECTOR_SCALE_MIN", 0.72);
   const double smax = env_double("LOGO_DETECTOR_SCALE_MAX", 1.28);
   const int steps = env_int("LOGO_DETECTOR_SCALE_STEPS", 17);

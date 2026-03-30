@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight, Trash01 } from "@untitledui/icons";
+import { useDateFormatter } from "react-aria";
 import {
   COLUMN_WIDTH_PX,
   ZOOM_LEVELS_MS,
@@ -41,6 +42,10 @@ interface EditorTimelineProps {
   adsLoading?: boolean;
   onRemoveAd?: (id: string) => void;
   onResizeAd?: (id: string, newStartTime?: number, newEndTime?: number) => void;
+  /** Unix seconds when the clip window starts (wall clock = this + playhead offset). */
+  clipStartUnixSec?: number;
+  /** IANA timezone (e.g. from ?tz= query). */
+  clientTimeZone?: string;
 }
 
 export function EditorTimeline({
@@ -61,6 +66,8 @@ export function EditorTimeline({
   adsLoading = false,
   onRemoveAd,
   onResizeAd,
+  clipStartUnixSec = 0,
+  clientTimeZone,
 }: EditorTimelineProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   /** Thin horizontal scrollbar below thumbnails, synced with scrollRef */
@@ -126,6 +133,30 @@ export function EditorTimeline({
 
   const playheadPx =
     durationSeconds > 0 ? currentTimeSeconds * pixelsPerSecond : 0;
+
+  const wallClockFormatter = useDateFormatter({
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    ...(clientTimeZone ? { timeZone: clientTimeZone } : {}),
+  });
+
+  const wallClockAtPlayhead = useMemo(() => {
+    if (!clipStartUnixSec || !Number.isFinite(clipStartUnixSec) || clipStartUnixSec <= 0) return "";
+    const offset = Math.max(0, Math.min(currentTimeSeconds, durationSeconds));
+    const ms = (clipStartUnixSec + offset) * 1000;
+    const d = new Date(ms);
+    if (!Number.isFinite(d.getTime())) return "";
+    return wallClockFormatter.format(d);
+  }, [
+    clipStartUnixSec,
+    currentTimeSeconds,
+    durationSeconds,
+    wallClockFormatter,
+  ]);
 
   useEffect(() => {
     const content = scrollRef.current;
@@ -319,10 +350,18 @@ export function EditorTimeline({
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <span className="text-xs font-medium text-secondary">
+        <div className="flex min-w-0 flex-1 items-center gap-3 flex-wrap">
+          <span className="text-xs font-medium text-secondary tabular-nums">
             {formatTime(currentTimeSeconds)} / {formatTime(durationSeconds)}
           </span>
+          {wallClockAtPlayhead ? (
+            <span
+              className="max-w-full truncate rounded-md border border-secondary bg-secondary_alt px-2 py-0.5 text-[10px] font-medium tabular-nums text-secondary"
+              title={`Program time (${clientTimeZone ?? "local"})`}
+            >
+              {wallClockAtPlayhead}
+            </span>
+          ) : null}
           {adsLoading && (
             <span className="animate-pulse text-[10px] font-medium text-amber-500">
               Detecting ads…

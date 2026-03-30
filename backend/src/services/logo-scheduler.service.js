@@ -138,24 +138,62 @@ async function runOneCycle() {
         continue;
       }
 
-      const m3u8 = buildArchiveM3u8(hls, slotStart, slotEnd);
-      const probe = await runLogoDetectorOnStream(m3u8, paths, {
-        timeoutMs: config.logoDetector.runTimeoutMs,
-      });
+      const base = resolveHlsBaseUrl(hls);
+      const timeoutMs = config.logoDetector.runTimeoutMs;
+      const half = Math.floor(w / 2);
 
-      if (!probe) {
-        console.warn(`[logo-archive] detector failed tenant=${tenantId} channel=${channelId} slot=${slotStart}`);
-        continue;
+      /**
+       * Single-frame probe per sub-window. Two half-slots avoid marking a full 2×half window as ad
+       * when the break starts mid-window (previously up to ~w seconds late on start time).
+       */
+      async function probeWindow(a, b) {
+        const m3u8 = buildArchiveM3u8(hls, a, b);
+        const p = await runLogoDetectorOnStream(m3u8, paths, { timeoutMs });
+        if (!p) return null;
+        return p.logo === true || p.logo_present === true;
       }
 
-      const logoPresent = probe.logo === true || probe.logo_present === true;
-      if (!logoPresent) {
-        const base = resolveHlsBaseUrl(hls);
-        await mergeArchiveAdSegment(channelId, tenantId, base, slotStart, slotEnd);
-        console.log(
-          `[logo-archive] slot [${slotStart},${slotEnd}) no logo match → ad segment ` +
-            `tenant=${tenantId} channel=${channelId}`,
-        );
+      if (half >= 15 && slotStart + half < slotEnd) {
+        const mid = slotStart + half;
+        const [logoFirst, logoSecond] = await Promise.all([
+          probeWindow(slotStart, mid),
+          probeWindow(mid, slotEnd),
+        ]);
+        if (logoFirst === null || logoSecond === null) {
+          console.warn(`[logo-archive] detector failed tenant=${tenantId} channel=${channelId} slot=${slotStart}`);
+          continue;
+        }
+        if (!logoFirst && !logoSecond) {
+          await mergeArchiveAdSegment(channelId, tenantId, base, slotStart, slotEnd);
+          console.log(
+            `[logo-archive] slot [${slotStart},${slotEnd}) no logo → ad tenant=${tenantId} channel=${channelId}`,
+          );
+        } else if (logoFirst && !logoSecond) {
+          await mergeArchiveAdSegment(channelId, tenantId, base, mid, slotEnd);
+          console.log(
+            `[logo-archive] slot [${mid},${slotEnd}) no logo (mid break) tenant=${tenantId} channel=${channelId}`,
+          );
+        } else if (!logoFirst && logoSecond) {
+          await mergeArchiveAdSegment(channelId, tenantId, base, slotStart, mid);
+          console.log(
+            `[logo-archive] slot [${slotStart},${mid}) no logo (early break) tenant=${tenantId} channel=${channelId}`,
+          );
+        }
+      } else {
+        const m3u8 = buildArchiveM3u8(hls, slotStart, slotEnd);
+        const probe = await runLogoDetectorOnStream(m3u8, paths, { timeoutMs });
+        if (!probe) {
+          console.warn(`[logo-archive] detector failed tenant=${tenantId} channel=${channelId} slot=${slotStart}`);
+          continue;
+        }
+        const logoPresent = probe.logo === true || probe.logo_present === true;
+        if (!logoPresent) {
+          await mergeArchiveAdSegment(channelId, tenantId, base, slotStart, slotEnd);
+          console.log(
+            `[logo-archive] slot [${slotStart},${slotEnd}) no logo match → ad segment ` +
+              `tenant=${tenantId} channel=${channelId}`,
+          );
+        }
       }
 
       map[ck] = slotStart;
@@ -180,10 +218,6 @@ async function schedulerLoop() {
  * Starts the archive scan loop (idempotent). Uses logo-detector + uploaded logos only.
  */
 export function startLogoScanScheduler() {
-  if (!config.logoArchiveScan.enabled) {
-    console.log("[logo-archive] Disabled (set LOGO_SCAN_ENABLED=true to enable archive window probe)");
-    return;
-  }
   if (schedulerRunning) return;
   schedulerRunning = true;
   schedulerLoop().catch((e) => console.error("[logo-archive] fatal:", e));

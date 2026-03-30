@@ -13,9 +13,10 @@ import { mergeChannelSnapshotFields, resolveHlsBaseUrl } from "./channel-ads-dis
 
 /** Consecutive live samples without logo before an ad window opens (1 sample ~= 1s). */
 const MIN_ABSENT_TO_OPEN = 10;
-/** Seconds to rewind ad start from confirm time (logo was absent during hysteresis but not yet confirmed). */
+/** Fallback if first-absent epoch is missing (should not happen). */
 const AD_START_LOOKBACK_SEC = 10;
-const MIN_PRESENT_TO_CLOSE = 2;
+/** Consecutive samples with logo before closing an ad window (stricter = fewer false “logo back”). */
+const MIN_PRESENT_TO_CLOSE = 4;
 
 /** Throttle stderr logs when a channel has no uploaded logos yet (paths re-checked every loop). */
 const lastMissingLogoLogMs = new Map();
@@ -118,6 +119,7 @@ function channelHlsUrl(row) {
  *   trueStreak: number,
  *   inAd: boolean,
  *   adWindowStartEpoch: number | null,
+ *   absentStreakStartEpoch: number | null,
  *   segments: Array<{ startEpoch: number, endEpoch: number }>,
  *   lastLogo: boolean | null,
  *   lastMatchScore: number | null,
@@ -135,6 +137,7 @@ function applyHysteresisSample(st, logoPresent, nowSec) {
   if (logoPresent) {
     st.trueStreak += 1;
     st.falseStreak = 0;
+    st.absentStreakStartEpoch = null;
     if (st.inAd && st.trueStreak >= MIN_PRESENT_TO_CLOSE) {
       const endEpoch = nowSec - MIN_PRESENT_TO_CLOSE;
       if (st.adWindowStartEpoch != null && endEpoch >= st.adWindowStartEpoch) {
@@ -145,12 +148,19 @@ function applyHysteresisSample(st, logoPresent, nowSec) {
       st.trueStreak = 0;
     }
   } else {
+    if (!st.inAd && st.falseStreak === 0) {
+      st.absentStreakStartEpoch = nowSec;
+    }
     st.falseStreak += 1;
     st.trueStreak = 0;
     if (!st.inAd && st.falseStreak >= MIN_ABSENT_TO_OPEN) {
       st.inAd = true;
-      st.adWindowStartEpoch = Math.max(0, nowSec - AD_START_LOOKBACK_SEC);
+      st.adWindowStartEpoch =
+        st.absentStreakStartEpoch != null
+          ? Math.max(0, st.absentStreakStartEpoch)
+          : Math.max(0, nowSec - AD_START_LOOKBACK_SEC);
       st.falseStreak = 0;
+      st.absentStreakStartEpoch = null;
     }
   }
   st.lastLogo = logoPresent;
@@ -201,6 +211,7 @@ function cloneChannelState(st) {
     trueStreak: st.trueStreak,
     inAd: st.inAd,
     adWindowStartEpoch: st.adWindowStartEpoch,
+    absentStreakStartEpoch: st.absentStreakStartEpoch ?? null,
     segments: Array.isArray(st.segments) ? st.segments.map((s) => ({ ...s })) : [],
     lastLogo: st.lastLogo,
     lastMatchScore: st.lastMatchScore,
@@ -258,6 +269,7 @@ function ensureChannelRow(channels, channelId, meta) {
       trueStreak: 0,
       inAd: false,
       adWindowStartEpoch: null,
+      absentStreakStartEpoch: null,
       segments: [],
       lastLogo: null,
       lastMatchScore: null,
@@ -269,6 +281,9 @@ function ensureChannelRow(channels, channelId, meta) {
     channels[channelId].title = meta.title;
     channels[channelId].hlsStream = meta.hlsStream;
     if (!Array.isArray(channels[channelId].segments)) channels[channelId].segments = [];
+    if (channels[channelId].absentStreakStartEpoch === undefined) {
+      channels[channelId].absentStreakStartEpoch = null;
+    }
   }
   return channels[channelId];
 }

@@ -29,8 +29,8 @@ export const config = {
    */
   logoDetector: {
     threshold: (() => {
-      const v = parseFloat(process.env.LOGO_DETECTOR_THRESHOLD ?? process.env.LOGO_SCAN_MATCHER_THRESHOLD ?? "0.48");
-      return Number.isFinite(v) && v >= 0 && v <= 1 ? v : 0.48;
+      const v = parseFloat(process.env.LOGO_DETECTOR_THRESHOLD ?? process.env.LOGO_SCAN_MATCHER_THRESHOLD ?? "0.78");
+      return Number.isFinite(v) && v >= 0 && v <= 1 ? v : 0.78;
     })(),
     scaleMin: (() => {
       const v = parseFloat(process.env.LOGO_DETECTOR_SCALE_MIN ?? process.env.LOGO_SCAN_MATCHER_SCALE_MIN ?? "0.72");
@@ -61,7 +61,8 @@ export const config = {
     enabled: process.env.LOGO_LIVE_MATCHING_ENABLED !== "false",
     intervalMs: parseInt(process.env.LOGO_LIVE_MATCHING_INTERVAL_MS || "1000", 10),
     discoveryIntervalMs: parseInt(process.env.LOGO_LIVE_DISCOVERY_INTERVAL_MS || "60000", 10),
-    probeTimeoutMs: parseInt(process.env.LOGO_LIVE_PROBE_TIMEOUT_MS || "90000", 10),
+    /** Single logo-detector run (ffmpeg + OpenCV) per live tick. Env: LOGO_LIVE_PROBE_TIMEOUT_MS */
+    probeTimeoutMs: parseInt(process.env.LOGO_LIVE_PROBE_TIMEOUT_MS || "5000", 10),
     stateFilePath:
       process.env.LOGO_LIVE_MATCHING_STATE_FILE ||
       path.join(backendRoot, "data", "logo-live-matching-state.json"),
@@ -81,9 +82,9 @@ export const config = {
    * Skips channels with no uploaded logos. Re-evaluates every cycle when logos appear later.
    */
   logoArchiveScan: {
-    enabled: process.env.LOGO_SCAN_ENABLED === "true",
     cyclePauseMs: parseInt(process.env.LOGO_SCAN_CYCLE_PAUSE_MS || "45000", 10),
-    windowSeconds: parseInt(process.env.LOGO_SCAN_MATCHER_WINDOW_SEC || "120", 10),
+    /** One detector pass per half-window; smaller = finer ad edges but more CDN/probe load. Env: LOGO_SCAN_MATCHER_WINDOW_SEC */
+    windowSeconds: parseInt(process.env.LOGO_SCAN_MATCHER_WINDOW_SEC || "60", 10),
     stateFilePath:
       process.env.LOGO_ARCHIVE_SCAN_STATE_FILE ||
       path.join(backendRoot, "data", "logo-archive-scan-state.json"),

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, Play } from "@untitledui/icons";
 import { useLocation, useNavigate } from "react-router";
+import { useTimezone } from "@/hooks/use-timezone";
 import {
   EditorPlayer,
   EditorTimeline,
@@ -24,6 +25,7 @@ export function EditorPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const clipState = location.state as EditorClipState | null;
+  const clientTimeZone = useTimezone();
 
   const playerRef = useRef<EditorPlayerRef>(null);
   const [muted, setMuted] = useState(false);
@@ -454,6 +456,8 @@ export function EditorPage() {
               adsLoading={adsLoading}
               onRemoveAd={handleRemoveAd}
               onResizeAd={handleResizeAd}
+              clipStartUnixSec={clipState.startTime}
+              clientTimeZone={clientTimeZone}
             />
           </section>
 
