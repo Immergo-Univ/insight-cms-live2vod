@@ -120,18 +120,31 @@ function logoDetectorChildEnv(channelId) {
 }
 
 /**
+ * @param {{ reason?: string } | undefined} ref
+ * @param {string} reason
+ */
+function setDetectorFailureReason(ref, reason) {
+  if (ref && typeof ref === "object") ref.reason = reason;
+}
+
+/**
  * @param {string} m3u8Url
  * @param {string[]} logoAbsPaths
- * @param {{ timeoutMs?: number, channelId?: string }} [opts]
+ * @param {{ timeoutMs?: number, channelId?: string, failureRef?: { reason?: string } }} [opts]
  */
 export async function runLogoDetectorOnStream(m3u8Url, logoAbsPaths, opts = {}) {
+  const failRef = opts.failureRef;
   const bin = config.logoDetector.bin;
   const cwd = config.logoDetector.dir;
   if (!(await fileExists(bin))) {
+    setDetectorFailureReason(failRef, "binary_missing");
     console.error(`[logo-detector] Missing binary: ${bin} (make -C utils/logo-detector)`);
     return null;
   }
-  if (!m3u8Url || !logoAbsPaths.length) return null;
+  if (!m3u8Url || !logoAbsPaths.length) {
+    setDetectorFailureReason(failRef, "missing_url_or_logo_paths");
+    return null;
+  }
   const d = config.logoDetector;
   const args = [];
   if (d.debugLogoDetector) args.push("--debug");
@@ -148,11 +161,15 @@ export async function runLogoDetectorOnStream(m3u8Url, logoAbsPaths, opts = {}) 
     }
     const probe = parseProbeJsonFromStdout(stdout);
     if (!probe || probe.ok === false) {
+      setDetectorFailureReason(failRef, !probe ? "invalid_probe_json" : "probe_ok_false");
       console.error(`[logo-detector] bad JSON or ok=false: ${stdout.slice(0, 400)}`);
       return null;
     }
     return probe;
   } catch (e) {
+    const msg = e && typeof e.message === "string" ? e.message : String(e);
+    const short = msg.length > 120 ? `${msg.slice(0, 117)}...` : msg;
+    setDetectorFailureReason(failRef, short);
     console.error(`[logo-detector] ${e.message}`);
     return null;
   }

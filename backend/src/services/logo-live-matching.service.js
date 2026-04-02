@@ -71,6 +71,9 @@ function logLogoLiveStatus(st, channelId, kind, flags = {}) {
   const label = logoLiveLabelSlot(st, channelId);
   const sym = kind === "ok" ? "✅" : kind === "absent" ? "❌" : "⚠️";
   let line = `[logo-live] ${label}:  ${sym} (${count})`;
+  if (kind === "error" && typeof st.lastError === "string" && st.lastError.trim() !== "") {
+    line += ` | ${st.lastError.trim()}`;
+  }
   if (flags.adOpened) line += " -- AD start --";
   if (flags.adClosed) line += " -- AD end --";
   console.log(line);
@@ -299,13 +302,17 @@ async function tickChannel(channelId, st, logoPaths) {
     return;
   }
 
+  const detectorFailure = {};
   const probe = await runLogoDetectorOnStream(st.hlsStream, logoPaths, {
     timeoutMs: config.logoLiveMatching.probeTimeoutMs,
     channelId,
+    failureRef: detectorFailure,
   });
 
   if (!probe) {
-    st.lastError = "logo_detector_failed";
+    st.lastError = detectorFailure.reason
+      ? `detector:${detectorFailure.reason}`
+      : "logo_detector_failed";
     logLogoLiveStatus(st, channelId, "error");
     return;
   }

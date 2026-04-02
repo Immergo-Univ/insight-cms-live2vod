@@ -9,8 +9,6 @@ import { TimelineSelection } from "./timeline-selection";
 import { useTimezone } from "@/hooks/use-timezone";
 import { getPrecalculatedAds, type PreCalcAd } from "@/services/ads.service";
 import type { EpgEvent } from "@/types/channel";
-import { ChannelTimelineSettings } from "@/components/live2vod/channel-timeline-settings";
-
 export interface TimeWindow {
   startTime: number;
   endTime: number;
@@ -161,7 +159,6 @@ export function TimelinePanel({
             onChange={handleSelectionChange}
           />
         </div>
-        {channelId ? <ChannelTimelineSettings channelId={channelId} /> : null}
       </div>
     </div>
   );

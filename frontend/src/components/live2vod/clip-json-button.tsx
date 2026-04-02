@@ -39,9 +39,9 @@ export function ClipJsonButton({ streamUrl, timeWindow }: ClipJsonButtonProps) {
   const json = JSON.stringify(clipState, null, 2);
 
   return (
-    <div className="fixed bottom-4 right-4 z-50">
+    <div className="relative">
       {open && (
-        <div className="absolute bottom-12 right-0 w-96 rounded-lg border border-secondary bg-primary shadow-xl">
+        <div className="absolute bottom-12 right-0 z-10 w-96 rounded-lg border border-secondary bg-primary shadow-xl">
           <div className="flex items-center justify-between border-b border-secondary px-3 py-2">
             <span className="text-xs font-semibold text-primary">JSON</span>
             <button

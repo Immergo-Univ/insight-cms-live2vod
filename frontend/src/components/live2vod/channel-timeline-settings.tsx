@@ -173,18 +173,18 @@ function formatUploaded(iso: string) {
   }
 }
 
+/** Logo upload / channel settings trigger (place inside a fixed toolbar next to other actions). */
 export function ChannelTimelineSettings({ channelId }: ChannelTimelineSettingsProps) {
   return (
-    <div className="pointer-events-none absolute right-0 bottom-0 z-20 p-3">
-      <DialogTrigger>
-        <Button
-          type="button"
-          size="sm"
-          color="secondary"
-          iconLeading={Settings01}
-          className="pointer-events-auto shadow-md"
-          aria-label="Channel settings"
-        />
+    <DialogTrigger>
+      <Button
+        type="button"
+        size="sm"
+        color="secondary"
+        iconLeading={Settings01}
+        className="shadow-md"
+        aria-label="Channel settings"
+      />
       <ModalOverlay isDismissable className="z-[60]">
         <Modal className="z-[61]">
           <Dialog
@@ -198,6 +198,5 @@ export function ChannelTimelineSettings({ channelId }: ChannelTimelineSettingsPr
         </Modal>
       </ModalOverlay>
     </DialogTrigger>
-    </div>
   );
 }
