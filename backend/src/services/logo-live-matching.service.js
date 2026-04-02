@@ -12,12 +12,13 @@ import { config } from "../config.js";
 import { resolveTenant } from "./auth.service.js";
 import { fetchChannelsWithArchive } from "./channels.service.js";
 import {
-  buildLiveLogoProbeM3u8,
+  getLiveLogoProbeWindow,
   LIVE_LOGO_PROBE_INTERVAL_MS,
   resolveChannelLogoPathsForMatching,
   runLogoDetectorOnStream,
 } from "./logo-pipeline.service.js";
 import { mergeChannelSnapshotFields, resolveHlsBaseUrl } from "./channel-ads-disk.service.js";
+import { inferStreamEdgeUnixSecFromM3u8 } from "./m3u8.service.js";
 
 /** Consecutive live samples without logo before an ad window opens (1 sample ~= 1s). */
 const MIN_ABSENT_TO_OPEN = 10;
@@ -145,17 +146,22 @@ function channelHlsUrl(row) {
  */
 
 /**
+ * Hysteresis for live logo samples.
+ * - `absentStreakStartEpoch` is set on the **first** absent sample (not after MIN_ABSENT_TO_OPEN).
+ * - When the streak reaches MIN_ABSENT_TO_OPEN, `adWindowStartEpoch` is set to that first-absent time
+ *   (confirmation only); the ad is not assumed to begin at the Nth sample.
  * @param {LiveChannelState} st
  * @param {boolean} logoPresent
- * @param {number} nowSec
+ * @param {number} sampleEpoch unix seconds for this sample — should match the stream window used for the probe
+ *   (m3u8 endTime / playlist edge), not an arbitrary wall clock after a long ffmpeg run.
  */
-function applyHysteresisSample(st, logoPresent, nowSec) {
+function applyHysteresisSample(st, logoPresent, sampleEpoch) {
   if (logoPresent) {
     st.trueStreak += 1;
     st.falseStreak = 0;
     st.absentStreakStartEpoch = null;
     if (st.inAd && st.trueStreak >= MIN_PRESENT_TO_CLOSE) {
-      const endEpoch = nowSec - MIN_PRESENT_TO_CLOSE;
+      const endEpoch = sampleEpoch - MIN_PRESENT_TO_CLOSE;
       if (st.adWindowStartEpoch != null && endEpoch >= st.adWindowStartEpoch) {
         st.segments.push({ startEpoch: st.adWindowStartEpoch, endEpoch });
       }
@@ -165,7 +171,7 @@ function applyHysteresisSample(st, logoPresent, nowSec) {
     }
   } else {
     if (!st.inAd && st.falseStreak === 0) {
-      st.absentStreakStartEpoch = nowSec;
+      st.absentStreakStartEpoch = sampleEpoch;
     }
     st.falseStreak += 1;
     st.trueStreak = 0;
@@ -174,7 +180,7 @@ function applyHysteresisSample(st, logoPresent, nowSec) {
       st.adWindowStartEpoch =
         st.absentStreakStartEpoch != null
           ? Math.max(0, st.absentStreakStartEpoch)
-          : Math.max(0, nowSec - AD_START_LOOKBACK_SEC);
+          : Math.max(0, sampleEpoch - AD_START_LOOKBACK_SEC);
       st.falseStreak = 0;
       st.absentStreakStartEpoch = null;
     }
@@ -305,7 +311,6 @@ function ensureChannelRow(channels, channelId, meta) {
 }
 
 async function tickChannel(channelId, st, logoPaths) {
-  const nowSec = Math.floor(Date.now() / 1000);
   st.lastProbeAt = new Date().toISOString();
   st.lastError = null;
 
@@ -315,16 +320,22 @@ async function tickChannel(channelId, st, logoPaths) {
     return;
   }
 
+  const { m3u8Url: probeM3u8, endEpoch: probeEndEpoch } = getLiveLogoProbeWindow(
+    st.hlsStream,
+    config.logoLiveMatching.probeWindowSeconds,
+  );
+
   const detectorFailure = {};
   const timeoutMs = config.logoLiveMatching.probeTimeoutMs;
-  const probeM3u8 = buildLiveLogoProbeM3u8(st.hlsStream, config.logoLiveMatching.probeWindowSeconds);
   let probe = await runLogoDetectorOnStream(probeM3u8, logoPaths, {
     timeoutMs,
     channelId,
     failureRef: detectorFailure,
     liveProbeIntervalMs: LIVE_LOGO_PROBE_INTERVAL_MS,
   });
+  let usedWindowedProbe = true;
   if (!probe && config.logoLiveMatching.probeFallbackRaw) {
+    usedWindowedProbe = false;
     detectorFailure.reason = undefined;
     probe = await runLogoDetectorOnStream(st.hlsStream, logoPaths, {
       timeoutMs,
@@ -342,12 +353,25 @@ async function tickChannel(channelId, st, logoPaths) {
     return;
   }
 
+  /** Media clock aligned with the m3u8 that was actually probed (windowed endTime or raw playlist). */
+  let sampleEpoch = probeEndEpoch;
+  let inferUrl = probeM3u8;
+  if (!usedWindowedProbe) {
+    sampleEpoch = Math.floor(Date.now() / 1000);
+    inferUrl = st.hlsStream;
+  }
+  try {
+    sampleEpoch = await inferStreamEdgeUnixSecFromM3u8(inferUrl, sampleEpoch);
+  } catch {
+    /* keep sampleEpoch */
+  }
+
   const skipped = probe.match_skipped === true;
   const score = typeof probe.match_score === "number" ? probe.match_score : 0;
   st.lastMatchScore = score;
   const logoPresent = skipped ? false : probe.logo === true || probe.logo_present === true;
   const wasInAd = st.inAd;
-  applyHysteresisSample(st, logoPresent, nowSec);
+  applyHysteresisSample(st, logoPresent, sampleEpoch);
   const adOpened = !wasInAd && st.inAd;
   const adClosed = wasInAd && !st.inAd;
   if (logoPresent) {

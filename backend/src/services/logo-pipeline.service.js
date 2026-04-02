@@ -34,11 +34,26 @@ export function buildArchiveM3u8(hlsStream, startEpoch, endEpoch) {
  * @param {number} [windowSeconds] default 180; clamped 1..1800
  */
 export function buildLiveLogoProbeM3u8(hlsStream, windowSeconds = 180) {
+  const { m3u8Url } = getLiveLogoProbeWindow(hlsStream, windowSeconds);
+  return m3u8Url;
+}
+
+/**
+ * Single wall-clock tick for live probe: `endEpoch` matches the m3u8 `endTime` query param (stream media clock).
+ * @param {string} hlsStream
+ * @param {number} [windowSeconds]
+ * @returns {{ m3u8Url: string, startEpoch: number, endEpoch: number }}
+ */
+export function getLiveLogoProbeWindow(hlsStream, windowSeconds = 180) {
   const w = Number(windowSeconds);
   const win = Number.isFinite(w) ? Math.min(1800, Math.max(1, Math.floor(w))) : 180;
   const endEpoch = Math.floor(Date.now() / 1000);
   const startEpoch = Math.max(0, endEpoch - win);
-  return buildArchiveM3u8(hlsStream, startEpoch, endEpoch);
+  return {
+    endEpoch,
+    startEpoch,
+    m3u8Url: buildArchiveM3u8(hlsStream, startEpoch, endEpoch),
+  };
 }
 
 function runExecutable(binPath, args, { cwd, timeoutMs, env }) {

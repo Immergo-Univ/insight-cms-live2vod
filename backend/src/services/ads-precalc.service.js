@@ -19,6 +19,37 @@ function filterAdsByRetention(adsList) {
   return (adsList ?? []).filter((ad) => ad.endEpoch > cutoff);
 }
 
+/**
+ * Merge archive `ads` with live `liveStreamAdSegments` (same unix epoch axis as m3u8 startTime/endTime).
+ */
+function mergedAdsFromSnapshot(snap) {
+  const archive = Array.isArray(snap?.ads) ? snap.ads : [];
+  const liveRaw = Array.isArray(snap?.liveStreamAdSegments) ? snap.liveStreamAdSegments : [];
+  const live = liveRaw.map((s) => ({
+    startEpoch: s.startEpoch,
+    endEpoch: s.endEpoch,
+    startProgramDateTime: "",
+    endProgramDateTime: "",
+  }));
+  const all = [...archive, ...live]
+    .filter((a) => a && typeof a.startEpoch === "number" && typeof a.endEpoch === "number")
+    .sort((a, b) => a.startEpoch - b.startEpoch);
+  if (all.length === 0) return [];
+  const out = [];
+  let cur = { ...all[0] };
+  for (let i = 1; i < all.length; i++) {
+    const n = all[i];
+    if (n.startEpoch <= cur.endEpoch) {
+      cur.endEpoch = Math.max(cur.endEpoch, n.endEpoch);
+    } else {
+      out.push(cur);
+      cur = { ...n };
+    }
+  }
+  out.push(cur);
+  return out;
+}
+
 function toTimelineAds(adsList) {
   return (adsList ?? []).map((ad) => ({
     startEpoch: ad.startEpoch,
@@ -60,7 +91,7 @@ export async function queryAdsByM3u8Url(m3u8Url) {
     if (!startTime || !endTime || endTime <= startTime) return null;
 
     const snap = await readChannelSnapshotByHls(m3u8Url);
-    const adsList = snap?.ads ? filterAdsByRetention(snap.ads) : [];
+    const adsList = snap ? filterAdsByRetention(mergedAdsFromSnapshot(snap)) : [];
     const { ads, processedRange } = findAdsForWindow(adsList, startTime, endTime);
 
     return {
@@ -96,7 +127,7 @@ export async function queryAdsForTimeline(hlsStream, startEpoch, endEpoch, optio
   }
   if (!snap) snap = await readChannelSnapshotByHls(hlsStream);
 
-  let adsList = snap?.ads ?? [];
+  let adsList = snap ? mergedAdsFromSnapshot(snap) : [];
   adsList = filterAdsByRetention(adsList);
 
   const { ads, processedRange } = findAdsForWindow(adsList, startEpoch, endEpoch);

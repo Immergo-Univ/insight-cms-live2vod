@@ -169,9 +169,26 @@ async function runOneCycle() {
             `[logo-archive] slot [${slotStart},${slotEnd}) no logo → ad tenant=${tenantId} channel=${channelId}`,
           );
         } else if (logoFirst && !logoSecond) {
-          await mergeArchiveAdSegment(channelId, tenantId, base, mid, slotEnd);
+          /**
+           * Logo in first half only: break likely starts before `mid`. A single full-half true would mark
+           * the ad from `mid`, up to ~w/2 late. Narrow with one inner probe on the first half.
+           */
+          let adStart = mid;
+          const innerStart = slotStart + Math.max(10, Math.floor(half / 2));
+          if (innerStart < mid - 8) {
+            const logoInner = await probeWindow(innerStart, mid);
+            if (logoInner === false) adStart = innerStart;
+            else if (logoInner === true) adStart = mid;
+            else {
+              console.warn(
+                `[logo-archive] inner probe failed tenant=${tenantId} channel=${channelId} slot=${slotStart}`,
+              );
+              continue;
+            }
+          }
+          await mergeArchiveAdSegment(channelId, tenantId, base, adStart, slotEnd);
           console.log(
-            `[logo-archive] slot [${mid},${slotEnd}) no logo (mid break) tenant=${tenantId} channel=${channelId}`,
+            `[logo-archive] slot [${adStart},${slotEnd}) no logo (mid break) tenant=${tenantId} channel=${channelId}`,
           );
         } else if (!logoFirst && logoSecond) {
           await mergeArchiveAdSegment(channelId, tenantId, base, slotStart, mid);
