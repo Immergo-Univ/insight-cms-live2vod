@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Settings01, Trash02 } from "@untitledui/icons";
+import { AlertTriangle, Settings01, Trash02 } from "@untitledui/icons";
 import { DialogTrigger, ModalOverlay, Modal, Dialog } from "@/components/application/modals/modal";
 import { Button } from "@/components/base/buttons/button";
+import { CloseButton } from "@/components/base/buttons/close-button";
+import { Tooltip, TooltipTrigger } from "@/components/base/tooltip/tooltip";
 import { httpClient } from "@/services/http-client";
 import {
   deleteChannelLogo,
@@ -14,7 +16,13 @@ interface ChannelTimelineSettingsProps {
   channelId: string;
 }
 
-function ChannelSettingsModalBody({ channelId }: { channelId: string }) {
+function ChannelSettingsModalBody({
+  channelId,
+  onLogoCountChange,
+}: {
+  channelId: string;
+  onLogoCountChange?: (count: number) => void;
+}) {
   const [logos, setLogos] = useState<ChannelLogoRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -27,13 +35,14 @@ function ChannelSettingsModalBody({ channelId }: { channelId: string }) {
     try {
       const data = await fetchChannelSettings(channelId);
       setLogos(data.logos);
+      onLogoCountChange?.(data.logos.length);
     } catch (e) {
       setError(httpClient.getErrorMessage(e));
       setLogos([]);
     } finally {
       setLoading(false);
     }
-  }, [channelId]);
+  }, [channelId, onLogoCountChange]);
 
   useEffect(() => {
     void load();
@@ -55,6 +64,7 @@ function ChannelSettingsModalBody({ channelId }: { channelId: string }) {
     try {
       const data = await uploadChannelLogos(channelId, files);
       setLogos(data.logos);
+      onLogoCountChange?.(data.logos.length);
     } catch (err) {
       setError(httpClient.getErrorMessage(err));
     } finally {
@@ -66,7 +76,11 @@ function ChannelSettingsModalBody({ channelId }: { channelId: string }) {
     setError(null);
     try {
       await deleteChannelLogo(channelId, logoId);
-      setLogos((prev) => prev.filter((x) => x.id !== logoId));
+      setLogos((prev) => {
+        const next = prev.filter((x) => x.id !== logoId);
+        onLogoCountChange?.(next.length);
+        return next;
+      });
     } catch (err) {
       setError(httpClient.getErrorMessage(err));
     }
@@ -74,7 +88,7 @@ function ChannelSettingsModalBody({ channelId }: { channelId: string }) {
 
   return (
     <div className="flex max-h-[min(80vh,640px)] w-full max-w-2xl flex-col gap-4 outline-hidden">
-      <div className="shrink-0 border-b border-secondary pb-3">
+      <div className="shrink-0 border-b border-secondary pb-3 pr-12 sm:pr-14">
         <h2 id="channel-settings-title" className="text-lg font-semibold text-primary">
           Channel settings
         </h2>
@@ -175,28 +189,59 @@ function formatUploaded(iso: string) {
 
 /** Logo upload / channel settings trigger (place inside a fixed toolbar next to other actions). */
 export function ChannelTimelineSettings({ channelId }: ChannelTimelineSettingsProps) {
+  const [logoCount, setLogoCount] = useState<number | null>(null);
+
+  const refreshLogoCount = useCallback(async () => {
+    try {
+      const data = await fetchChannelSettings(channelId);
+      setLogoCount(data.logos.length);
+    } catch {
+      setLogoCount(null);
+    }
+  }, [channelId]);
+
+  useEffect(() => {
+    void refreshLogoCount();
+  }, [refreshLogoCount]);
+
+  const showNoLogoWarning = logoCount === 0;
+
   return (
-    <DialogTrigger>
-      <Button
-        type="button"
-        size="sm"
-        color="secondary"
-        iconLeading={Settings01}
-        className="shadow-md"
-        aria-label="Channel settings"
-      />
-      <ModalOverlay isDismissable className="z-[60]">
-        <Modal className="z-[61]">
-          <Dialog
-            aria-labelledby="channel-settings-title"
-            className="mx-4 flex w-full max-w-2xl justify-center outline-hidden sm:mx-auto"
+    <div className="inline-flex items-center gap-1">
+      <DialogTrigger>
+        <Button
+          type="button"
+          size="sm"
+          color="secondary"
+          iconLeading={Settings01}
+          className="shadow-md"
+          aria-label="Channel settings"
+        />
+        <ModalOverlay isDismissable isKeyboardDismissDisabled={false} className="z-[60]">
+          <Modal className="z-[61]">
+            <Dialog
+              aria-labelledby="channel-settings-title"
+              className="mx-4 flex w-full max-w-2xl justify-center outline-hidden sm:mx-auto"
+            >
+              <div className="relative w-full rounded-xl border border-secondary bg-primary p-5 shadow-xl">
+                <CloseButton slot="close" size="xs" label="Close" className="absolute top-3 right-3 z-10" />
+                <ChannelSettingsModalBody channelId={channelId} onLogoCountChange={setLogoCount} />
+              </div>
+            </Dialog>
+          </Modal>
+        </ModalOverlay>
+      </DialogTrigger>
+      {showNoLogoWarning && (
+        <Tooltip title="No logo configured" placement="top">
+          <TooltipTrigger
+            isDisabled={false}
+            className="flex cursor-default text-fg-warning-primary outline-hidden transition duration-100 hover:text-fg-warning-secondary"
+            aria-label="No logo configured"
           >
-            <div className="w-full rounded-xl border border-secondary bg-primary p-5 shadow-xl">
-              <ChannelSettingsModalBody channelId={channelId} />
-            </div>
-          </Dialog>
-        </Modal>
-      </ModalOverlay>
-    </DialogTrigger>
+            <AlertTriangle data-icon className="size-4 shrink-0" aria-hidden />
+          </TooltipTrigger>
+        </Tooltip>
+      )}
+    </div>
   );
 }

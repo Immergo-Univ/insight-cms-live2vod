@@ -6,8 +6,9 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { config } from "../config.js";
+import { deleteLogoObject, isS3LogosEnabled, putManifestDocument } from "./s3-logos.service.js";
 
-function safeChannelSegment(channelId) {
+export function safeChannelSegment(channelId) {
   return String(channelId).replace(/[^a-zA-Z0-9_-]/g, "_");
 }
 
@@ -49,7 +50,7 @@ export async function readChannelSettings(channelId) {
   return { channelId: cid, logos: [], updatedAt: null };
 }
 
-async function writeChannelSettings(doc) {
+export async function writeChannelSettings(doc) {
   await fs.mkdir(config.channelSettings.dataDir, { recursive: true });
   const p = channelSettingsJsonPath(doc.channelId);
   const tmp = `${p}.tmp`;
@@ -79,6 +80,9 @@ export async function addChannelLogoEntries(channelId, metas) {
   }
   doc.updatedAt = now;
   await writeChannelSettings(doc);
+  if (isS3LogosEnabled()) {
+    await putManifestDocument(safeChannelSegment(doc.channelId), doc);
+  }
   return added;
 }
 
@@ -93,6 +97,9 @@ export async function removeChannelLogo(channelId, logoId) {
   if (idx < 0) return null;
   const [removed] = doc.logos.splice(idx, 1);
   doc.updatedAt = new Date().toISOString();
+  if (isS3LogosEnabled()) {
+    await deleteLogoObject(removed.storedRelative);
+  }
   const abs = path.join(config.channelSettings.logosDir, removed.storedRelative);
   try {
     await fs.unlink(abs);
@@ -100,6 +107,9 @@ export async function removeChannelLogo(channelId, logoId) {
     if (e.code !== "ENOENT") throw e;
   }
   await writeChannelSettings(doc);
+  if (isS3LogosEnabled()) {
+    await putManifestDocument(safeChannelSegment(doc.channelId), doc);
+  }
   return removed;
 }
 

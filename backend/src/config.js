@@ -4,6 +4,57 @@ import { fileURLToPath } from "url";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const backendRoot = path.join(__dirname, "..");
 
+/**
+ * S3-compatible logos (DO Spaces, MinIO, AWS). Keys: S3_* or AWS_* or DO tutorial SPACES_* / SPACES_SECRET.
+ *
+ * DigitalOcean Spaces: aligned with immergo-producer `utils/s3.js` — path-style addressing
+ * (`forcePathStyle: true`) and `S3_REGION` defaulting to us-east-1 when unset. Public URLs there are built as
+ * `${S3_ENDPOINT}/${S3_BUCKET_NAME}/${key}`. Override signing with S3_SIGNING_REGION if needed.
+ */
+const s3LogosResolved = (() => {
+  const accessKeyId = (
+    process.env.S3_ACCESS_KEY_ID ||
+    process.env.AWS_ACCESS_KEY_ID ||
+    process.env.SPACES_KEY ||
+    ""
+  ).trim();
+  const secretAccessKey = (
+    process.env.S3_SECRET_ACCESS_KEY ||
+    process.env.AWS_SECRET_ACCESS_KEY ||
+    process.env.SPACES_SECRET ||
+    ""
+  ).trim();
+  const bucket = (process.env.S3_BUCKET_NAME || process.env.AWS_S3_BUCKET || "").trim();
+  const endpoint = (process.env.S3_ENDPOINT || process.env.AWS_ENDPOINT_URL_S3 || "").trim();
+  const isDigitalOceanSpaces = /digitaloceanspaces\.com/i.test(endpoint);
+  const region = (() => {
+    if (process.env.S3_SIGNING_REGION?.trim()) return process.env.S3_SIGNING_REGION.trim();
+    if (isDigitalOceanSpaces) return (process.env.S3_REGION || "us-east-1").trim();
+    return (process.env.S3_REGION || process.env.AWS_REGION || "us-east-1").trim();
+  })();
+  /** DO Spaces: immergo-producer uses s3ForcePathStyle: true; virtual-hosted (false) often breaks uploads. */
+  const forcePathStyle =
+    process.env.S3_FORCE_PATH_STYLE === "false"
+      ? false
+      : process.env.S3_FORCE_PATH_STYLE === "true"
+        ? true
+        : isDigitalOceanSpaces;
+  const enabled =
+    process.env.S3_LOGOS_ENABLED !== "false" &&
+    Boolean(accessKeyId && secretAccessKey && bucket && endpoint);
+  return {
+    enabled,
+    accessKeyId,
+    secretAccessKey,
+    bucket,
+    endpoint,
+    region,
+    forcePathStyle,
+    prefix: (process.env.S3_LOGOS_PREFIX || "channel-logos").replace(/^\/+|\/+$/g, ""),
+    syncIntervalMs: parseInt(process.env.CHANNEL_LOGOS_S3_SYNC_INTERVAL_MS || "60000", 10),
+  };
+})();
+
 export const config = {
   insightApiBase: process.env.INSIGHT_API_BASE || "https://insight-api-frankly.univtec.com",
   port: process.env.PORT || 3001,
@@ -56,9 +107,7 @@ export const config = {
      * When true, spawn logo-detector with --debug and LOGO_DETECTOR_DEBUG_PATH per channel
      * (logo-detector-debug-<channelId>.jpg under debugImageDir). Opt out: LOGO_DETECTOR_DEBUG=0
      */
-    debugLogoDetector:
-      process.env.LOGO_DETECTOR_DEBUG !== "0" &&
-      (process.env.NODE_ENV === "development" || process.env.LOGO_DETECTOR_DEBUG === "1"),
+    debugLogoDetector: process.env.LOGO_DETECTOR_DEBUG !== "0",
     /** Directory for per-channel debug JPEGs. Env: LOGO_DETECTOR_DEBUG_DIR */
     debugImageDir: process.env.LOGO_DETECTOR_DEBUG_DIR || path.join(backendRoot, "utils", "logo-detector"),
   },
@@ -85,6 +134,8 @@ export const config = {
     dataDir: path.join(backendRoot, "data", "channel-settings"),
     logosDir: path.join(backendRoot, "data", "channel-logos"),
   },
+
+  s3Logos: s3LogosResolved,
 
   /**
    * Optional archive window probe: logo-detector on DVR m3u8 per channel (same env as legacy LOGO_SCAN_*).

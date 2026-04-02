@@ -10,6 +10,8 @@ import { authRouter } from "./controllers/auth.controller.js";
 import { config } from "./config.js";
 import { startLogoScanScheduler } from "./services/logo-scheduler.service.js";
 import { startLogoLiveMatchingService } from "./services/logo-live-matching.service.js";
+import { isS3LogosEnabled, logS3LogosStartup } from "./services/s3-logos.service.js";
+import { syncAllChannelLogosFromS3, startChannelLogosS3Sync } from "./services/channel-logos-sync.service.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -33,6 +35,11 @@ app.get("/{*splat}", (_req, res) => {
 
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
+  logS3LogosStartup();
+  if (isS3LogosEnabled()) {
+    syncAllChannelLogosFromS3().catch((e) => console.warn("[channel-logos-sync] startup:", e.message));
+    startChannelLogosS3Sync();
+  }
   startLogoScanScheduler();
   startLogoLiveMatchingService();
 });
