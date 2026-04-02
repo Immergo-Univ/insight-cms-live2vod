@@ -117,6 +117,7 @@ export const config = {
    */
   logoLiveMatching: {
     enabled: process.env.LOGO_LIVE_MATCHING_ENABLED !== "false",
+    /** Target gap between probe starts per channel; service enforces at least 500ms. Env: LOGO_LIVE_MATCHING_INTERVAL_MS */
     intervalMs: parseInt(process.env.LOGO_LIVE_MATCHING_INTERVAL_MS || "500", 10),
     discoveryIntervalMs: parseInt(process.env.LOGO_LIVE_DISCOVERY_INTERVAL_MS || "60000", 10),
     /** Single logo-detector run (ffmpeg + OpenCV) per live tick. Env: LOGO_LIVE_PROBE_TIMEOUT_MS */

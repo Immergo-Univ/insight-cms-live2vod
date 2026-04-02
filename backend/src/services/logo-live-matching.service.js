@@ -1,5 +1,8 @@
 /**
- * Live HLS: ~1 FPS probe per channel via logo-detector (OpenCV) on the stream URL.
+ * Live HLS: logo-detector (OpenCV) on each channel’s stream URL.
+ * - Discovery: all tenants are queried in parallel (Promise.all).
+ * - Each channel runs its own async loop; probes on different channels run concurrently.
+ * - Minimum delay between consecutive probes on the same channel: 500ms (see runOneChannelLoop).
  * Persists state to logo-live-matching-state.json and merges liveStream* into data/channels/<id>.json.
  */
 
@@ -87,7 +90,7 @@ const channelLoopTasks = new Map();
 let serviceRunning = false;
 let loopPromise = null;
 
-/** Serializes load/save of logo-live-matching-state.json */
+/** Serializes load/save of logo-live-matching-state.json (avoids lost updates); detector runs still overlap across channels. */
 let persistChain = Promise.resolve();
 
 function sleep(ms) {
@@ -345,7 +348,8 @@ async function tickChannel(channelId, st, logoPaths) {
 }
 
 async function runOneChannelLoop(channelId) {
-  const interval = Math.max(200, config.logoLiveMatching.intervalMs);
+  /** Minimum time between probe starts for this channel (parallel across channels). */
+  const interval = Math.max(500, config.logoLiveMatching.intervalMs);
 
   while (serviceRunning && liveChannelWanted.has(channelId)) {
     const t0 = Date.now();
@@ -406,32 +410,32 @@ async function discoveryTick() {
   /** @type {Array<{ channelId: string, tenantId: string, title: string, hlsStream: string }>} */
   const discovered = [];
 
-  for (const tenantId of tenantsForLive()) {
-    let accountId;
-    try {
-      const t = await resolveTenant(tenantId);
-      accountId = t.accountId;
-    } catch (e) {
-      console.error(`[logo-live] tenant ${tenantId}: ${e.message}`);
+  const tenantIds = tenantsForLive();
+  const tenantResults = await Promise.all(
+    tenantIds.map(async (tenantId) => {
+      try {
+        const t = await resolveTenant(tenantId);
+        const rows = await fetchChannelsWithArchive({ accountId: t.accountId, tenantId });
+        return { ok: true, tenantId, rows };
+      } catch (e) {
+        return { ok: false, tenantId, error: e && typeof e.message === "string" ? e.message : String(e) };
+      }
+    }),
+  );
+
+  for (const tr of tenantResults) {
+    if (!tr.ok) {
+      console.error(`[logo-live] tenant ${tr.tenantId}: ${tr.error}`);
       continue;
     }
-
-    let rows;
-    try {
-      rows = await fetchChannelsWithArchive({ accountId, tenantId });
-    } catch (e) {
-      console.error(`[logo-live] channels ${tenantId}: ${e.message}`);
-      continue;
-    }
-
-    for (const row of rows) {
+    for (const row of tr.rows) {
       const channelId = String(row._id);
       const hls = channelHlsUrl(row);
       if (!hls) continue;
       fetched.add(channelId);
       discovered.push({
         channelId,
-        tenantId,
+        tenantId: tr.tenantId,
         title: row.title || "",
         hlsStream: hls,
       });
@@ -481,6 +485,10 @@ export function startLogoLiveMatchingService() {
   }
   if (serviceRunning) return;
   serviceRunning = true;
+  const probeGap = Math.max(500, config.logoLiveMatching.intervalMs);
+  console.log(
+    `[logo-live] Started: parallel tenant discovery, one concurrent loop per channel, ≥${probeGap}ms between probes per channel`,
+  );
   loopPromise = discoveryLoop();
   loopPromise.catch((e) => console.error("[logo-live] fatal:", e));
 }
