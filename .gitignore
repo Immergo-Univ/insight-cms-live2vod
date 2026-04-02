@@ -11,6 +11,7 @@ frontend/node_modules/
 # Optional local native/third_party bundles under backend utils (legacy or future tools)
 backend/utils/third_party/
 backend/utils/logo-detector/logo-detector
+backend/utils/logo-detector/logo-detector-debug-*.jpg
 
 # Channel logos uploaded from UI (images + per-channel settings JSON)
 backend/data/channel-logos/

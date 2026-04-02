@@ -4,6 +4,7 @@
 
 import { spawn } from "node:child_process";
 import fs from "node:fs/promises";
+import path from "node:path";
 import { config } from "../config.js";
 import { listUploadedLogoAbsolutePaths } from "./channel-settings.service.js";
 
@@ -84,21 +85,44 @@ export async function resolveChannelLogoPathsForMatching(channelId) {
   return listUploadedLogoAbsolutePaths(channelId);
 }
 
-function logoDetectorChildEnv() {
+/**
+ * Safe file segment for debug JPEG filename (matches channel logo dirs convention).
+ * @param {string} [channelId]
+ */
+export function sanitizeChannelIdForLogoDebug(channelId) {
+  return String(channelId ?? "unknown").replace(/[^a-zA-Z0-9_-]/g, "_");
+}
+
+/**
+ * Absolute path to the last debug frame for this channel (overwritten each probe).
+ * @param {string} [channelId]
+ */
+export function resolveLogoDetectorDebugImagePath(channelId) {
+  const safe = sanitizeChannelIdForLogoDebug(channelId);
+  return path.join(config.logoDetector.debugImageDir, `logo-detector-debug-${safe}.jpg`);
+}
+
+/** @param {string | undefined} channelId */
+function logoDetectorChildEnv(channelId) {
   const d = config.logoDetector;
-  return {
+  const env = {
     ...process.env,
     LOGO_DETECTOR_THRESHOLD: String(d.threshold),
     LOGO_DETECTOR_SCALE_MIN: String(d.scaleMin),
     LOGO_DETECTOR_SCALE_MAX: String(d.scaleMax),
     LOGO_DETECTOR_SCALE_STEPS: String(d.scaleSteps),
   };
+  if (d.debugLogoDetector) {
+    env.LOGO_DETECTOR_DEBUG = "1";
+    env.LOGO_DETECTOR_DEBUG_PATH = resolveLogoDetectorDebugImagePath(channelId);
+  }
+  return env;
 }
 
 /**
  * @param {string} m3u8Url
  * @param {string[]} logoAbsPaths
- * @param {{ timeoutMs?: number }} [opts]
+ * @param {{ timeoutMs?: number, channelId?: string }} [opts]
  */
 export async function runLogoDetectorOnStream(m3u8Url, logoAbsPaths, opts = {}) {
   const bin = config.logoDetector.bin;
@@ -108,13 +132,16 @@ export async function runLogoDetectorOnStream(m3u8Url, logoAbsPaths, opts = {}) 
     return null;
   }
   if (!m3u8Url || !logoAbsPaths.length) return null;
-  const args = [...logoAbsPaths, m3u8Url];
+  const d = config.logoDetector;
+  const args = [];
+  if (d.debugLogoDetector) args.push("--debug");
+  args.push(...logoAbsPaths, m3u8Url);
   const timeoutMs = opts.timeoutMs ?? config.logoLiveMatching.probeTimeoutMs;
   try {
     const { stdout, stderr } = await runExecutable(bin, args, {
       cwd,
       timeoutMs,
-      env: logoDetectorChildEnv(),
+      env: logoDetectorChildEnv(opts.channelId),
     });
     if (stderr && process.env.LOGO_LIVE_DEBUG === "true") {
       console.error(stderr.slice(-2000));

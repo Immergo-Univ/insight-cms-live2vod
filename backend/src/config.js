@@ -52,6 +52,15 @@ export const config = {
     bin: path.join(backendRoot, "utils", "logo-detector", "logo-detector"),
     /** Timeout for one detector run (ffmpeg + OpenCV). */
     runTimeoutMs: parseInt(process.env.LOGO_DETECTOR_TIMEOUT_MS || process.env.LOGO_SCAN_MATCHER_TIMEOUT_MS || "900000", 10),
+    /**
+     * When true, spawn logo-detector with --debug and LOGO_DETECTOR_DEBUG_PATH per channel
+     * (logo-detector-debug-<channelId>.jpg under debugImageDir). Opt out: LOGO_DETECTOR_DEBUG=0
+     */
+    debugLogoDetector:
+      process.env.LOGO_DETECTOR_DEBUG !== "0" &&
+      (process.env.NODE_ENV === "development" || process.env.LOGO_DETECTOR_DEBUG === "1"),
+    /** Directory for per-channel debug JPEGs. Env: LOGO_DETECTOR_DEBUG_DIR */
+    debugImageDir: process.env.LOGO_DETECTOR_DEBUG_DIR || path.join(backendRoot, "utils", "logo-detector"),
   },
 
   /**
@@ -59,7 +68,7 @@ export const config = {
    */
   logoLiveMatching: {
     enabled: process.env.LOGO_LIVE_MATCHING_ENABLED !== "false",
-    intervalMs: parseInt(process.env.LOGO_LIVE_MATCHING_INTERVAL_MS || "1000", 10),
+    intervalMs: parseInt(process.env.LOGO_LIVE_MATCHING_INTERVAL_MS || "500", 10),
     discoveryIntervalMs: parseInt(process.env.LOGO_LIVE_DISCOVERY_INTERVAL_MS || "60000", 10),
     /** Single logo-detector run (ffmpeg + OpenCV) per live tick. Env: LOGO_LIVE_PROBE_TIMEOUT_MS */
     probeTimeoutMs: parseInt(process.env.LOGO_LIVE_PROBE_TIMEOUT_MS || "5000", 10),

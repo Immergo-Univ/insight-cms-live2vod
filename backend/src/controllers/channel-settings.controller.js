@@ -10,6 +10,7 @@ import {
   removeChannelLogo,
   logoFileAbsolutePath,
 } from "../services/channel-settings.service.js";
+import { resolveLogoDetectorDebugImagePath } from "../services/logo-pipeline.service.js";
 
 export const channelSettingsRouter = Router();
 
@@ -43,6 +44,23 @@ const upload = multer({
     if (okMime || okName) cb(null, true);
     else cb(new Error("Only PNG or JPEG images are allowed"));
   },
+});
+
+/** Last logo-detector debug JPEG for this channel (development / LOGO_DETECTOR_DEBUG). */
+channelSettingsRouter.get("/:channelId/logo-detector-debug", async (req, res) => {
+  const abs = path.resolve(resolveLogoDetectorDebugImagePath(req.params.channelId));
+  try {
+    await fs.access(abs);
+  } catch {
+    return res.status(404).json({
+      error: "Debug frame not found for this channel (enable debug probes or wait for next run).",
+    });
+  }
+  res.setHeader("Content-Type", "image/jpeg");
+  res.setHeader("Cache-Control", "no-store");
+  res.sendFile(abs, (err) => {
+    if (err && !res.headersSent) res.status(500).end();
+  });
 });
 
 channelSettingsRouter.get("/:channelId/settings", async (req, res) => {

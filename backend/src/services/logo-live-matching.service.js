@@ -301,6 +301,7 @@ async function tickChannel(channelId, st, logoPaths) {
 
   const probe = await runLogoDetectorOnStream(st.hlsStream, logoPaths, {
     timeoutMs: config.logoLiveMatching.probeTimeoutMs,
+    channelId,
   });
 
   if (!probe) {

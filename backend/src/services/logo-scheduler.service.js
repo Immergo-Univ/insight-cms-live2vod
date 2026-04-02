@@ -148,7 +148,7 @@ async function runOneCycle() {
        */
       async function probeWindow(a, b) {
         const m3u8 = buildArchiveM3u8(hls, a, b);
-        const p = await runLogoDetectorOnStream(m3u8, paths, { timeoutMs });
+        const p = await runLogoDetectorOnStream(m3u8, paths, { timeoutMs, channelId });
         if (!p) return null;
         return p.logo === true || p.logo_present === true;
       }
@@ -181,7 +181,7 @@ async function runOneCycle() {
         }
       } else {
         const m3u8 = buildArchiveM3u8(hls, slotStart, slotEnd);
-        const probe = await runLogoDetectorOnStream(m3u8, paths, { timeoutMs });
+        const probe = await runLogoDetectorOnStream(m3u8, paths, { timeoutMs, channelId });
         if (!probe) {
           console.warn(`[logo-archive] detector failed tenant=${tenantId} channel=${channelId} slot=${slotStart}`);
           continue;
