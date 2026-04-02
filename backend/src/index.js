@@ -12,6 +12,7 @@ import { startLogoScanScheduler } from "./services/logo-scheduler.service.js";
 import { startLogoLiveMatchingService } from "./services/logo-live-matching.service.js";
 import { isS3LogosEnabled, logS3LogosStartup } from "./services/s3-logos.service.js";
 import { syncAllChannelLogosFromS3, startChannelLogosS3Sync } from "./services/channel-logos-sync.service.js";
+import { syncChannelAdsSnapshotsFromS3OnStartup } from "./services/channel-ads-s3-backup.service.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -37,6 +38,7 @@ app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
   logS3LogosStartup();
   if (isS3LogosEnabled()) {
+    syncChannelAdsSnapshotsFromS3OnStartup().catch((e) => console.warn("[channel-ads-s3] startup:", e.message));
     syncAllChannelLogosFromS3().catch((e) => console.warn("[channel-logos-sync] startup:", e.message));
     startChannelLogosS3Sync();
   }

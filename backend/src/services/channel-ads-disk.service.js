@@ -7,6 +7,7 @@ import fs from "fs/promises";
 import path from "path";
 import { randomBytes } from "node:crypto";
 import { config } from "../config.js";
+import { isS3LogosEnabled, putChannelAdsBackupDocument } from "./s3-logos.service.js";
 
 const __channelsDir = config.channelsDataDir;
 const __indexPath = path.join(__channelsDir, "_index.json");
@@ -17,6 +18,11 @@ function safeChannelFileBase(channelId) {
 
 function channelFilePath(channelId) {
   return path.join(__channelsDir, `${safeChannelFileBase(channelId)}.json`);
+}
+
+/** Absolute path to data/channels/<safeId>.json (for S3 restore / tooling). */
+export function getChannelSnapshotPath(channelId) {
+  return channelFilePath(channelId);
 }
 
 function resolveBaseUrl(hlsStream) {
@@ -87,6 +93,32 @@ async function saveIndex(byBaseUrl) {
   await writeJsonAtomic(__indexPath, { version: 1, updatedAt: new Date().toISOString(), byBaseUrl });
 }
 
+async function persistSnapshotAndIndex(channelId, next) {
+  await writeJsonAtomic(channelFilePath(channelId), next);
+  if (typeof next.hlsBaseUrl === "string" && next.hlsBaseUrl) {
+    await withIndexLock(async () => {
+      const index = await loadIndex();
+      index.byBaseUrl[next.hlsBaseUrl] = channelId;
+      await saveIndex(index.byBaseUrl);
+    });
+  }
+}
+
+/**
+ * Replace on-disk snapshot from a full document (e.g. S3 backup restore). Preserves doc.updatedAt when present.
+ * @param {Record<string, unknown>} doc
+ */
+export async function writeChannelSnapshotDocument(doc) {
+  if (!doc || typeof doc !== "object") return;
+  const channelId = String(doc.channelId ?? "").trim();
+  if (!channelId) {
+    console.warn("[channel-ads-disk] writeChannelSnapshotDocument: skipped — missing channelId");
+    return;
+  }
+  const next = { version: doc.version ?? 1, ...doc, channelId };
+  await persistSnapshotAndIndex(channelId, next);
+}
+
 /**
  * @param {string} channelId
  * @returns {Promise<object | null>}
@@ -118,14 +150,12 @@ export async function mergeChannelSnapshotFields(channelId, patch) {
     channelId: base.channelId || channelId,
     updatedAt: new Date().toISOString(),
   };
-  await writeJsonAtomic(channelFilePath(channelId), next);
+  await persistSnapshotAndIndex(channelId, next);
 
-  if (typeof next.hlsBaseUrl === "string" && next.hlsBaseUrl) {
-    await withIndexLock(async () => {
-      const index = await loadIndex();
-      index.byBaseUrl[next.hlsBaseUrl] = channelId;
-      await saveIndex(index.byBaseUrl);
-    });
+  if (isS3LogosEnabled()) {
+    void putChannelAdsBackupDocument(channelId, next).catch((e) =>
+      console.warn(`[channel-ads-s3] upload failed ${channelId}:`, e.message),
+    );
   }
 }
 
@@ -139,6 +169,40 @@ export async function readChannelSnapshotByHls(hlsStream) {
   const channelId = index.byBaseUrl[baseUrl];
   if (!channelId) return null;
   return readJsonIfExists(channelFilePath(channelId));
+}
+
+/**
+ * Remove local channel snapshot JSON and HLS index entries for this channel (ads + live probe fields).
+ * @param {string} channelId
+ * @returns {Promise<{ localExisted: boolean }>}
+ */
+export async function clearChannelAdsSnapshot(channelId) {
+  const cid = String(channelId);
+  const fp = getChannelSnapshotPath(cid);
+  let localExisted = false;
+  try {
+    await fs.access(fp);
+    localExisted = true;
+  } catch {
+    /* no file */
+  }
+
+  await withIndexLock(async () => {
+    const data = await loadIndex();
+    const bb = { ...(data.byBaseUrl || {}) };
+    for (const [url, id] of Object.entries(bb)) {
+      if (String(id) === cid) delete bb[url];
+    }
+    await saveIndex(bb);
+  });
+
+  try {
+    await fs.unlink(fp);
+  } catch (e) {
+    if (e.code !== "ENOENT") throw e;
+  }
+
+  return { localExisted };
 }
 
 export { resolveBaseUrl as resolveHlsBaseUrl };

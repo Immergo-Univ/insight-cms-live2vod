@@ -54,3 +54,17 @@ export async function deleteChannelLogo(channelId: string, logoId: string): Prom
   const client = httpClient.getBffClient();
   await client.delete(`/channels/${encodeURIComponent(channelId)}/settings/logos/${encodeURIComponent(logoId)}`);
 }
+
+export interface ClearAdsSnapshotResponse {
+  ok: boolean;
+  localRemoved: boolean;
+  s3: { skipped: true } | { deleted: boolean };
+}
+
+export async function deleteChannelAdsSnapshot(channelId: string): Promise<ClearAdsSnapshotResponse> {
+  const client = httpClient.getBffClient();
+  const { data } = await client.delete<ClearAdsSnapshotResponse>(
+    `/channels/${encodeURIComponent(channelId)}/settings/ads-snapshot`,
+  );
+  return data;
+}

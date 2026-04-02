@@ -6,6 +6,7 @@ const backendRoot = path.join(__dirname, "..");
 
 /**
  * S3-compatible logos (DO Spaces, MinIO, AWS). Keys: S3_* or AWS_* or DO tutorial SPACES_* / SPACES_SECRET.
+ * When enabled, also backs up channel ads/timeline JSON to `{prefix}/channel-ads/<channelId>.json` and restores newer copies on startup.
  *
  * DigitalOcean Spaces: aligned with immergo-producer `utils/s3.js` — path-style addressing
  * (`forcePathStyle: true`) and `S3_REGION` defaulting to us-east-1 when unset. Public URLs there are built as

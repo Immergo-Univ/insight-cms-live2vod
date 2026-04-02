@@ -12,7 +12,13 @@ import {
   safeChannelSegment,
 } from "../services/channel-settings.service.js";
 import { resolveLogoDetectorDebugImagePath } from "../services/logo-pipeline.service.js";
-import { deleteLogoObject, isS3LogosEnabled, putLogoObject } from "../services/s3-logos.service.js";
+import { clearChannelAdsSnapshot } from "../services/channel-ads-disk.service.js";
+import {
+  deleteChannelAdsBackupObject,
+  deleteLogoObject,
+  isS3LogosEnabled,
+  putLogoObject,
+} from "../services/s3-logos.service.js";
 
 export const channelSettingsRouter = Router();
 
@@ -179,6 +185,27 @@ channelSettingsRouter.delete("/:channelId/settings/logos/:logoId", async (req, r
     const removed = await removeChannelLogo(req.params.channelId, req.params.logoId);
     if (!removed) return res.status(404).json({ error: "Logo not found" });
     res.json({ ok: true, removedId: removed.id });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+/** Remove precalculated ads + live probe snapshot for this channel (local JSON and S3 backup if configured). */
+channelSettingsRouter.delete("/:channelId/settings/ads-snapshot", async (req, res) => {
+  try {
+    const channelId = req.params.channelId;
+    const { localExisted } = await clearChannelAdsSnapshot(channelId);
+    let s3 = { skipped: true };
+    try {
+      s3 = await deleteChannelAdsBackupObject(channelId);
+    } catch (e) {
+      return res.status(500).json({ error: `S3 delete failed: ${e.message}` });
+    }
+    res.json({
+      ok: true,
+      localRemoved: localExisted,
+      s3: s3.skipped ? { skipped: true } : { deleted: Boolean(s3.deleted) },
+    });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
