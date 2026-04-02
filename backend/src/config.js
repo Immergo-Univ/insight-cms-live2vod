@@ -117,11 +117,19 @@ export const config = {
    */
   logoLiveMatching: {
     enabled: process.env.LOGO_LIVE_MATCHING_ENABLED !== "false",
-    /** Target gap between probe starts per channel; service enforces at least 500ms. Env: LOGO_LIVE_MATCHING_INTERVAL_MS */
-    intervalMs: parseInt(process.env.LOGO_LIVE_MATCHING_INTERVAL_MS || "500", 10),
     discoveryIntervalMs: parseInt(process.env.LOGO_LIVE_DISCOVERY_INTERVAL_MS || "60000", 10),
-    /** Single logo-detector run (ffmpeg + OpenCV) per live tick. Env: LOGO_LIVE_PROBE_TIMEOUT_MS */
-    probeTimeoutMs: parseInt(process.env.LOGO_LIVE_PROBE_TIMEOUT_MS || "5000", 10),
+    /** DVR window length (seconds) for live probe URL; wider = more segments for ffmpeg. Env: LOGO_LIVE_PROBE_WINDOW_SEC */
+    probeWindowSeconds: (() => {
+      const v = parseInt(process.env.LOGO_LIVE_PROBE_WINDOW_SEC || "180", 10);
+      return Number.isFinite(v) ? Math.min(1800, Math.max(1, v)) : 180;
+    })(),
+    /** If windowed URL fails, retry once with the raw stream URL (no startTime/endTime). Env: LOGO_LIVE_PROBE_FALLBACK_RAW=false to disable */
+    probeFallbackRaw: process.env.LOGO_LIVE_PROBE_FALLBACK_RAW !== "false",
+    /** Single logo-detector run (ffmpeg + OpenCV) per live tick; 2s is too low for most CDNs. Env: LOGO_LIVE_PROBE_TIMEOUT_MS */
+    probeTimeoutMs: (() => {
+      const v = parseInt(process.env.LOGO_LIVE_PROBE_TIMEOUT_MS || "15000", 10);
+      return Number.isFinite(v) ? Math.max(3000, v) : 15000;
+    })(),
     stateFilePath:
       process.env.LOGO_LIVE_MATCHING_STATE_FILE ||
       path.join(backendRoot, "data", "logo-live-matching-state.json"),

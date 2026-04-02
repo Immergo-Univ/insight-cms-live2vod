@@ -9,6 +9,12 @@ import { config } from "../config.js";
 import { listUploadedLogoAbsolutePaths } from "./channel-settings.service.js";
 
 /**
+ * Target milliseconds between live logo probes per channel (orchestrator cadence).
+ * 200 ms ≈ 5 probes per second. Passed to logo-detector as --live-probe-interval-ms (echoed in JSON).
+ */
+export const LIVE_LOGO_PROBE_INTERVAL_MS = 200;
+
+/**
  * @param {string} hlsStream base channel URL; startTime/endTime are set for archive window
  * @param {number} startEpoch inclusive unix seconds
  * @param {number} endEpoch exclusive unix seconds
@@ -18,6 +24,21 @@ export function buildArchiveM3u8(hlsStream, startEpoch, endEpoch) {
   u.searchParams.set("startTime", String(startEpoch));
   u.searchParams.set("endTime", String(endEpoch));
   return u.toString();
+}
+
+/**
+ * DVR-style window ending at "now" so streamPlaylist returns a short m3u8 (not full archive).
+ * Uses the same startTime/endTime query params as archive clips.
+ *
+ * @param {string} hlsStream base channel URL (e.g. .../streamPlaylist.m3u8)
+ * @param {number} [windowSeconds] default 180; clamped 1..1800
+ */
+export function buildLiveLogoProbeM3u8(hlsStream, windowSeconds = 180) {
+  const w = Number(windowSeconds);
+  const win = Number.isFinite(w) ? Math.min(1800, Math.max(1, Math.floor(w))) : 180;
+  const endEpoch = Math.floor(Date.now() / 1000);
+  const startEpoch = Math.max(0, endEpoch - win);
+  return buildArchiveM3u8(hlsStream, startEpoch, endEpoch);
 }
 
 function runExecutable(binPath, args, { cwd, timeoutMs, env }) {
@@ -130,7 +151,8 @@ function setDetectorFailureReason(ref, reason) {
 /**
  * @param {string} m3u8Url
  * @param {string[]} logoAbsPaths
- * @param {{ timeoutMs?: number, channelId?: string, failureRef?: { reason?: string } }} [opts]
+ * @param {{ timeoutMs?: number, channelId?: string, failureRef?: { reason?: string }, liveProbeIntervalMs?: number }} [opts]
+ *   When `liveProbeIntervalMs` is a positive integer, passes `--live-probe-interval-ms` to the binary (echoed in JSON).
  */
 export async function runLogoDetectorOnStream(m3u8Url, logoAbsPaths, opts = {}) {
   const failRef = opts.failureRef;
@@ -148,6 +170,10 @@ export async function runLogoDetectorOnStream(m3u8Url, logoAbsPaths, opts = {}) 
   const d = config.logoDetector;
   const args = [];
   if (d.debugLogoDetector) args.push("--debug");
+  const liveMs = opts.liveProbeIntervalMs;
+  if (typeof liveMs === "number" && Number.isFinite(liveMs) && liveMs >= 1) {
+    args.push("--live-probe-interval-ms", String(Math.floor(liveMs)));
+  }
   args.push(...logoAbsPaths, m3u8Url);
   const timeoutMs = opts.timeoutMs ?? config.logoLiveMatching.probeTimeoutMs;
   try {

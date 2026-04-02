@@ -89,11 +89,6 @@ export async function resolveTenant(tenantId) {
     throw new Error(`No account found for customer "${customer.title}" (${customerId})`);
   }
 
-  console.log(
-    `[auth] Resolved tenantId="${tenantId}" → customer="${customer.title}" ` +
-      `(customerId=${customerId}), accountId="${account._id}"`
-  );
-
   return {
     accountId: account._id,
     customerId,

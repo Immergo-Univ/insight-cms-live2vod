@@ -8,10 +8,6 @@ export async function fetchChannelsWithArchive({ accountId, tenantId }) {
 
   const authToken = await getAuthToken();
 
-  console.log(`[channels] GET ${url}`);
-  console.log(`[channels]   filter: ${filter}`);
-  console.log(`[channels]   x-tenant-id: ${tenantId}`);
-
   const response = await axios.get(url, {
     params: { filter },
     headers: {
@@ -22,7 +18,6 @@ export async function fetchChannelsWithArchive({ accountId, tenantId }) {
 
   const data = response.data;
   const results = Array.isArray(data) ? data : [data];
-  console.log(`[channels]   → ${results.length} channel(s) returned`);
 
   return results;
 }

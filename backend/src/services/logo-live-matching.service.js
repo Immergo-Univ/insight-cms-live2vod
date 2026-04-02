@@ -2,7 +2,7 @@
  * Live HLS: logo-detector (OpenCV) on each channel’s stream URL.
  * - Discovery: all tenants are queried in parallel (Promise.all).
  * - Each channel runs its own async loop; probes on different channels run concurrently.
- * - Minimum delay between consecutive probes on the same channel: 500ms (see runOneChannelLoop).
+ * - Live probe cadence: LIVE_LOGO_PROBE_INTERVAL_MS in logo-pipeline (default 200ms ≈ 5/s).
  * Persists state to logo-live-matching-state.json and merges liveStream* into data/channels/<id>.json.
  */
 
@@ -11,7 +11,12 @@ import path from "path";
 import { config } from "../config.js";
 import { resolveTenant } from "./auth.service.js";
 import { fetchChannelsWithArchive } from "./channels.service.js";
-import { resolveChannelLogoPathsForMatching, runLogoDetectorOnStream } from "./logo-pipeline.service.js";
+import {
+  buildLiveLogoProbeM3u8,
+  LIVE_LOGO_PROBE_INTERVAL_MS,
+  resolveChannelLogoPathsForMatching,
+  runLogoDetectorOnStream,
+} from "./logo-pipeline.service.js";
 import { mergeChannelSnapshotFields, resolveHlsBaseUrl } from "./channel-ads-disk.service.js";
 
 /** Consecutive live samples without logo before an ad window opens (1 sample ~= 1s). */
@@ -27,6 +32,11 @@ const MISSING_LOGO_LOG_INTERVAL_MS = 60_000;
 
 /** channelId -> { kind: 'ok'|'absent'|'error', count } — consecutive log streak per channel */
 const logoLiveLogStreak = new Map();
+
+/** ISO timestamp for every [logo-live] log line. */
+function logoLiveNow() {
+  return new Date().toISOString();
+}
 
 /** Max code points for channel title in probe logs (Hebrew / long names truncated). */
 const LOGO_LIVE_PROBE_LABEL_MAX_CP = 22;
@@ -73,13 +83,13 @@ function logLogoLiveStatus(st, channelId, kind, flags = {}) {
 
   const label = logoLiveLabelSlot(st, channelId);
   const sym = kind === "ok" ? "✅" : kind === "absent" ? "❌" : "⚠️";
-  let line = `[logo-live] ${label}:  ${sym} (${count})`;
+  let line = `${label}:  ${sym} (${count})`;
   if (kind === "error" && typeof st.lastError === "string" && st.lastError.trim() !== "") {
     line += ` | ${st.lastError.trim()}`;
   }
   if (flags.adOpened) line += " -- AD start --";
   if (flags.adClosed) line += " -- AD end --";
-  console.log(line);
+  console.log(`[logo-live] ${logoLiveNow()} ${line}`);
 }
 
 /** Channel IDs that should keep probing (refreshed from API). */
@@ -178,7 +188,7 @@ async function loadState() {
     const o = JSON.parse(raw);
     if (o && typeof o === "object" && o.channels && typeof o.channels === "object") return o;
   } catch (e) {
-    if (e.code !== "ENOENT") console.warn("[logo-live] state read:", e.message);
+    if (e.code !== "ENOENT") console.warn(`[logo-live] ${logoLiveNow()} state read:`, e.message);
   }
   return {
     version: 1,
@@ -201,7 +211,7 @@ async function saveState(doc) {
  */
 function withPersistLock(fn) {
   const next = persistChain.then(() => fn()).catch((e) => {
-    console.error("[logo-live] persist error:", e.message);
+    console.error(`[logo-live] ${logoLiveNow()} persist error:`, e.message);
   });
   persistChain = next;
   return next;
@@ -306,11 +316,23 @@ async function tickChannel(channelId, st, logoPaths) {
   }
 
   const detectorFailure = {};
-  const probe = await runLogoDetectorOnStream(st.hlsStream, logoPaths, {
-    timeoutMs: config.logoLiveMatching.probeTimeoutMs,
+  const timeoutMs = config.logoLiveMatching.probeTimeoutMs;
+  const probeM3u8 = buildLiveLogoProbeM3u8(st.hlsStream, config.logoLiveMatching.probeWindowSeconds);
+  let probe = await runLogoDetectorOnStream(probeM3u8, logoPaths, {
+    timeoutMs,
     channelId,
     failureRef: detectorFailure,
+    liveProbeIntervalMs: LIVE_LOGO_PROBE_INTERVAL_MS,
   });
+  if (!probe && config.logoLiveMatching.probeFallbackRaw) {
+    detectorFailure.reason = undefined;
+    probe = await runLogoDetectorOnStream(st.hlsStream, logoPaths, {
+      timeoutMs,
+      channelId,
+      failureRef: detectorFailure,
+      liveProbeIntervalMs: LIVE_LOGO_PROBE_INTERVAL_MS,
+    });
+  }
 
   if (!probe) {
     st.lastError = detectorFailure.reason
@@ -349,7 +371,7 @@ async function tickChannel(channelId, st, logoPaths) {
 
 async function runOneChannelLoop(channelId) {
   /** Minimum time between probe starts for this channel (parallel across channels). */
-  const interval = Math.max(500, config.logoLiveMatching.intervalMs);
+  const interval = Math.max(1, LIVE_LOGO_PROBE_INTERVAL_MS);
 
   while (serviceRunning && liveChannelWanted.has(channelId)) {
     const t0 = Date.now();
@@ -375,7 +397,7 @@ async function runOneChannelLoop(channelId) {
       }
       await persistLiveRow(channelId, st);
     } catch (e) {
-      console.error(`[logo-live] ${channelId}: ${e.message}`);
+      console.error(`[logo-live] ${logoLiveNow()} ${channelId}: ${e.message}`);
       try {
         const state = await loadState();
         const st = state.channels[channelId];
@@ -397,7 +419,7 @@ function spawnChannelLoopIfNeeded(channelId) {
   if (channelLoopTasks.has(channelId)) return;
   const p = runOneChannelLoop(channelId);
   channelLoopTasks.set(channelId, p);
-  p.catch((e) => console.error(`[logo-live] loop crashed ${channelId}:`, e.message)).finally(() => {
+  p.catch((e) => console.error(`[logo-live] ${logoLiveNow()} loop crashed ${channelId}:`, e.message)).finally(() => {
     channelLoopTasks.delete(channelId);
     if (serviceRunning && liveChannelWanted.has(channelId)) {
       setTimeout(() => spawnChannelLoopIfNeeded(channelId), 5000);
@@ -425,7 +447,7 @@ async function discoveryTick() {
 
   for (const tr of tenantResults) {
     if (!tr.ok) {
-      console.error(`[logo-live] tenant ${tr.tenantId}: ${tr.error}`);
+      console.error(`[logo-live] ${logoLiveNow()} tenant ${tr.tenantId}: ${tr.error}`);
       continue;
     }
     for (const row of tr.rows) {
@@ -456,7 +478,7 @@ async function discoveryTick() {
       await saveState(state);
     });
   } catch (e) {
-    console.error(`[logo-live] discovery persist: ${e.message}`);
+    console.error(`[logo-live] ${logoLiveNow()} discovery persist: ${e.message}`);
   }
 
   for (const id of fetched) {
@@ -480,17 +502,17 @@ async function discoveryLoop() {
 
 export function startLogoLiveMatchingService() {
   if (!config.logoLiveMatching.enabled) {
-    console.log("[logo-live] Disabled (LOGO_LIVE_MATCHING_ENABLED=false)");
+    console.log(`[logo-live] ${logoLiveNow()} Disabled (LOGO_LIVE_MATCHING_ENABLED=false)`);
     return;
   }
   if (serviceRunning) return;
   serviceRunning = true;
-  const probeGap = Math.max(500, config.logoLiveMatching.intervalMs);
+  const probeGap = Math.max(1, LIVE_LOGO_PROBE_INTERVAL_MS);
   console.log(
-    `[logo-live] Started: parallel tenant discovery, one concurrent loop per channel, ≥${probeGap}ms between probes per channel`,
+    `[logo-live] ${logoLiveNow()} Started: parallel tenant discovery, one concurrent loop per channel, ≥${probeGap}ms between probes per channel`,
   );
   loopPromise = discoveryLoop();
-  loopPromise.catch((e) => console.error("[logo-live] fatal:", e));
+  loopPromise.catch((e) => console.error(`[logo-live] ${logoLiveNow()} fatal:`, e));
 }
 
 export function stopLogoLiveMatchingService() {
