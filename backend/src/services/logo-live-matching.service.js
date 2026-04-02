@@ -137,6 +137,7 @@ function channelHlsUrl(row) {
  *   inAd: boolean,
  *   adWindowStartEpoch: number | null,
  *   absentStreakStartEpoch: number | null,
+ *   presentStreakStartEpoch: number | null,
  *   segments: Array<{ startEpoch: number, endEpoch: number }>,
  *   lastLogo: boolean | null,
  *   lastMatchScore: number | null,
@@ -157,17 +158,24 @@ function channelHlsUrl(row) {
  */
 function applyHysteresisSample(st, logoPresent, sampleEpoch) {
   if (logoPresent) {
+    if (st.inAd && st.trueStreak === 0) {
+      st.presentStreakStartEpoch = sampleEpoch;
+    }
     st.trueStreak += 1;
     st.falseStreak = 0;
     st.absentStreakStartEpoch = null;
     if (st.inAd && st.trueStreak >= MIN_PRESENT_TO_CLOSE) {
-      const endEpoch = sampleEpoch - MIN_PRESENT_TO_CLOSE;
+      const endEpoch =
+        st.presentStreakStartEpoch != null
+          ? Math.max(0, st.presentStreakStartEpoch)
+          : Math.max(0, sampleEpoch - MIN_PRESENT_TO_CLOSE);
       if (st.adWindowStartEpoch != null && endEpoch >= st.adWindowStartEpoch) {
         st.segments.push({ startEpoch: st.adWindowStartEpoch, endEpoch });
       }
       st.inAd = false;
       st.adWindowStartEpoch = null;
       st.trueStreak = 0;
+      st.presentStreakStartEpoch = null;
     }
   } else {
     if (!st.inAd && st.falseStreak === 0) {
@@ -175,6 +183,7 @@ function applyHysteresisSample(st, logoPresent, sampleEpoch) {
     }
     st.falseStreak += 1;
     st.trueStreak = 0;
+    st.presentStreakStartEpoch = null;
     if (!st.inAd && st.falseStreak >= MIN_ABSENT_TO_OPEN) {
       st.inAd = true;
       st.adWindowStartEpoch =
@@ -234,6 +243,7 @@ function cloneChannelState(st) {
     inAd: st.inAd,
     adWindowStartEpoch: st.adWindowStartEpoch,
     absentStreakStartEpoch: st.absentStreakStartEpoch ?? null,
+    presentStreakStartEpoch: st.presentStreakStartEpoch ?? null,
     segments: Array.isArray(st.segments) ? st.segments.map((s) => ({ ...s })) : [],
     lastLogo: st.lastLogo,
     lastMatchScore: st.lastMatchScore,
@@ -292,6 +302,7 @@ function ensureChannelRow(channels, channelId, meta) {
       inAd: false,
       adWindowStartEpoch: null,
       absentStreakStartEpoch: null,
+      presentStreakStartEpoch: null,
       segments: [],
       lastLogo: null,
       lastMatchScore: null,
@@ -305,6 +316,9 @@ function ensureChannelRow(channels, channelId, meta) {
     if (!Array.isArray(channels[channelId].segments)) channels[channelId].segments = [];
     if (channels[channelId].absentStreakStartEpoch === undefined) {
       channels[channelId].absentStreakStartEpoch = null;
+    }
+    if (channels[channelId].presentStreakStartEpoch === undefined) {
+      channels[channelId].presentStreakStartEpoch = null;
     }
   }
   return channels[channelId];

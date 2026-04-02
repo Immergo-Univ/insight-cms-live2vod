@@ -26,6 +26,9 @@
  *   LOGO_DETECTOR_DEBUG_PATH       — absolute path to output JPEG (overwrite each run; backend uses per-channel name)
  *   LOGO_DETECTOR_FFMPEG_UA        — User-Agent for ffmpeg when pulling HLS (default: browser-like)
  *   LOGO_DETECTOR_FFMPEG_RW_TIMEOUT_US — ffmpeg -rw_timeout in microseconds (default 20000000)
+ *   LOGO_DETECTOR_HLS_FROM_START   — if 1/true, decode from first playlist segment (legacy). Default: use
+ *                                    -live_start_index -1 so the single frame matches the live edge / end of
+ *                                    the DVR window (must align with m3u8 endTime used for timestamps).
  *
  * Build:
  *   make -C backend/utils/logo-detector
@@ -122,6 +125,16 @@ int run_ffmpeg_one_frame(const char *input_url, const std::string &out_jpg) {
   storage.emplace_back("file,http,https,tcp,tls,crypto,subfile");
   storage.emplace_back("-fflags");
   storage.emplace_back("+discardcorrupt+genpts");
+  /**
+   * Without this, HLS demux starts at the first listed segment (oldest in the window) while the backend
+   * timestamps samples from playlist end / endTime — tens of seconds to minutes of skew vs the player.
+   */
+  const char *hls_from_start = std::getenv("LOGO_DETECTOR_HLS_FROM_START");
+  const bool force_first_segment = hls_from_start && env_truthy(hls_from_start);
+  if (is_http_url(input_url) && !force_first_segment) {
+    storage.emplace_back("-live_start_index");
+    storage.emplace_back("-1");
+  }
   storage.emplace_back("-y");
   storage.emplace_back("-i");
   storage.emplace_back(input_url);
