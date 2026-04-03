@@ -18,9 +18,8 @@ import {
   runLogoDetectorOnStream,
 } from "./logo-pipeline.service.js";
 import { mergeChannelSnapshotFields, resolveHlsBaseUrl } from "./channel-ads-disk.service.js";
-import { inferStreamEdgeUnixSecFromM3u8 } from "./m3u8.service.js";
 
-/** Consecutive live samples without logo before an ad window opens (1 sample ~= 1s). */
+/** Consecutive live samples without logo before an ad window opens (wall-clock spaced by real probe cadence). */
 const MIN_ABSENT_TO_OPEN = 10;
 /** Fallback if first-absent epoch is missing (should not happen). */
 const AD_START_LOOKBACK_SEC = 10;
@@ -138,7 +137,10 @@ function channelHlsUrl(row) {
  *   adWindowStartEpoch: number | null,
  *   absentStreakStartEpoch: number | null,
  *   presentStreakStartEpoch: number | null,
- *   segments: Array<{ startEpoch: number, endEpoch: number }>,
+ *   adConfirmWallSec: number | null,
+ *   lastProbeWallMs: number | null,
+ *   avgProbeIntervalMs: number | null,
+ *   segments: Array<Record<string, unknown>>,
  *   lastLogo: boolean | null,
  *   lastMatchScore: number | null,
  *   lastProbeAt: string | null,
@@ -147,19 +149,23 @@ function channelHlsUrl(row) {
  */
 
 /**
- * Hysteresis for live logo samples.
- * - `absentStreakStartEpoch` is set on the **first** absent sample (not after MIN_ABSENT_TO_OPEN).
- * - When the streak reaches MIN_ABSENT_TO_OPEN, `adWindowStartEpoch` is set to that first-absent time
- *   (confirmation only); the ad is not assumed to begin at the Nth sample.
+ * Hysteresis using wall clock at the instant each probe result is applied (aligned with debug frame “now”).
+ * - First absent: `absentStreakStartEpoch = floor(Date.now()/1000)` at that tick.
+ * - AD opens after MIN_ABSENT_TO_OPEN consecutive absents; `adWindowStartEpoch` stays the **first** absent second.
+ * - `adConfirmWallSec` stores the wall second when the streak confirmed (Nth sample), for JSON lag metadata.
  * @param {LiveChannelState} st
  * @param {boolean} logoPresent
- * @param {number} sampleEpoch unix seconds for this sample — should match the stream window used for the probe
- *   (m3u8 endTime / playlist edge), not an arbitrary wall clock after a long ffmpeg run.
+ * @param {number} wallNowSec `Math.floor(Date.now()/1000)` when registering this probe outcome
  */
-function applyHysteresisSample(st, logoPresent, sampleEpoch) {
+function applyHysteresisSample(st, logoPresent, wallNowSec) {
+  const nominalMs = LIVE_LOGO_PROBE_INTERVAL_MS;
+  const avgMs = st.avgProbeIntervalMs ?? nominalMs;
+  const hysteresisStartOffsetSec = Math.round(((MIN_ABSENT_TO_OPEN - 1) * avgMs) / 1000);
+  const hysteresisEndOffsetSec = Math.round(((MIN_PRESENT_TO_CLOSE - 1) * avgMs) / 1000);
+
   if (logoPresent) {
     if (st.inAd && st.trueStreak === 0) {
-      st.presentStreakStartEpoch = sampleEpoch;
+      st.presentStreakStartEpoch = wallNowSec;
     }
     st.trueStreak += 1;
     st.falseStreak = 0;
@@ -168,28 +174,42 @@ function applyHysteresisSample(st, logoPresent, sampleEpoch) {
       const endEpoch =
         st.presentStreakStartEpoch != null
           ? Math.max(0, st.presentStreakStartEpoch)
-          : Math.max(0, sampleEpoch - MIN_PRESENT_TO_CLOSE);
+          : Math.max(0, wallNowSec - hysteresisEndOffsetSec);
       if (st.adWindowStartEpoch != null && endEpoch >= st.adWindowStartEpoch) {
-        st.segments.push({ startEpoch: st.adWindowStartEpoch, endEpoch });
+        const confirmLagStartSec =
+          st.adConfirmWallSec != null ? Math.max(0, st.adConfirmWallSec - st.adWindowStartEpoch) : null;
+        st.segments.push({
+          startEpoch: st.adWindowStartEpoch,
+          endEpoch,
+          timestampSource: "wall_clock_date_now",
+          hysteresisAbsentSamples: MIN_ABSENT_TO_OPEN,
+          hysteresisPresentSamples: MIN_PRESENT_TO_CLOSE,
+          estimatedAvgProbeIntervalMs: Math.round(avgMs),
+          hysteresisStartOffsetSecNominal: hysteresisStartOffsetSec,
+          hysteresisEndOffsetSecNominal: hysteresisEndOffsetSec,
+          wallClockAbsentConfirmLagSec: confirmLagStartSec,
+        });
       }
       st.inAd = false;
       st.adWindowStartEpoch = null;
+      st.adConfirmWallSec = null;
       st.trueStreak = 0;
       st.presentStreakStartEpoch = null;
     }
   } else {
     if (!st.inAd && st.falseStreak === 0) {
-      st.absentStreakStartEpoch = sampleEpoch;
+      st.absentStreakStartEpoch = wallNowSec;
     }
     st.falseStreak += 1;
     st.trueStreak = 0;
     st.presentStreakStartEpoch = null;
     if (!st.inAd && st.falseStreak >= MIN_ABSENT_TO_OPEN) {
       st.inAd = true;
+      st.adConfirmWallSec = wallNowSec;
       st.adWindowStartEpoch =
         st.absentStreakStartEpoch != null
           ? Math.max(0, st.absentStreakStartEpoch)
-          : Math.max(0, sampleEpoch - AD_START_LOOKBACK_SEC);
+          : Math.max(0, wallNowSec - Math.max(AD_START_LOOKBACK_SEC, hysteresisStartOffsetSec));
       st.falseStreak = 0;
       st.absentStreakStartEpoch = null;
     }
@@ -244,6 +264,9 @@ function cloneChannelState(st) {
     adWindowStartEpoch: st.adWindowStartEpoch,
     absentStreakStartEpoch: st.absentStreakStartEpoch ?? null,
     presentStreakStartEpoch: st.presentStreakStartEpoch ?? null,
+    adConfirmWallSec: st.adConfirmWallSec ?? null,
+    lastProbeWallMs: st.lastProbeWallMs ?? null,
+    avgProbeIntervalMs: st.avgProbeIntervalMs ?? null,
     segments: Array.isArray(st.segments) ? st.segments.map((s) => ({ ...s })) : [],
     lastLogo: st.lastLogo,
     lastMatchScore: st.lastMatchScore,
@@ -303,6 +326,9 @@ function ensureChannelRow(channels, channelId, meta) {
       adWindowStartEpoch: null,
       absentStreakStartEpoch: null,
       presentStreakStartEpoch: null,
+      adConfirmWallSec: null,
+      lastProbeWallMs: null,
+      avgProbeIntervalMs: null,
       segments: [],
       lastLogo: null,
       lastMatchScore: null,
@@ -320,6 +346,15 @@ function ensureChannelRow(channels, channelId, meta) {
     if (channels[channelId].presentStreakStartEpoch === undefined) {
       channels[channelId].presentStreakStartEpoch = null;
     }
+    if (channels[channelId].adConfirmWallSec === undefined) {
+      channels[channelId].adConfirmWallSec = null;
+    }
+    if (channels[channelId].lastProbeWallMs === undefined) {
+      channels[channelId].lastProbeWallMs = null;
+    }
+    if (channels[channelId].avgProbeIntervalMs === undefined) {
+      channels[channelId].avgProbeIntervalMs = null;
+    }
   }
   return channels[channelId];
 }
@@ -334,7 +369,7 @@ async function tickChannel(channelId, st, logoPaths) {
     return;
   }
 
-  const { m3u8Url: probeM3u8, mediaAnchorEpoch: probeAnchorEpoch } = getLiveLogoStreamProbeUrl(st.hlsStream);
+  const { m3u8Url: probeM3u8 } = getLiveLogoStreamProbeUrl(st.hlsStream);
 
   const detectorFailure = {};
   const timeoutMs = config.logoLiveMatching.probeTimeoutMs;
@@ -344,9 +379,7 @@ async function tickChannel(channelId, st, logoPaths) {
     failureRef: detectorFailure,
     liveProbeIntervalMs: LIVE_LOGO_PROBE_INTERVAL_MS,
   });
-  let usedWindowedProbe = true;
   if (!probe && config.logoLiveMatching.probeFallbackRaw) {
-    usedWindowedProbe = false;
     detectorFailure.reason = undefined;
     probe = await runLogoDetectorOnStream(st.hlsStream, logoPaths, {
       timeoutMs,
@@ -364,25 +397,23 @@ async function tickChannel(channelId, st, logoPaths) {
     return;
   }
 
-  /** Media clock: live probe uses startTime-only URL; anchor = that startTime, refined from playlist when possible. */
-  let sampleEpoch = probeAnchorEpoch;
-  let inferUrl = probeM3u8;
-  if (!usedWindowedProbe) {
-    sampleEpoch = Math.floor(Date.now() / 1000);
-    inferUrl = st.hlsStream;
+  const wallMs = Date.now();
+  const wallNowSec = Math.floor(wallMs / 1000);
+  if (st.lastProbeWallMs != null) {
+    const delta = wallMs - st.lastProbeWallMs;
+    if (delta > 500 && delta < 600_000) {
+      st.avgProbeIntervalMs =
+        st.avgProbeIntervalMs == null ? delta : st.avgProbeIntervalMs * 0.82 + delta * 0.18;
+    }
   }
-  try {
-    sampleEpoch = await inferStreamEdgeUnixSecFromM3u8(inferUrl, sampleEpoch);
-  } catch {
-    /* keep sampleEpoch */
-  }
+  st.lastProbeWallMs = wallMs;
 
   const skipped = probe.match_skipped === true;
   const score = typeof probe.match_score === "number" ? probe.match_score : 0;
   st.lastMatchScore = score;
   const logoPresent = skipped ? false : probe.logo === true || probe.logo_present === true;
   const wasInAd = st.inAd;
-  applyHysteresisSample(st, logoPresent, sampleEpoch);
+  applyHysteresisSample(st, logoPresent, wallNowSec);
   const adOpened = !wasInAd && st.inAd;
   const adClosed = wasInAd && !st.inAd;
   if (logoPresent) {
@@ -395,6 +426,7 @@ async function tickChannel(channelId, st, logoPaths) {
     tenantId: st.tenantId,
     hlsBaseUrl: resolveHlsBaseUrl(st.hlsStream),
     liveStreamAdSegments: st.segments.slice(),
+    liveStreamAdTimestampSource: "wall_clock_date_now",
     liveStreamInAd: st.inAd,
     liveStreamAdStartEpoch: st.adWindowStartEpoch,
     liveStreamLastLogo: st.lastLogo,
