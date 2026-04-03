@@ -12,7 +12,7 @@ import { config } from "../config.js";
 import { resolveTenant } from "./auth.service.js";
 import { fetchChannelsWithArchive } from "./channels.service.js";
 import {
-  getLiveLogoProbeWindow,
+  getLiveLogoStreamProbeUrl,
   LIVE_LOGO_PROBE_INTERVAL_MS,
   resolveChannelLogoPathsForMatching,
   runLogoDetectorOnStream,
@@ -334,10 +334,7 @@ async function tickChannel(channelId, st, logoPaths) {
     return;
   }
 
-  const { m3u8Url: probeM3u8, endEpoch: probeEndEpoch } = getLiveLogoProbeWindow(
-    st.hlsStream,
-    config.logoLiveMatching.probeWindowSeconds,
-  );
+  const { m3u8Url: probeM3u8, mediaAnchorEpoch: probeAnchorEpoch } = getLiveLogoStreamProbeUrl(st.hlsStream);
 
   const detectorFailure = {};
   const timeoutMs = config.logoLiveMatching.probeTimeoutMs;
@@ -367,8 +364,8 @@ async function tickChannel(channelId, st, logoPaths) {
     return;
   }
 
-  /** Media clock aligned with the m3u8 that was actually probed (windowed endTime or raw playlist). */
-  let sampleEpoch = probeEndEpoch;
+  /** Media clock: live probe uses startTime-only URL; anchor = that startTime, refined from playlist when possible. */
+  let sampleEpoch = probeAnchorEpoch;
   let inferUrl = probeM3u8;
   if (!usedWindowedProbe) {
     sampleEpoch = Math.floor(Date.now() / 1000);

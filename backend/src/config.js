@@ -119,12 +119,7 @@ export const config = {
   logoLiveMatching: {
     enabled: process.env.LOGO_LIVE_MATCHING_ENABLED !== "false",
     discoveryIntervalMs: parseInt(process.env.LOGO_LIVE_DISCOVERY_INTERVAL_MS || "60000", 10),
-    /** DVR window length (seconds) for live probe URL; wider = more segments for ffmpeg. Env: LOGO_LIVE_PROBE_WINDOW_SEC */
-    probeWindowSeconds: (() => {
-      const v = parseInt(process.env.LOGO_LIVE_PROBE_WINDOW_SEC || "180", 10);
-      return Number.isFinite(v) ? Math.min(1800, Math.max(1, v)) : 180;
-    })(),
-    /** If windowed URL fails, retry once with the raw stream URL (no startTime/endTime). Env: LOGO_LIVE_PROBE_FALLBACK_RAW=false to disable */
+    /** If live startTime-only probe fails, retry once with the raw stream URL. Env: LOGO_LIVE_PROBE_FALLBACK_RAW=false to disable */
     probeFallbackRaw: process.env.LOGO_LIVE_PROBE_FALLBACK_RAW !== "false",
     /** Single logo-detector run (ffmpeg + OpenCV) per live tick; 2s is too low for most CDNs. Env: LOGO_LIVE_PROBE_TIMEOUT_MS */
     probeTimeoutMs: (() => {

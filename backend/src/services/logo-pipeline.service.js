@@ -27,33 +27,24 @@ export function buildArchiveM3u8(hlsStream, startEpoch, endEpoch) {
 }
 
 /**
- * DVR-style window ending at "now" so streamPlaylist returns a short m3u8 (not full archive).
- * Uses the same startTime/endTime query params as archive clips.
+ * Live logo probe URL: `startTime` = current unix second, **`endTime` removed** so the origin serves a
+ * sliding/live playlist (not a bounded VOD-style window that lags the UI). Archive scans keep using
+ * {@link buildArchiveM3u8} with both bounds.
  *
  * @param {string} hlsStream base channel URL (e.g. .../streamPlaylist.m3u8)
- * @param {number} [windowSeconds] default 180; clamped 1..1800
+ * @returns {{ m3u8Url: string, mediaAnchorEpoch: number }} mediaAnchorEpoch = startTime sent (clock for hysteresis)
  */
-export function buildLiveLogoProbeM3u8(hlsStream, windowSeconds = 180) {
-  const { m3u8Url } = getLiveLogoProbeWindow(hlsStream, windowSeconds);
-  return m3u8Url;
+export function getLiveLogoStreamProbeUrl(hlsStream) {
+  const u = new URL(hlsStream);
+  const mediaAnchorEpoch = Math.floor(Date.now() / 1000);
+  u.searchParams.set("startTime", String(mediaAnchorEpoch));
+  u.searchParams.delete("endTime");
+  return { m3u8Url: u.toString(), mediaAnchorEpoch };
 }
 
-/**
- * Single wall-clock tick for live probe: `endEpoch` matches the m3u8 `endTime` query param (stream media clock).
- * @param {string} hlsStream
- * @param {number} [windowSeconds]
- * @returns {{ m3u8Url: string, startEpoch: number, endEpoch: number }}
- */
-export function getLiveLogoProbeWindow(hlsStream, windowSeconds = 180) {
-  const w = Number(windowSeconds);
-  const win = Number.isFinite(w) ? Math.min(1800, Math.max(1, Math.floor(w))) : 180;
-  const endEpoch = Math.floor(Date.now() / 1000);
-  const startEpoch = Math.max(0, endEpoch - win);
-  return {
-    endEpoch,
-    startEpoch,
-    m3u8Url: buildArchiveM3u8(hlsStream, startEpoch, endEpoch),
-  };
+/** @param {string} hlsStream */
+export function buildLiveLogoProbeM3u8(hlsStream) {
+  return getLiveLogoStreamProbeUrl(hlsStream).m3u8Url;
 }
 
 function runExecutable(binPath, args, { cwd, timeoutMs, env }) {
