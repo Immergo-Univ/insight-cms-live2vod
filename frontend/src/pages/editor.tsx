@@ -9,6 +9,8 @@ import {
   EditorJsonButton,
   EditorRightPanel,
   EditorCapturePreview,
+  EditorVerticalCropButton,
+  EditorSubtitleButton,
 } from "@/components/editor";
 import { ProcessingClipsNavButton } from "@/components/live2vod/processing-clips-nav-button";
 import { httpClient } from "@/services/http-client";
@@ -19,10 +21,19 @@ import { detectAds, getPrecalculatedAds } from "@/services/ads.service";
 import type {
   EditorAdMarker,
   EditorClipState,
+  EditorCropWindow,
   EditorPosterEntry,
   EditorStateJson,
   EditorSubClip,
+  EditorSubtitleStyle,
 } from "@/types/editor";
+
+const DEFAULT_SUBTITLE_STYLE: EditorSubtitleStyle = {
+  fontSizePx: 28,
+  textColor: "#FFFFFF",
+  outlineColor: "#000000",
+  outlineWidthPx: 3,
+};
 
 export function EditorPage() {
   const navigate = useNavigate();
@@ -49,6 +60,11 @@ export function EditorPage() {
   const [playingSequenceIndex, setPlayingSequenceIndex] = useState<number | null>(null);
   const [finishLoading, setFinishLoading] = useState(false);
   const [finishError, setFinishError] = useState<string | null>(null);
+  const [verticalCropMode, setVerticalCropMode] = useState(false);
+  const [cropWindow, setCropWindow] = useState<EditorCropWindow | null>(null);
+  const [subtitleMode, setSubtitleMode] = useState(false);
+  const [subtitleStyle, setSubtitleStyle] = useState<EditorSubtitleStyle>(DEFAULT_SUBTITLE_STYLE);
+  const [jsonPanelOpen, setJsonPanelOpen] = useState(false);
 
   const [ads, setAds] = useState<EditorAdMarker[]>([]);
   const [adsLoading, setAdsLoading] = useState(false);
@@ -335,6 +351,77 @@ export function EditorPage() {
     playerRef.current?.seek(timeSeconds);
   }, []);
 
+  const handleVerticalCropToggle = useCallback(() => {
+    setVerticalCropMode((prev) => {
+      if (prev) {
+        setCropWindow(null);
+        setJsonPanelOpen(false);
+        return false;
+      }
+      setCropWindow({ aspectRatio: "9:16", centerX: 0.5 });
+      return true;
+    });
+  }, []);
+
+  const handleSubtitleToggle = useCallback(() => {
+    setSubtitleMode((prev) => {
+      if (prev) {
+        setJsonPanelOpen(false);
+        return false;
+      }
+      return true;
+    });
+  }, []);
+
+  const handleVerticalCropCenterX = useCallback((centerX: number) => {
+    setCropWindow((cw) =>
+      cw ? { ...cw, centerX } : { aspectRatio: "9:16", centerX },
+    );
+  }, []);
+
+  const stateJson: EditorStateJson | null = useMemo(() => {
+    if (!clipState?.clipUrl) return null;
+    const absEpochToIso = (absSec: number) => {
+      const t = Number(absSec);
+      if (!Number.isFinite(t)) return "";
+      const d = new Date(t * 1000);
+      return Number.isFinite(d.getTime()) ? d.toISOString() : "";
+    };
+    return {
+      clipUrl: clipState.clipUrl,
+      sourceM3u8: clipState.sourceM3u8,
+      startTime: clipState.startTime,
+      endTime: clipState.endTime,
+      posters,
+      clips: clips.map((c) => ({ order: c.order, startTime: c.startTime, endTime: c.endTime })),
+      ads: ads.map((a) => ({
+        index: a.index,
+        startTime: a.startTime,
+        endTime: a.endTime,
+        startProgramDateTime: absEpochToIso(clipState.startTime + a.startTime),
+        endProgramDateTime: absEpochToIso(clipState.startTime + a.endTime),
+      })),
+      ...(verticalCropMode && cropWindow ? { cropWindow } : {}),
+      ...(subtitleMode
+        ? {
+            subtitles: {
+              enabled: true as const,
+              style: { ...subtitleStyle },
+            },
+          }
+        : {}),
+    };
+  }, [
+    clipState,
+    posters,
+    clips,
+    ads,
+    verticalCropMode,
+    cropWindow,
+    subtitleMode,
+    subtitleStyle,
+  ]);
+
   if (!clipState?.clipUrl) {
     return (
       <div className="flex h-full flex-col bg-primary">
@@ -364,29 +451,6 @@ export function EditorPage() {
   const effectiveDuration = duration > 0 ? duration : durationSeconds;
   const channelId = clipState.channelId ?? "";
 
-  const absEpochToIso = (absSec: number) => {
-    const t = Number(absSec);
-    if (!Number.isFinite(t)) return "";
-    const d = new Date(t * 1000);
-    return Number.isFinite(d.getTime()) ? d.toISOString() : "";
-  };
-
-  const stateJson: EditorStateJson = {
-    clipUrl: clipState.clipUrl,
-    sourceM3u8: clipState.sourceM3u8,
-    startTime: clipState.startTime,
-    endTime: clipState.endTime,
-    posters,
-    clips: clips.map((c) => ({ order: c.order, startTime: c.startTime, endTime: c.endTime })),
-    ads: ads.map((a) => ({
-      index: a.index,
-      startTime: a.startTime,
-      endTime: a.endTime,
-      startProgramDateTime: absEpochToIso(clipState.startTime + a.startTime),
-      endProgramDateTime: absEpochToIso(clipState.startTime + a.endTime),
-    })),
-  };
-
   const handleCreateAndFinish = async () => {
     if (clips.length === 0) {
       setFinishError("Add at least one clip before creating a VOD.");
@@ -399,6 +463,7 @@ export function EditorPage() {
     setFinishError(null);
     setFinishLoading(true);
     try {
+      if (!stateJson) return;
       await startVodJob(stateJson);
       navigate({ pathname: "/processing-clips", search: window.location.search });
     } catch (err) {
@@ -445,6 +510,12 @@ export function EditorPage() {
                 selectedClip={selectedClipId ? clips.find((c) => c.id === selectedClipId) ?? null : null}
                 onMarkIn={handleMarkIn}
                 onMarkOut={handleMarkOut}
+                verticalCropActive={verticalCropMode}
+                verticalCropCenterX={cropWindow?.centerX ?? 0.5}
+                onVerticalCropCenterXChange={handleVerticalCropCenterX}
+                subtitleOverlayActive={subtitleMode}
+                subtitleStyle={subtitleStyle}
+                onSubtitleStyleChange={setSubtitleStyle}
               />
             </div>
             <div className="min-w-0 flex-1 basis-0">
@@ -554,7 +625,16 @@ export function EditorPage() {
               {finishLoading ? "Starting…" : "Create and Finish"}
             </button>
             <ProcessingClipsNavButton />
-            <EditorJsonButton stateJson={stateJson} />
+            <EditorVerticalCropButton
+              active={verticalCropMode}
+              onToggle={handleVerticalCropToggle}
+            />
+            <EditorSubtitleButton active={subtitleMode} onToggle={handleSubtitleToggle} />
+            <EditorJsonButton
+              stateJson={stateJson}
+              open={jsonPanelOpen}
+              onOpenChange={setJsonPanelOpen}
+            />
           </div>
         </div>
       </footer>

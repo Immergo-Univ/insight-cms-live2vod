@@ -1,13 +1,25 @@
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { File06 } from "@untitledui/icons";
 import type { EditorStateJson } from "@/types/editor";
 
 interface EditorJsonButtonProps {
   stateJson: EditorStateJson | null;
+  /** Controlled open state (closes when vertical crop mode is disabled, etc.). */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }
 
-export function EditorJsonButton({ stateJson }: EditorJsonButtonProps) {
-  const [open, setOpen] = useState(false);
+export function EditorJsonButton({ stateJson, open: openControlled, onOpenChange }: EditorJsonButtonProps) {
+  const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
+  const isControlled = openControlled !== undefined;
+  const open = isControlled ? openControlled : uncontrolledOpen;
+  const setOpen = useCallback(
+    (next: boolean) => {
+      if (isControlled) onOpenChange?.(next);
+      else setUncontrolledOpen(next);
+    },
+    [isControlled, onOpenChange],
+  );
 
   if (!stateJson) return null;
 
@@ -35,7 +47,7 @@ export function EditorJsonButton({ stateJson }: EditorJsonButtonProps) {
 
       <button
         type="button"
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => setOpen(!open)}
         className="flex size-10 cursor-pointer items-center justify-center rounded-full border border-secondary bg-primary shadow-lg transition-colors hover:bg-secondary"
         title="JSON"
         aria-label="Toggle JSON state"

@@ -6,6 +6,8 @@ export { EditorTransportControls } from "./editor-transport-controls";
 export { EditorMarkInOut } from "./editor-mark-in-out";
 export { EditorClipsList } from "./editor-clips-list";
 export { EditorJsonButton } from "./editor-json-button";
+export { EditorVerticalCropButton } from "./editor-vertical-crop-button";
+export { EditorSubtitleButton } from "./editor-subtitle-button";
 export { EditorRightPanel } from "./editor-right-panel";
 export { EditorCapturePreview } from "./editor-capture-preview";
 export {

@@ -45,6 +45,31 @@ export interface EditorSubClip {
 }
 
 /**
+ * Vertical (9:16) crop over a wide frame: full frame height, width = height × 9/16, horizontally positioned.
+ * centerX is normalized to the source width (0 = left, 1 = right).
+ */
+export interface EditorCropWindow {
+  aspectRatio: "9:16";
+  centerX: number;
+}
+
+/** Burned-in subtitle appearance (matches ffmpeg/libass force_style). */
+export interface EditorSubtitleStyle {
+  fontSizePx: number;
+  /** Hex #RRGGBB */
+  textColor: string;
+  /** Hex #RRGGBB */
+  outlineColor: string;
+  outlineWidthPx: number;
+}
+
+/** Sent in JSON when subtitle mode is on. */
+export interface EditorSubtitlesConfig {
+  enabled: true;
+  style: EditorSubtitleStyle;
+}
+
+/**
  * Full editor JSON state (for export / process).
  */
 export interface EditorStateJson {
@@ -61,4 +86,6 @@ export interface EditorStateJson {
     startProgramDateTime: string;
     endProgramDateTime: string;
   }>;
+  cropWindow?: EditorCropWindow;
+  subtitles?: EditorSubtitlesConfig;
 }

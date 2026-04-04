@@ -1,9 +1,23 @@
-import { useCallback, useEffect, useRef, useImperativeHandle, forwardRef } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useImperativeHandle,
+  forwardRef,
+  useState,
+} from "react";
 import { Play, PauseCircle, StopCircle, VolumeMax, VolumeX } from "@untitledui/icons";
 import videojs from "video.js";
 import type Player from "video.js/dist/types/player";
 import "video.js/dist/video-js.css";
-import type { EditorSubClip } from "@/types/editor";
+import type { EditorSubClip, EditorSubtitleStyle } from "@/types/editor";
+import {
+  computeVideoContentRect,
+  EditorVerticalCropOverlay,
+  type VideoContentRect,
+} from "./editor-vertical-crop-overlay";
+import { EditorSubtitleOverlay } from "./editor-subtitle-overlay";
 
 export interface EditorPlayerRef {
   seek: (timeSeconds: number) => void;
@@ -35,6 +49,14 @@ interface EditorPlayerProps {
   onMarkIn?: (timeSeconds: number) => void;
   onMarkOut?: (timeSeconds: number) => void;
   markInOutDisabled?: boolean;
+  /** 9:16 vertical crop preview over the wide frame. */
+  verticalCropActive?: boolean;
+  verticalCropCenterX?: number;
+  onVerticalCropCenterXChange?: (centerX: number) => void;
+  /** Burned-in subtitle preview (example text) over the picture. */
+  subtitleOverlayActive?: boolean;
+  subtitleStyle?: EditorSubtitleStyle;
+  onSubtitleStyleChange?: (next: EditorSubtitleStyle) => void;
 }
 
 const overlayButtonClass =
@@ -60,11 +82,76 @@ export const EditorPlayer = forwardRef<EditorPlayerRef, EditorPlayerProps>(
       onMarkIn,
       onMarkOut,
       markInOutDisabled,
+      verticalCropActive = false,
+      verticalCropCenterX = 0.5,
+      onVerticalCropCenterXChange,
+      subtitleOverlayActive = false,
+      subtitleStyle,
+      onSubtitleStyleChange,
     },
     ref
   ) {
+    const outerRef = useRef<HTMLDivElement>(null);
     const containerRef = useRef<HTMLDivElement>(null);
     const playerRef = useRef<Player | null>(null);
+    const [contentRect, setContentRect] = useState<VideoContentRect>({
+      x: 0,
+      y: 0,
+      w: 0,
+      h: 0,
+    });
+
+    const updateContentRect = useCallback(() => {
+      const outer = outerRef.current;
+      const video = containerRef.current?.querySelector("video") ?? null;
+      if (!outer) return;
+      setContentRect(computeVideoContentRect(outer, video));
+    }, []);
+
+    const updateContentRectRef = useRef(updateContentRect);
+    updateContentRectRef.current = updateContentRect;
+
+    const measureOverlays = verticalCropActive || subtitleOverlayActive;
+
+    useLayoutEffect(() => {
+      if (!measureOverlays) return;
+      updateContentRect();
+    }, [measureOverlays, clipUrl, updateContentRect]);
+
+    useEffect(() => {
+      if (!measureOverlays) return;
+      const outer = outerRef.current;
+      const container = containerRef.current;
+      if (!outer || !container) return;
+
+      const ro = new ResizeObserver(() => updateContentRect());
+      ro.observe(outer);
+
+      let detachVideo: (() => void) | undefined;
+      const bindVideo = () => {
+        detachVideo?.();
+        const v = container.querySelector("video");
+        if (!v) return;
+        const onMeta = () => updateContentRect();
+        v.addEventListener("loadedmetadata", onMeta);
+        detachVideo = () => v.removeEventListener("loadedmetadata", onMeta);
+      };
+
+      bindVideo();
+      updateContentRect();
+
+      const mo = new MutationObserver(() => {
+        bindVideo();
+        updateContentRect();
+      });
+      mo.observe(container, { childList: true, subtree: true });
+
+      return () => {
+        ro.disconnect();
+        mo.disconnect();
+        detachVideo?.();
+      };
+    }, [measureOverlays, clipUrl, updateContentRect]);
 
     useEffect(() => {
       if (!containerRef.current) return;
@@ -84,6 +171,10 @@ export const EditorPlayer = forwardRef<EditorPlayerRef, EditorPlayerProps>(
       });
 
       playerRef.current = player;
+
+      player.ready(() => {
+        updateContentRectRef.current();
+      });
 
       const onTimeUpdateHandler = () => {
         const t = player.currentTime();
@@ -153,16 +244,33 @@ export const EditorPlayer = forwardRef<EditorPlayerRef, EditorPlayerProps>(
     const isMarkInRangeSelectionActive = !selectedClip && markInTime !== null;
 
     return (
-      <div className="relative aspect-video w-full max-w-3xl overflow-hidden rounded-lg bg-black">
+      <div
+        ref={outerRef}
+        className="relative aspect-video w-full max-w-3xl overflow-hidden rounded-lg bg-black"
+      >
         <div ref={containerRef} className="video-js-container" />
+        {verticalCropActive && onVerticalCropCenterXChange ? (
+          <EditorVerticalCropOverlay
+            contentRect={contentRect}
+            centerX={verticalCropCenterX}
+            onCenterXChange={onVerticalCropCenterXChange}
+          />
+        ) : null}
+        {subtitleOverlayActive && subtitleStyle && onSubtitleStyleChange ? (
+          <EditorSubtitleOverlay
+            contentRect={contentRect}
+            style={subtitleStyle}
+            onStyleChange={onSubtitleStyleChange}
+          />
+        ) : null}
         {isMarkInRangeSelectionActive && (
-          <div className="pointer-events-none absolute top-2 left-1/2 -translate-x-1/2 rounded-md bg-black/60 px-3 py-1.5 text-xs font-semibold text-white shadow">
+          <div className="pointer-events-none absolute top-2 left-1/2 z-20 -translate-x-1/2 rounded-md bg-black/60 px-3 py-1.5 text-xs font-semibold text-white shadow">
             Select the time until Mark Out
           </div>
         )}
         {/* Play / Pause / Stop — bottom-left, same style as Mute */}
         {(onTransportPlay || onTransportPause || onTransportStop) && (
-          <div className="absolute bottom-2 left-2 flex items-center gap-1">
+          <div className="absolute bottom-2 left-2 z-20 flex items-center gap-1">
             {isPlaying ? (
               <button
                 type="button"
@@ -197,7 +305,7 @@ export const EditorPlayer = forwardRef<EditorPlayerRef, EditorPlayerProps>(
         )}
         {/* Mark In / Mark Out — bottom center, same style as Play/Stop */}
         {onMarkIn && onMarkOut && (
-          <div className="absolute bottom-2 left-1/2 flex -translate-x-1/2 items-center gap-1">
+          <div className="absolute bottom-2 left-1/2 z-20 flex -translate-x-1/2 items-center gap-1">
             <button
               type="button"
               onClick={() => onMarkIn(currentTimeSeconds)}
@@ -225,7 +333,7 @@ export const EditorPlayer = forwardRef<EditorPlayerRef, EditorPlayerProps>(
         <button
           type="button"
           onClick={handleMuteToggle}
-          className={`absolute bottom-2 right-2 ${overlayButtonClass}`}
+          className={`absolute bottom-2 right-2 z-20 ${overlayButtonClass}`}
           title={muted ? "Unmute" : "Mute"}
           aria-label={muted ? "Unmute" : "Mute"}
         >

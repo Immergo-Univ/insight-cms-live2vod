@@ -141,8 +141,10 @@ int run_ffmpeg_one_frame(const char *input_url, const std::string &out_jpg) {
   storage.emplace_back("-an");
   storage.emplace_back("-sn");
   storage.emplace_back("-dn");
+  // Optional map: some HLS windows / CDN responses expose audio-only briefly; bare 0:v:0 aborts
+  // during option parsing ("matches no streams") before any decode attempt.
   storage.emplace_back("-map");
-  storage.emplace_back("0:v:0");
+  storage.emplace_back("0:v:0?");
   storage.emplace_back("-frames:v");
   storage.emplace_back("1");
   storage.emplace_back("-pix_fmt");

@@ -19,12 +19,12 @@ import {
 } from "./logo-pipeline.service.js";
 import { mergeChannelSnapshotFields, resolveHlsBaseUrl } from "./channel-ads-disk.service.js";
 
-/** Consecutive live samples without logo before an ad window opens (wall-clock spaced by real probe cadence). */
-const MIN_ABSENT_TO_OPEN = 10;
+/** Consecutive live samples (one probe ≈ one frame grab) without logo before an ad window opens. */
+const MIN_ABSENT_TO_OPEN = 3;
 /** Fallback if first-absent epoch is missing (should not happen). */
 const AD_START_LOOKBACK_SEC = 10;
-/** Consecutive samples with logo before closing an ad window (stricter = fewer false “logo back”). */
-const MIN_PRESENT_TO_CLOSE = 4;
+/** Consecutive samples with logo before closing an ad window (back to program). */
+const MIN_PRESENT_TO_CLOSE = 3;
 
 /** Throttle stderr logs when a channel has no uploaded logos yet (paths re-checked every loop). */
 const lastMissingLogoLogMs = new Map();
@@ -151,8 +151,10 @@ function channelHlsUrl(row) {
 /**
  * Hysteresis using wall clock at the instant each probe result is applied (aligned with debug frame “now”).
  * - First absent: `absentStreakStartEpoch = floor(Date.now()/1000)` at that tick.
- * - AD opens after MIN_ABSENT_TO_OPEN consecutive absents; `adWindowStartEpoch` stays the **first** absent second.
- * - `adConfirmWallSec` stores the wall second when the streak confirmed (Nth sample), for JSON lag metadata.
+ * - AD opens after MIN_ABSENT_TO_OPEN consecutive absents; `adWindowStartEpoch` is the **first** absent second
+ *   (AD content begins from that instant; confirmation lags by (N-1) probe intervals — see hysteresis*Nominal).
+ * - AD closes after MIN_PRESENT_TO_CLOSE consecutive presents; `endEpoch` is the **first** present second in that streak.
+ * - `adConfirmWallSec` stores the wall second when the open streak confirmed (Nth absent sample), for JSON lag metadata.
  * @param {LiveChannelState} st
  * @param {boolean} logoPresent
  * @param {number} wallNowSec `Math.floor(Date.now()/1000)` when registering this probe outcome
