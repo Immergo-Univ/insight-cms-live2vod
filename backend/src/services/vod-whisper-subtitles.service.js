@@ -2,9 +2,83 @@
  * Transcribe final MP4 with whisper.cpp and burn subtitles (styled) into the video.
  */
 
-import { spawn } from "child_process";
+import { execFileSync, spawn } from "child_process";
+import { accessSync } from "fs";
 import fs from "fs/promises";
 import path from "path";
+
+function pathExistsSync(p) {
+  try {
+    accessSync(p);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** @returns {string | null} */
+function whisperCliFromShellPath() {
+  try {
+    const out = execFileSync("/bin/sh", ["-c", "command -v whisper-cli 2>/dev/null"], {
+      encoding: "utf8",
+      maxBuffer: 4096,
+    }).trim();
+    return out && pathExistsSync(out) ? out : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * @returns {string}
+ */
+function resolveWhisperCliPath() {
+  const envPath = process.env.WHISPER_CLI_PATH?.trim();
+  if (envPath) {
+    if (!pathExistsSync(envPath)) {
+      throw new Error(
+        `WHISPER_CLI_PATH points to missing file: ${envPath}. Fix the path or unset it to use whisper-cli on PATH.`,
+      );
+    }
+    return envPath;
+  }
+  const fromPath = whisperCliFromShellPath();
+  if (fromPath) return fromPath;
+  const dockerPath = "/opt/whisper/whisper-cli";
+  if (pathExistsSync(dockerPath)) return dockerPath;
+  throw new Error(
+    "whisper-cli not found. Options: (1) Add whisper-cli to PATH (build whisper.cpp), (2) set WHISPER_CLI_PATH to the binary, or (3) run the backend in Docker where /opt/whisper is preinstalled.",
+  );
+}
+
+/**
+ * @returns {string}
+ */
+function resolveWhisperModelPath() {
+  const envPath = process.env.WHISPER_MODEL_PATH?.trim();
+  if (envPath) {
+    if (!pathExistsSync(envPath)) {
+      throw new Error(
+        `WHISPER_MODEL_PATH points to missing file: ${envPath}. Download a ggml model (e.g. whisper.cpp models/download-ggml-model.sh base).`,
+      );
+    }
+    return envPath;
+  }
+  const dockerPath = "/opt/whisper/models/ggml-base.bin";
+  if (pathExistsSync(dockerPath)) return dockerPath;
+  const home = process.env.HOME?.trim() || "";
+  const candidates = [
+    path.join(home, "whisper.cpp/models/ggml-base.bin"),
+    path.join(process.cwd(), "models/ggml-base.bin"),
+    path.join(process.cwd(), "whisper.cpp/models/ggml-base.bin"),
+  ];
+  for (const c of candidates) {
+    if (c && pathExistsSync(c)) return c;
+  }
+  throw new Error(
+    "Whisper GGML model not found (ggml-base.bin). Set WHISPER_MODEL_PATH to the .bin file, or run whisper.cpp models/download-ggml-model.sh base (see Dockerfile).",
+  );
+}
 
 /**
  * @param {string} hex
@@ -66,7 +140,12 @@ function runProc(cmd, args, shouldCancel) {
         return;
       }
       if (code === 0) resolve();
-      else reject(new Error(stderr.trim() || `${cmd} exited with code ${code}`));
+      else {
+        const tail = stderr.trim() || "(no stderr output)";
+        const label = path.basename(cmd);
+        console.error(`[vod][${label}] exit=${code}`, tail.length > 4000 ? `${tail.slice(0, 4000)}…` : tail);
+        reject(new Error(tail.length > 800 ? `${tail.slice(0, 800)}…` : tail || `${label} exited with code ${code}`));
+      }
     });
   });
 }
@@ -188,23 +267,8 @@ async function burnSubtitlesFfmpeg(opts) {
 export async function transcribeAndBurnSubtitles(ctx) {
   const { inputMp4, workDir, style, shouldCancel, onProgress } = ctx;
 
-  const whisperCli = (process.env.WHISPER_CLI_PATH || "/opt/whisper/whisper-cli").trim();
-  const modelPath = (process.env.WHISPER_MODEL_PATH || "/opt/whisper/models/ggml-base.bin").trim();
-
-  try {
-    await fs.access(whisperCli);
-  } catch {
-    throw new Error(
-      `whisper-cli not found at ${whisperCli}. Set WHISPER_CLI_PATH or install whisper.cpp (see Dockerfile).`,
-    );
-  }
-  try {
-    await fs.access(modelPath);
-  } catch {
-    throw new Error(
-      `Whisper model missing at ${modelPath}. Set WHISPER_MODEL_PATH or add ggml-base.bin under /opt/whisper/models/.`,
-    );
-  }
+  const whisperCli = resolveWhisperCliPath();
+  const modelPath = resolveWhisperModelPath();
 
   const wavPath = path.join(workDir, "whisper_input.wav");
   const srtBase = path.join(workDir, "whisper_subs");

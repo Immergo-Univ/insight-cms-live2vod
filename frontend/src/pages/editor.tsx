@@ -505,11 +505,7 @@ export function EditorPage() {
                 onTransportPlay={handlePlay}
                 onTransportPause={handlePause}
                 onTransportStop={handleStop}
-                currentTimeSeconds={currentTime}
-                markInTime={markInTime}
-                selectedClip={selectedClipId ? clips.find((c) => c.id === selectedClipId) ?? null : null}
-                onMarkIn={handleMarkIn}
-                onMarkOut={handleMarkOut}
+                markRangeAwaitingOut={!selectedClipId && markInTime !== null}
                 verticalCropActive={verticalCropMode}
                 verticalCropCenterX={cropWindow?.centerX ?? 0.5}
                 onVerticalCropCenterXChange={handleVerticalCropCenterX}
@@ -555,6 +551,9 @@ export function EditorPage() {
               onResizeAd={handleResizeAd}
               clipStartUnixSec={clipState.startTime}
               clientTimeZone={clientTimeZone}
+              markInTime={markInTime}
+              onMarkIn={handleMarkIn}
+              onMarkOut={handleMarkOut}
             />
           </section>
 

@@ -142,6 +142,7 @@ export function ProcessingClipsPage() {
                   <th className="px-3 py-2 font-medium text-secondary">Job</th>
                   <th className="px-3 py-2 font-medium text-secondary">Status</th>
                   <th className="px-3 py-2 font-medium text-secondary">Phase</th>
+                  <th className="min-w-[200px] max-w-[320px] px-3 py-2 font-medium text-secondary">Error</th>
                   <th className="min-w-[180px] px-3 py-2 font-medium text-secondary">Progress</th>
                   <th className="px-3 py-2 font-medium text-secondary">Source</th>
                   <th className="px-3 py-2 font-medium text-secondary">Output</th>
@@ -151,7 +152,7 @@ export function ProcessingClipsPage() {
               <tbody>
                 {jobs.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="px-3 py-6 text-center text-tertiary">
+                    <td colSpan={8} className="px-3 py-6 text-center text-tertiary">
                       No jobs yet. Use Create and Finish in the editor to start encoding.
                     </td>
                   </tr>
@@ -163,6 +164,17 @@ export function ProcessingClipsPage() {
                       </td>
                       <td className="px-3 py-2 text-primary">{job.status}</td>
                       <td className="px-3 py-2 text-secondary">{job.phase}</td>
+                      <td className="max-w-[320px] px-3 py-2 align-top text-xs break-words">
+                        {job.error ? (
+                          <span className="text-error-primary" title={job.error}>
+                            {job.error}
+                          </span>
+                        ) : job.status === "failed" ? (
+                          <span className="text-tertiary">No error text (check server logs)</span>
+                        ) : (
+                          <span className="text-tertiary">—</span>
+                        )}
+                      </td>
                       <td className="px-3 py-2">
                         <div className="flex items-center gap-2">
                           <div className="h-2 flex-1 overflow-hidden rounded-full bg-secondary">

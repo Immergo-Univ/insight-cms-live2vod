@@ -160,7 +160,12 @@ async function runFfprobeVideoSize(inputUrl) {
       });
       proc.on("close", (code) => {
         if (code !== 0) {
-          reject(new Error(stderr.trim() || `ffprobe exited with code ${code}`));
+          const errText = stderr.trim() || `ffprobe exited with code ${code}`;
+          console.error(
+            "[vod][ffprobe]",
+            errText.length > 4000 ? `${errText.slice(0, 4000)}…` : errText,
+          );
+          reject(new Error(errText));
           return;
         }
         resolve({ stdout, stderr });
@@ -331,7 +336,11 @@ function runFfmpeg(args, shouldCancel) {
         return;
       }
       if (code === 0) resolve();
-      else reject(new Error(stderr.trim() || `ffmpeg exited with code ${code}`));
+      else {
+        const tail = stderr.trim() || "(no stderr output)";
+        console.error(`[vod][ffmpeg] exit=${code}`, tail.length > 4000 ? `${tail.slice(0, 4000)}…` : tail);
+        reject(new Error(tail.length > 800 ? `${tail.slice(0, 800)}…` : tail || `ffmpeg exited with code ${code}`));
+      }
     });
   });
 }

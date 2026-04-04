@@ -32,12 +32,27 @@ function subtitlesEnabled(spec) {
   return !!(s && typeof s === "object" && s.enabled === true);
 }
 
+/**
+ * @param {string} jobId
+ * @param {string} tenantId
+ * @param {boolean} burnSubs
+ * @param {string} [clipHint]
+ */
+function logVodInfo(jobId, tenantId, burnSubs, clipHint) {
+  const clip = clipHint && clipHint.length > 120 ? `${clipHint.slice(0, 120)}…` : clipHint || "";
+  console.log(
+    `[vod] start job=${jobId} tenant=${tenantId} subtitles=${burnSubs ? "yes" : "no"}${clip ? ` clip=${clip}` : ""}`,
+  );
+}
+
 export async function runVodEncodeJob(opts) {
   const { jobId, tenantId, spec } = opts;
   const workDir = path.join(os.tmpdir(), `vod-job-${jobId}`);
   const burnSubs = subtitlesEnabled(spec);
 
   try {
+    logVodInfo(jobId, tenantId, burnSubs, typeof spec?.clipUrl === "string" ? spec.clipUrl : "");
+
     if (shouldCancel(jobId)) {
       updateJob(jobId, {
         status: "cancelled",
@@ -137,6 +152,7 @@ export async function runVodEncodeJob(opts) {
       s3Key: key,
       outputUrl: publicUrl || null,
     });
+    console.log(`[vod] done job=${jobId} tenant=${tenantId} key=${key}`);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     if (msg === "CANCELLED" || shouldCancel(jobId)) {
@@ -146,17 +162,22 @@ export async function runVodEncodeJob(opts) {
         phase: "cancelled",
         message: "Cancelled",
       });
+      console.log(`[vod] cancelled job=${jobId} tenant=${tenantId}`);
     } else {
-      console.error("[vod] encode failed", jobId, "tenant=", tenantId, msg);
+      console.error(`[vod] FAILED job=${jobId} tenant=${tenantId}`);
+      console.error(`[vod] error: ${msg || "(empty message)"}`);
       if (err instanceof Error && err.stack) {
+        console.error("[vod] stack:");
         console.error(err.stack);
+      } else {
+        console.error("[vod] raw:", err);
       }
       updateJob(jobId, {
         status: "failed",
         progress: 0,
         phase: "failed",
-        error: msg,
-        message: "Failed",
+        error: msg || "Unknown error",
+        message: msg ? `Failed: ${msg.slice(0, 200)}` : "Failed",
       });
     }
   } finally {
@@ -190,14 +211,20 @@ export function startBackgroundVodJob(opts) {
     clipUrl: clipUrlPreview || spec.clipUrl,
   });
 
+  const subs = subtitlesEnabled(spec);
+  console.log(`[vod] queued job=${jobId} tenant=${tenantId} subtitles=${subs ? "yes" : "no"}`);
+
   queueMicrotask(() => {
-    runVodEncodeJob({ jobId, tenantId, spec }).catch((e) => {
-      console.error("[vod] job error", jobId, e);
+    // runVodEncodeJob catches internally; this only fires on unexpected bugs
+    void runVodEncodeJob({ jobId, tenantId, spec }).catch((e) => {
+      const m = e instanceof Error ? e.message : String(e);
+      console.error(`[vod] unexpected rejection job=${jobId}`, m);
+      if (e instanceof Error && e.stack) console.error(e.stack);
       updateJob(jobId, {
         status: "failed",
-        error: e instanceof Error ? e.message : String(e),
+        error: m,
         phase: "failed",
-        message: "Failed",
+        message: `Failed: ${m.slice(0, 200)}`,
       });
     });
   });

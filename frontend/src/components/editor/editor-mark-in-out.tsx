@@ -8,6 +8,8 @@ interface EditorMarkInOutProps {
   onMarkIn: (timeSeconds: number) => void;
   onMarkOut: (timeSeconds: number) => void;
   isDisabled?: boolean;
+  /** Inline row under the player (timeline toolbar) vs prominent toolbar buttons. */
+  variant?: "toolbar" | "timeline";
 }
 
 export function EditorMarkInOut({
@@ -17,6 +19,7 @@ export function EditorMarkInOut({
   onMarkIn,
   onMarkOut,
   isDisabled,
+  variant = "toolbar",
 }: EditorMarkInOutProps) {
   const canMarkIn = selectedClip
     ? currentTimeSeconds < selectedClip.endTime
@@ -24,6 +27,36 @@ export function EditorMarkInOut({
   const canMarkOut = selectedClip
     ? currentTimeSeconds > selectedClip.startTime
     : markInTime !== null && currentTimeSeconds > markInTime;
+  const isMarkInRangeSelectionActive = !selectedClip && markInTime !== null;
+
+  if (variant === "timeline") {
+    const baseBtn =
+      "rounded-md border px-2 py-1 text-xs font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-brand-secondary/30 disabled:cursor-not-allowed disabled:opacity-50";
+    return (
+      <div className="flex shrink-0 flex-wrap items-center gap-1.5">
+        <button
+          type="button"
+          onClick={() => onMarkIn(currentTimeSeconds)}
+          disabled={isDisabled || !canMarkIn}
+          className={`${baseBtn} border-secondary bg-primary text-primary hover:bg-secondary ${
+            isMarkInRangeSelectionActive ? "border-blue-500 ring-2 ring-blue-500/35" : ""
+          }`}
+          title="Mark In"
+        >
+          Mark In
+        </button>
+        <button
+          type="button"
+          onClick={() => onMarkOut(currentTimeSeconds)}
+          disabled={isDisabled || !canMarkOut}
+          className={`${baseBtn} border-secondary bg-primary text-primary hover:bg-secondary`}
+          title="Mark Out"
+        >
+          Mark Out
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-wrap items-center gap-2">

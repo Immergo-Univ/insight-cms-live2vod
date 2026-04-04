@@ -11,7 +11,7 @@ import { Play, PauseCircle, StopCircle, VolumeMax, VolumeX } from "@untitledui/i
 import videojs from "video.js";
 import type Player from "video.js/dist/types/player";
 import "video.js/dist/video-js.css";
-import type { EditorSubClip, EditorSubtitleStyle } from "@/types/editor";
+import type { EditorSubtitleStyle } from "@/types/editor";
 import {
   computeVideoContentRect,
   EditorVerticalCropOverlay,
@@ -42,13 +42,8 @@ interface EditorPlayerProps {
   onTransportPlay?: () => void;
   onTransportPause?: () => void;
   onTransportStop?: () => void;
-  /** Mark In/Out buttons at bottom center. */
-  currentTimeSeconds?: number;
-  markInTime?: number | null;
-  selectedClip?: EditorSubClip | null;
-  onMarkIn?: (timeSeconds: number) => void;
-  onMarkOut?: (timeSeconds: number) => void;
-  markInOutDisabled?: boolean;
+  /** True after Mark In (no clip selected): show hint until Mark Out. */
+  markRangeAwaitingOut?: boolean;
   /** 9:16 vertical crop preview over the wide frame. */
   verticalCropActive?: boolean;
   verticalCropCenterX?: number;
@@ -76,12 +71,7 @@ export const EditorPlayer = forwardRef<EditorPlayerRef, EditorPlayerProps>(
       onTransportPlay,
       onTransportPause,
       onTransportStop,
-      currentTimeSeconds = 0,
-      markInTime = null,
-      selectedClip = null,
-      onMarkIn,
-      onMarkOut,
-      markInOutDisabled,
+      markRangeAwaitingOut = false,
       verticalCropActive = false,
       verticalCropCenterX = 0.5,
       onVerticalCropCenterXChange,
@@ -235,14 +225,6 @@ export const EditorPlayer = forwardRef<EditorPlayerRef, EditorPlayerProps>(
       onMutedChange?.(!muted);
     }, [muted, onMutedChange]);
 
-    const canMarkIn = selectedClip
-      ? currentTimeSeconds < selectedClip.endTime
-      : true;
-    const canMarkOut = selectedClip
-      ? currentTimeSeconds > selectedClip.startTime
-      : markInTime !== null && currentTimeSeconds > markInTime;
-    const isMarkInRangeSelectionActive = !selectedClip && markInTime !== null;
-
     return (
       <div
         ref={outerRef}
@@ -263,7 +245,7 @@ export const EditorPlayer = forwardRef<EditorPlayerRef, EditorPlayerProps>(
             onStyleChange={onSubtitleStyleChange}
           />
         ) : null}
-        {isMarkInRangeSelectionActive && (
+        {markRangeAwaitingOut && (
           <div className="pointer-events-none absolute top-2 left-1/2 z-20 -translate-x-1/2 rounded-md bg-black/60 px-3 py-1.5 text-xs font-semibold text-white shadow">
             Select the time until Mark Out
           </div>
@@ -300,33 +282,6 @@ export const EditorPlayer = forwardRef<EditorPlayerRef, EditorPlayerProps>(
               aria-label="Stop"
             >
               <StopCircle className="size-5" />
-            </button>
-          </div>
-        )}
-        {/* Mark In / Mark Out — bottom center, same style as Play/Stop */}
-        {onMarkIn && onMarkOut && (
-          <div className="absolute bottom-2 left-1/2 z-20 flex -translate-x-1/2 items-center gap-1">
-            <button
-              type="button"
-              onClick={() => onMarkIn(currentTimeSeconds)}
-              disabled={markInOutDisabled || !canMarkIn}
-              className={`flex cursor-pointer items-center justify-center rounded-md bg-black/60 px-3 py-2 text-sm font-semibold text-white transition-colors hover:bg-black/80 focus:outline-none focus:ring-2 focus:ring-white/50 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-black/60 border-[3px] ${
-                isMarkInRangeSelectionActive ? "border-blue-500" : "border-transparent"
-              }`}
-              title="Mark In"
-              aria-label="Mark In"
-            >
-              Mark In
-            </button>
-            <button
-              type="button"
-              onClick={() => onMarkOut(currentTimeSeconds)}
-              disabled={markInOutDisabled || !canMarkOut}
-              className="flex cursor-pointer items-center justify-center rounded-md bg-black/60 px-3 py-2 text-sm font-semibold text-white transition-colors hover:bg-black/80 focus:outline-none focus:ring-2 focus:ring-white/50 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-black/60"
-              title="Mark Out"
-              aria-label="Mark Out"
-            >
-              Mark Out
             </button>
           </div>
         )}

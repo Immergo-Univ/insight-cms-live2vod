@@ -8,6 +8,7 @@ import {
   buildThumbnailUrl,
 } from "./editor-constants";
 import type { EditorAdMarker, EditorSubClip } from "@/types/editor";
+import { EditorMarkInOut } from "./editor-mark-in-out";
 
 const TIMELINE_SCRUB_HEIGHT_PX = 24;
 const TIMELINE_FILMSTRIP_HEIGHT_PX = 120;
@@ -46,6 +47,11 @@ interface EditorTimelineProps {
   clipStartUnixSec?: number;
   /** IANA timezone (e.g. from ?tz= query). */
   clientTimeZone?: string;
+  /** Mark In / Out (shown in the row under the player, next to time / ads). */
+  markInTime?: number | null;
+  onMarkIn?: (timeSeconds: number) => void;
+  onMarkOut?: (timeSeconds: number) => void;
+  markInOutDisabled?: boolean;
 }
 
 export function EditorTimeline({
@@ -68,6 +74,10 @@ export function EditorTimeline({
   onResizeAd,
   clipStartUnixSec = 0,
   clientTimeZone,
+  markInTime = null,
+  onMarkIn,
+  onMarkOut,
+  markInOutDisabled,
 }: EditorTimelineProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   /** Thin horizontal scrollbar below thumbnails, synced with scrollRef */
@@ -372,6 +382,17 @@ export function EditorTimeline({
               {ads.length} ad{ads.length !== 1 ? "s" : ""} detected
             </span>
           )}
+          {onMarkIn && onMarkOut ? (
+            <EditorMarkInOut
+              variant="timeline"
+              currentTimeSeconds={currentTimeSeconds}
+              markInTime={markInTime}
+              selectedClip={selectedClipId ? clips.find((c) => c.id === selectedClipId) ?? null : null}
+              onMarkIn={onMarkIn}
+              onMarkOut={onMarkOut}
+              isDisabled={markInOutDisabled}
+            />
+          ) : null}
         </div>
         <select
           value={zoomIndex}
