@@ -1,3 +1,7 @@
+import type { WhisperLanguageCode, WhisperSubtitleOutputLanguage } from "./editor-whisper-languages";
+
+export type { WhisperLanguageCode, WhisperSubtitleOutputLanguage } from "./editor-whisper-languages";
+
 /**
  * Editor clip data passed from the previous step (time window selection).
  */
@@ -63,10 +67,24 @@ export interface EditorSubtitleStyle {
   outlineWidthPx: number;
 }
 
+/**
+ * Editor state for subtitle preview + modal (not all fields are sent in JSON).
+ * Video language → whisper -l hint; subtitle language → transcription or translate to English.
+ */
+export interface EditorSubtitleSettings {
+  style: EditorSubtitleStyle;
+  whisperSourceLanguage: WhisperLanguageCode;
+  whisperOutputLanguage: WhisperSubtitleOutputLanguage;
+}
+
 /** Sent in JSON when subtitle mode is on. */
 export interface EditorSubtitlesConfig {
   enabled: true;
+  whisperSourceLanguage: WhisperLanguageCode;
+  whisperOutputLanguage: WhisperSubtitleOutputLanguage;
   style: EditorSubtitleStyle;
+  /** @deprecated Old jobs only; backend maps to source/output if present */
+  languageMode?: string;
 }
 
 /**

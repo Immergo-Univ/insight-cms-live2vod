@@ -179,30 +179,142 @@ async function extractAudioWav16k(opts) {
   );
 }
 
+/** Must stay in sync with frontend `editor-whisper-languages.ts` (minus legacy-only). */
+const WHISPER_LANGS = new Set([
+  "auto",
+  "ar",
+  "cs",
+  "da",
+  "de",
+  "el",
+  "en",
+  "es",
+  "fr",
+  "he",
+  "hi",
+  "hu",
+  "id",
+  "it",
+  "ja",
+  "ko",
+  "nl",
+  "pl",
+  "pt",
+  "ru",
+  "sv",
+  "tr",
+  "uk",
+  "vi",
+  "zh",
+  "fi",
+  "ro",
+]);
+
+/**
+ * @param {unknown} s
+ * @returns {string}
+ */
+function normalizeWhisperSource(s) {
+  const x = String(s ?? "auto").trim();
+  return WHISPER_LANGS.has(x) ? x : "auto";
+}
+
+/**
+ * @param {unknown} o
+ * @returns {string}
+ */
+function normalizeWhisperOutput(o) {
+  const x = String(o ?? "same").trim();
+  if (x === "same") return "same";
+  if (x === "auto") return "same";
+  if (WHISPER_LANGS.has(x) && x !== "auto") return x;
+  return "same";
+}
+
+/**
+ * @param {unknown} lm
+ * @returns {{ source: string, output: string }}
+ */
+function legacyLanguageModeToPair(lm) {
+  switch (String(lm || "").trim()) {
+    case "translate_en_he":
+      return { source: "he", output: "en" };
+    case "translate_en":
+      return { source: "auto", output: "en" };
+    case "es":
+      return { source: "es", output: "same" };
+    case "he":
+      return { source: "he", output: "same" };
+    default:
+      return { source: "auto", output: "same" };
+  }
+}
+
+/**
+ * @param {unknown} subtitles
+ * @returns {{ source: string, output: string }}
+ */
+function resolveWhisperLanguages(subtitles) {
+  if (!subtitles || typeof subtitles !== "object") {
+    return { source: "auto", output: "same" };
+  }
+  const s = /** @type {{ whisperSourceLanguage?: unknown, whisperOutputLanguage?: unknown, languageMode?: unknown }} */ (
+    subtitles
+  );
+  const hasNew =
+    s.whisperSourceLanguage != null &&
+    s.whisperOutputLanguage != null &&
+    String(s.whisperOutputLanguage).trim() !== "";
+  if (hasNew) {
+    return {
+      source: normalizeWhisperSource(s.whisperSourceLanguage),
+      output: normalizeWhisperOutput(s.whisperOutputLanguage),
+    };
+  }
+  if (s.languageMode != null && String(s.languageMode).trim() !== "") {
+    return legacyLanguageModeToPair(s.languageMode);
+  }
+  return { source: "auto", output: "same" };
+}
+
+/**
+ * @param {string} source
+ * @param {string} output
+ * @returns {string[]}
+ */
+function buildWhisperLangArgs(source, output) {
+  const src = normalizeWhisperSource(source);
+  const out = normalizeWhisperOutput(output);
+
+  if (out === "same") {
+    return ["-l", src === "auto" ? "auto" : src];
+  }
+  if (out === "en") {
+    if (src === "en") return ["-l", "en"];
+    return ["-l", src, "-tr"];
+  }
+  if (src === "auto" || out === src) {
+    return ["-l", out];
+  }
+  throw new Error(
+    `Unsupported subtitle languages: video=${src}, subtitles=${out}. Whisper can only translate to English across languages; otherwise use the same language for both (or Auto + one subtitle language).`,
+  );
+}
+
 /**
  * @param {object} opts
  * @param {string} opts.whisperCli
  * @param {string} opts.modelPath
  * @param {string} opts.wavPath
  * @param {string} opts.srtBase path without extension (whisper adds .srt)
+ * @param {string[]} opts.langArgs
  * @param {() => boolean} opts.shouldCancel
  */
 async function runWhisperCli(opts) {
-  const { whisperCli, modelPath, wavPath, srtBase, shouldCancel } = opts;
+  const { whisperCli, modelPath, wavPath, srtBase, shouldCancel, langArgs } = opts;
   await runProc(
     whisperCli,
-    [
-      "-m",
-      modelPath,
-      "-f",
-      wavPath,
-      "-l",
-      "auto",
-      "-osrt",
-      "-of",
-      srtBase,
-      "-np",
-    ],
+    ["-m", modelPath, "-f", wavPath, ...langArgs, "-osrt", "-of", srtBase, "-np"],
     shouldCancel,
   );
 }
@@ -260,12 +372,15 @@ async function burnSubtitlesFfmpeg(opts) {
  * @param {string} ctx.inputMp4
  * @param {string} ctx.workDir
  * @param {SubtitleBurnStyle} ctx.style
+ * @param {object} [ctx.subtitles] whisperSourceLanguage, whisperOutputLanguage (or legacy languageMode)
  * @param {() => boolean} ctx.shouldCancel
  * @param {(pct: number) => void} [ctx.onProgress]
  * @returns {Promise<{ localPath: string }>}
  */
 export async function transcribeAndBurnSubtitles(ctx) {
-  const { inputMp4, workDir, style, shouldCancel, onProgress } = ctx;
+  const { inputMp4, workDir, style, subtitles, shouldCancel, onProgress } = ctx;
+  const { source, output } = resolveWhisperLanguages(subtitles);
+  const langArgs = buildWhisperLangArgs(source, output);
 
   const whisperCli = resolveWhisperCliPath();
   const modelPath = resolveWhisperModelPath();
@@ -284,6 +399,7 @@ export async function transcribeAndBurnSubtitles(ctx) {
     modelPath,
     wavPath,
     srtBase,
+    langArgs,
     shouldCancel,
   });
 

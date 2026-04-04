@@ -351,7 +351,7 @@ function runFfmpeg(args, shouldCancel) {
  * @property {Array<{ order: number, startTime: number, endTime: number }>} clips
  * @property {Array<{ startTime: number, endTime: number }>} [ads]
  * @property {{ aspectRatio: string, centerX: number }} [cropWindow]
- * @property {{ enabled: boolean, style?: { fontSizePx?: number, textColor?: string, outlineColor?: string, outlineWidthPx?: number } }} [subtitles]
+ * @property {{ enabled: boolean, whisperSourceLanguage?: string, whisperOutputLanguage?: string, languageMode?: string, style?: { fontSizePx?: number, textColor?: string, outlineColor?: string, outlineWidthPx?: number } }} [subtitles]
  */
 
 /**

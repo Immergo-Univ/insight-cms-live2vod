@@ -1,6 +1,6 @@
 import { useCallback, useState } from "react";
 import { Edit03 } from "@untitledui/icons";
-import type { EditorSubtitleStyle } from "@/types/editor";
+import type { EditorSubtitleSettings, EditorSubtitleStyle } from "@/types/editor";
 import type { VideoContentRect } from "./editor-vertical-crop-overlay";
 import { EditorSubtitleStyleModal } from "./editor-subtitle-style-modal";
 
@@ -29,11 +29,12 @@ function outlineTextShadow(widthPx: number, color: string): string {
 
 interface EditorSubtitleOverlayProps {
   contentRect: VideoContentRect;
-  style: EditorSubtitleStyle;
-  onStyleChange: (next: EditorSubtitleStyle) => void;
+  settings: EditorSubtitleSettings;
+  onSettingsChange: (next: EditorSubtitleSettings) => void;
 }
 
-export function EditorSubtitleOverlay({ contentRect, style, onStyleChange }: EditorSubtitleOverlayProps) {
+export function EditorSubtitleOverlay({ contentRect, settings, onSettingsChange }: EditorSubtitleOverlayProps) {
+  const { style } = settings;
   const [modalOpen, setModalOpen] = useState(false);
 
   const openModal = useCallback(() => setModalOpen(true), []);
@@ -83,8 +84,8 @@ export function EditorSubtitleOverlay({ contentRect, style, onStyleChange }: Edi
       <EditorSubtitleStyleModal
         isOpen={modalOpen}
         onOpenChange={setModalOpen}
-        style={style}
-        onSave={onStyleChange}
+        settings={settings}
+        onSave={onSettingsChange}
       />
     </>
   );

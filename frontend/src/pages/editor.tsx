@@ -25,14 +25,19 @@ import type {
   EditorPosterEntry,
   EditorStateJson,
   EditorSubClip,
-  EditorSubtitleStyle,
+  EditorSubtitleSettings,
 } from "@/types/editor";
+import { isValidWhisperSubtitlePair } from "@/types/editor-whisper-languages";
 
-const DEFAULT_SUBTITLE_STYLE: EditorSubtitleStyle = {
-  fontSizePx: 28,
-  textColor: "#FFFFFF",
-  outlineColor: "#000000",
-  outlineWidthPx: 3,
+const DEFAULT_SUBTITLE_SETTINGS: EditorSubtitleSettings = {
+  whisperSourceLanguage: "auto",
+  whisperOutputLanguage: "same",
+  style: {
+    fontSizePx: 28,
+    textColor: "#FFFFFF",
+    outlineColor: "#000000",
+    outlineWidthPx: 3,
+  },
 };
 
 export function EditorPage() {
@@ -63,7 +68,7 @@ export function EditorPage() {
   const [verticalCropMode, setVerticalCropMode] = useState(false);
   const [cropWindow, setCropWindow] = useState<EditorCropWindow | null>(null);
   const [subtitleMode, setSubtitleMode] = useState(false);
-  const [subtitleStyle, setSubtitleStyle] = useState<EditorSubtitleStyle>(DEFAULT_SUBTITLE_STYLE);
+  const [subtitleSettings, setSubtitleSettings] = useState<EditorSubtitleSettings>(DEFAULT_SUBTITLE_SETTINGS);
   const [jsonPanelOpen, setJsonPanelOpen] = useState(false);
 
   const [ads, setAds] = useState<EditorAdMarker[]>([]);
@@ -406,7 +411,9 @@ export function EditorPage() {
         ? {
             subtitles: {
               enabled: true as const,
-              style: { ...subtitleStyle },
+              whisperSourceLanguage: subtitleSettings.whisperSourceLanguage,
+              whisperOutputLanguage: subtitleSettings.whisperOutputLanguage,
+              style: { ...subtitleSettings.style },
             },
           }
         : {}),
@@ -419,7 +426,7 @@ export function EditorPage() {
     verticalCropMode,
     cropWindow,
     subtitleMode,
-    subtitleStyle,
+    subtitleSettings,
   ]);
 
   if (!clipState?.clipUrl) {
@@ -454,6 +461,16 @@ export function EditorPage() {
   const handleCreateAndFinish = async () => {
     if (clips.length === 0) {
       setFinishError("Add at least one clip before creating a VOD.");
+      return;
+    }
+    if (
+      subtitleMode &&
+      !isValidWhisperSubtitlePair(
+        subtitleSettings.whisperSourceLanguage,
+        subtitleSettings.whisperOutputLanguage,
+      )
+    ) {
+      setFinishError("Fix subtitle languages in the subtitle style dialog (invalid video vs subtitle combination).");
       return;
     }
     if (!httpClient.getTenantId()) {
@@ -510,8 +527,8 @@ export function EditorPage() {
                 verticalCropCenterX={cropWindow?.centerX ?? 0.5}
                 onVerticalCropCenterXChange={handleVerticalCropCenterX}
                 subtitleOverlayActive={subtitleMode}
-                subtitleStyle={subtitleStyle}
-                onSubtitleStyleChange={setSubtitleStyle}
+                subtitleSettings={subtitleSettings}
+                onSubtitleSettingsChange={setSubtitleSettings}
               />
             </div>
             <div className="min-w-0 flex-1 basis-0">

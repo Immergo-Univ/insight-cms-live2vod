@@ -11,7 +11,7 @@ import { Play, PauseCircle, StopCircle, VolumeMax, VolumeX } from "@untitledui/i
 import videojs from "video.js";
 import type Player from "video.js/dist/types/player";
 import "video.js/dist/video-js.css";
-import type { EditorSubtitleStyle } from "@/types/editor";
+import type { EditorSubtitleSettings } from "@/types/editor";
 import {
   computeVideoContentRect,
   EditorVerticalCropOverlay,
@@ -50,8 +50,8 @@ interface EditorPlayerProps {
   onVerticalCropCenterXChange?: (centerX: number) => void;
   /** Burned-in subtitle preview (example text) over the picture. */
   subtitleOverlayActive?: boolean;
-  subtitleStyle?: EditorSubtitleStyle;
-  onSubtitleStyleChange?: (next: EditorSubtitleStyle) => void;
+  subtitleSettings?: EditorSubtitleSettings;
+  onSubtitleSettingsChange?: (next: EditorSubtitleSettings) => void;
 }
 
 const overlayButtonClass =
@@ -76,8 +76,8 @@ export const EditorPlayer = forwardRef<EditorPlayerRef, EditorPlayerProps>(
       verticalCropCenterX = 0.5,
       onVerticalCropCenterXChange,
       subtitleOverlayActive = false,
-      subtitleStyle,
-      onSubtitleStyleChange,
+      subtitleSettings,
+      onSubtitleSettingsChange,
     },
     ref
   ) {
@@ -238,11 +238,11 @@ export const EditorPlayer = forwardRef<EditorPlayerRef, EditorPlayerProps>(
             onCenterXChange={onVerticalCropCenterXChange}
           />
         ) : null}
-        {subtitleOverlayActive && subtitleStyle && onSubtitleStyleChange ? (
+        {subtitleOverlayActive && subtitleSettings && onSubtitleSettingsChange ? (
           <EditorSubtitleOverlay
             contentRect={contentRect}
-            style={subtitleStyle}
-            onStyleChange={onSubtitleStyleChange}
+            settings={subtitleSettings}
+            onSettingsChange={onSubtitleSettingsChange}
           />
         ) : null}
         {markRangeAwaitingOut && (

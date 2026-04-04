@@ -108,6 +108,7 @@ export async function runVodEncodeJob(opts) {
         inputMp4: encodedPath,
         workDir,
         style,
+        subtitles: spec.subtitles,
         shouldCancel: () => shouldCancel(jobId),
         onProgress: (pct) => {
           const phase = pct < 72 ? "transcribing" : "burning_subtitles";
