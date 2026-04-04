@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router";
 import { Clock, PlayCircle, Scissors01, Tv01 } from "@untitledui/icons";
 import { ClipJsonButton } from "@/components/live2vod/clip-json-button";
+import { ProcessingClipsNavButton } from "@/components/live2vod/processing-clips-nav-button";
 import { ChannelTimelineSettings } from "@/components/live2vod/channel-timeline-settings";
 import { useDateFormatter } from "react-aria";
 import type { DateValue, RangeValue } from "react-aria-components";
@@ -107,19 +108,24 @@ export function Live2VodPage() {
         )}
       </main>
 
-      {selectedChannel?.id ? (
-        <div className="pointer-events-none fixed bottom-4 right-4 z-50 flex flex-row items-end gap-2">
-          <div className="pointer-events-auto">
-            <ChannelTimelineSettings channelId={selectedChannel.id} />
-          </div>
-          <div className="pointer-events-auto">
-            <ClipJsonButton
-              streamUrl={selectedChannel.hlsStream ?? null}
-              timeWindow={timeWindow}
-            />
-          </div>
+      <div className="pointer-events-none fixed bottom-4 right-4 z-50 flex flex-row items-end gap-2">
+        {selectedChannel?.id ? (
+          <>
+            <div className="pointer-events-auto">
+              <ChannelTimelineSettings channelId={selectedChannel.id} />
+            </div>
+            <div className="pointer-events-auto">
+              <ClipJsonButton
+                streamUrl={selectedChannel.hlsStream ?? null}
+                timeWindow={timeWindow}
+              />
+            </div>
+          </>
+        ) : null}
+        <div className="pointer-events-auto">
+          <ProcessingClipsNavButton />
         </div>
-      ) : null}
+      </div>
     </div>
   );
 }

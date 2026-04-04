@@ -10,6 +10,9 @@ import {
   EditorRightPanel,
   EditorCapturePreview,
 } from "@/components/editor";
+import { ProcessingClipsNavButton } from "@/components/live2vod/processing-clips-nav-button";
+import { httpClient } from "@/services/http-client";
+import { startVodJob } from "@/services/vod.service";
 import { FRAME_DURATION_SEC } from "@/components/editor/editor-constants";
 import type { EditorPlayerRef } from "@/components/editor";
 import { detectAds, getPrecalculatedAds } from "@/services/ads.service";
@@ -44,6 +47,8 @@ export function EditorPage() {
   const [playingClipId, setPlayingClipId] = useState<string | null>(null);
   /** When set, we're playing the full sequence (order 1..N); value = current segment index. */
   const [playingSequenceIndex, setPlayingSequenceIndex] = useState<number | null>(null);
+  const [finishLoading, setFinishLoading] = useState(false);
+  const [finishError, setFinishError] = useState<string | null>(null);
 
   const [ads, setAds] = useState<EditorAdMarker[]>([]);
   const [adsLoading, setAdsLoading] = useState(false);
@@ -382,6 +387,27 @@ export function EditorPage() {
     })),
   };
 
+  const handleCreateAndFinish = async () => {
+    if (clips.length === 0) {
+      setFinishError("Add at least one clip before creating a VOD.");
+      return;
+    }
+    if (!httpClient.getTenantId()) {
+      setFinishError("Missing tenantId in the URL query string.");
+      return;
+    }
+    setFinishError(null);
+    setFinishLoading(true);
+    try {
+      await startVodJob(stateJson);
+      navigate({ pathname: "/processing-clips", search: window.location.search });
+    } catch (err) {
+      setFinishError(httpClient.getErrorMessage(err));
+    } finally {
+      setFinishLoading(false);
+    }
+  };
+
   return (
     <div className="flex h-full flex-col bg-primary">
       <header className="flex shrink-0 items-center gap-3 border-b border-secondary px-4 py-2">
@@ -514,17 +540,24 @@ export function EditorPage() {
             Back
           </button>
         </div>
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            className="rounded-lg bg-brand-solid px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-brand-solid-hover"
-          >
-            Create and Finish
-          </button>
+        <div className="flex flex-col items-end gap-1">
+          {finishError ? (
+            <p className="max-w-md text-right text-xs text-error-primary">{finishError}</p>
+          ) : null}
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={handleCreateAndFinish}
+              disabled={finishLoading}
+              className="rounded-lg bg-brand-solid px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-brand-solid-hover disabled:opacity-60"
+            >
+              {finishLoading ? "Starting…" : "Create and Finish"}
+            </button>
+            <ProcessingClipsNavButton />
+            <EditorJsonButton stateJson={stateJson} />
+          </div>
         </div>
       </footer>
-
-      <EditorJsonButton stateJson={stateJson} />
     </div>
   );
 }

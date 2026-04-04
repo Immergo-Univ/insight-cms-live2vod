@@ -1,0 +1,145 @@
+/**
+ * In-memory VOD job registry + WebSocket fan-out per tenant.
+ */
+
+/** @typedef {'queued' | 'processing' | 'uploading' | 'completed' | 'cancelled' | 'failed'} VodJobStatus */
+
+/**
+ * @typedef {object} VodJob
+ * @property {string} id
+ * @property {string} tenantId
+ * @property {VodJobStatus} status
+ * @property {number} progress
+ * @property {string} phase
+ * @property {string} [message]
+ * @property {string} [error]
+ * @property {string} createdAt
+ * @property {string} [updatedAt]
+ * @property {string} [clipUrl]
+ * @property {string} [s3Key]
+ * @property {string|null} [outputUrl]
+ */
+
+/** @type {Map<string, VodJob>} */
+const jobsById = new Map();
+
+/** @type {Map<string, Set<import('ws').WebSocket>>} */
+const subscribersByTenant = new Map();
+
+/**
+ * @param {string} tenantId
+ * @returns {VodJob[]}
+ */
+export function listJobsForTenant(tenantId) {
+  const list = [];
+  for (const job of jobsById.values()) {
+    if (job.tenantId === tenantId) list.push(job);
+  }
+  list.sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
+  return list;
+}
+
+/**
+ * @param {string} tenantId
+ */
+export function countActiveJobsForTenant(tenantId) {
+  let n = 0;
+  for (const job of jobsById.values()) {
+    if (job.tenantId !== tenantId) continue;
+    if (job.status === "queued" || job.status === "processing" || job.status === "uploading") n++;
+  }
+  return n;
+}
+
+/**
+ * @param {string} id
+ * @returns {VodJob | undefined}
+ */
+export function getJob(id) {
+  return jobsById.get(id);
+}
+
+/**
+ * @param {Omit<VodJob, 'createdAt' | 'updatedAt'> & Partial<Pick<VodJob, 'createdAt'>>} partial
+ */
+export function createJob(partial) {
+  const now = new Date().toISOString();
+  /** @type {VodJob} */
+  const job = {
+    ...partial,
+    createdAt: partial.createdAt || now,
+    updatedAt: now,
+  };
+  jobsById.set(job.id, job);
+  broadcastTenant(job.tenantId, { type: "job_update", job: serializeJob(job) });
+  return job;
+}
+
+/**
+ * @param {string} id
+ * @param {Partial<Pick<VodJob, 'status' | 'progress' | 'phase' | 'message' | 'error' | 's3Key' | 'outputUrl'>>} patch
+ */
+export function updateJob(id, patch) {
+  const job = jobsById.get(id);
+  if (!job) return null;
+  Object.assign(job, patch, { updatedAt: new Date().toISOString() });
+  broadcastTenant(job.tenantId, { type: "job_update", job: serializeJob(job) });
+  return job;
+}
+
+/**
+ * @param {VodJob} job
+ */
+function serializeJob(job) {
+  return { ...job };
+}
+
+/**
+ * @param {string} tenantId
+ * @param {object} payload
+ */
+function broadcastTenant(tenantId, payload) {
+  const set = subscribersByTenant.get(tenantId);
+  if (!set) return;
+  const data = JSON.stringify(payload);
+  for (const ws of set) {
+    if (ws.readyState === 1) {
+      try {
+        ws.send(data);
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+}
+
+/**
+ * @param {string} tenantId
+ * @param {import('ws').WebSocket} ws
+ */
+export function subscribeTenant(tenantId, ws) {
+  let set = subscribersByTenant.get(tenantId);
+  if (!set) {
+    set = new Set();
+    subscribersByTenant.set(tenantId, set);
+  }
+  set.add(ws);
+  ws.send(
+    JSON.stringify({
+      type: "snapshot",
+      jobs: listJobsForTenant(tenantId).map(serializeJob),
+      activeCount: countActiveJobsForTenant(tenantId),
+    }),
+  );
+}
+
+/**
+ * @param {string} tenantId
+ * @param {import('ws').WebSocket} ws
+ */
+export function unsubscribeTenant(tenantId, ws) {
+  const set = subscribersByTenant.get(tenantId);
+  if (!set) return;
+  set.delete(ws);
+  if (set.size === 0) subscribersByTenant.delete(tenantId);
+}
