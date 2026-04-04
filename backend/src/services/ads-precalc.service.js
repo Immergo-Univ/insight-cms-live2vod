@@ -20,6 +20,41 @@ function filterAdsByRetention(adsList) {
 }
 
 /**
+ * Half-open ad windows [startEpoch, endEpoch). Combine overlapping or boundary-adjacent intervals.
+ * When one window is fully inside the other (e.g. live segment inside coarse archive slot), keep the
+ * outer start and the inner end — same idea as using the first-absent instant for start: do not extend
+ * end to the coarse slot boundary when live already closed the break earlier.
+ * @param {{ startEpoch: number, endEpoch: number }} a
+ * @param {{ startEpoch: number, endEpoch: number }} b
+ * @returns {{ startEpoch: number, endEpoch: number } | null}
+ */
+function mergeOverlappingAdWindow(a, b) {
+  const s1 = a.startEpoch;
+  const e1 = a.endEpoch;
+  const s2 = b.startEpoch;
+  const e2 = b.endEpoch;
+
+  const strictOverlap = Math.max(s1, s2) < Math.min(e1, e2);
+  const adjacent = s2 === e1 || s1 === e2;
+  if (!strictOverlap && !adjacent) return null;
+
+  if (adjacent && !strictOverlap) {
+    return { startEpoch: Math.min(s1, s2), endEpoch: Math.max(e1, e2) };
+  }
+
+  const bInsideA = s2 >= s1 && e2 <= e1;
+  const aInsideB = s1 >= s2 && e1 <= e2;
+  if (bInsideA) {
+    return { startEpoch: s1, endEpoch: e2 };
+  }
+  if (aInsideB) {
+    return { startEpoch: s2, endEpoch: e1 };
+  }
+
+  return { startEpoch: Math.min(s1, s2), endEpoch: Math.max(e1, e2) };
+}
+
+/**
  * Merge archive `ads` with live `liveStreamAdSegments` (same unix epoch axis as m3u8 startTime/endTime).
  */
 function mergedAdsFromSnapshot(snap) {
@@ -33,14 +68,19 @@ function mergedAdsFromSnapshot(snap) {
   }));
   const all = [...archive, ...live]
     .filter((a) => a && typeof a.startEpoch === "number" && typeof a.endEpoch === "number")
-    .sort((a, b) => a.startEpoch - b.startEpoch);
+    .sort((a, b) => a.startEpoch - b.startEpoch || a.endEpoch - b.endEpoch);
   if (all.length === 0) return [];
   const out = [];
   let cur = { ...all[0] };
   for (let i = 1; i < all.length; i++) {
     const n = all[i];
-    if (n.startEpoch <= cur.endEpoch) {
-      cur.endEpoch = Math.max(cur.endEpoch, n.endEpoch);
+    const merged = mergeOverlappingAdWindow(cur, n);
+    if (merged) {
+      cur = {
+        ...cur,
+        startEpoch: merged.startEpoch,
+        endEpoch: merged.endEpoch,
+      };
     } else {
       out.push(cur);
       cur = { ...n };
