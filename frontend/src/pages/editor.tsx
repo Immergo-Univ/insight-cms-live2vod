@@ -1,12 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, Play } from "@untitledui/icons";
+import { ArrowLeft } from "@untitledui/icons";
 import { useLocation, useNavigate } from "react-router";
 import { useTimezone } from "@/hooks/use-timezone";
 import {
   EditorPlayer,
   EditorTimeline,
   EditorRealtimeRecBar,
-  EditorClipsList,
   EditorJsonButton,
   EditorRightPanel,
   EditorCapturePreview,
@@ -23,6 +22,7 @@ import type {
   EditorAdMarker,
   EditorClipState,
   EditorCropWindow,
+  EditorVodMetadata,
   EditorPosterEntry,
   EditorStateJson,
   EditorSubClip,
@@ -71,6 +71,11 @@ export function EditorPage() {
   const [subtitleMode, setSubtitleMode] = useState(false);
   const [subtitleSettings, setSubtitleSettings] = useState<EditorSubtitleSettings>(DEFAULT_SUBTITLE_SETTINGS);
   const [jsonPanelOpen, setJsonPanelOpen] = useState(false);
+  const [vodMetadata, setVodMetadata] = useState<EditorVodMetadata>({
+    title: "",
+    description: "",
+    tags: "",
+  });
 
   const [ads, setAds] = useState<EditorAdMarker[]>([]);
   const [adsLoading, setAdsLoading] = useState(false);
@@ -445,6 +450,7 @@ export function EditorPage() {
         startProgramDateTime: absEpochToIso(startTime + a.startTime),
         endProgramDateTime: absEpochToIso(startTime + a.endTime),
       })),
+      metadata: { ...vodMetadata },
       ...(verticalCropMode && cropWindow ? { cropWindow } : {}),
       ...(subtitleMode
         ? {
@@ -462,6 +468,7 @@ export function EditorPage() {
     posters,
     clips,
     ads,
+    vodMetadata,
     verticalCropMode,
     cropWindow,
     subtitleMode,
@@ -521,6 +528,10 @@ export function EditorPage() {
       setFinishError("Add at least one clip before creating a VOD.");
       return;
     }
+    if (!vodMetadata.title.trim() || !vodMetadata.description.trim()) {
+      setFinishError("Set title and description in the sidebar (click the session card).");
+      return;
+    }
     if (
       subtitleMode &&
       !isValidWhisperSubtitlePair(
@@ -562,10 +573,10 @@ export function EditorPage() {
       </header>
 
       <main className="flex min-h-0 flex-1 flex-row overflow-hidden">
-        {/* Left column: Player, Timeline, Clipping (only Clipping scrolls vertically) */}
-        <div className="flex min-w-0 flex-1 flex-col min-h-0 gap-3 overflow-hidden px-4 py-2">
+        {/* Left column: Player, Timeline — scroll if needed so timeline is never squashed under Preview */}
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-3 overflow-y-auto overflow-x-hidden px-4 py-2">
           {/* 1. Video player (~2/3) + Capture & Preview (~1/3) */}
-          <section className="flex shrink-0 gap-3">
+          <section className="flex shrink-0 items-start gap-3">
             <div className="min-w-0 flex-[2]">
               <EditorPlayer
                 ref={playerRef}
@@ -589,7 +600,7 @@ export function EditorPage() {
                 onSubtitleSettingsChange={setSubtitleSettings}
               />
             </div>
-            <div className="min-w-0 flex-1 basis-0">
+            <div className="min-h-0 min-w-0 flex-1 basis-0">
               <EditorCapturePreview
                 posters={posters}
                 currentTimeSeconds={currentTime}
@@ -601,8 +612,8 @@ export function EditorPage() {
             </div>
           </section>
 
-          {/* 2. Timeline + Zoom — hidden for live realtime (REC bar instead) */}
-          <section className="shrink-0">
+          {/* 2. Timeline + Zoom — natural height (no flex-1) so Mark In/Out never stacks under Preview */}
+          <section className="flex w-full min-w-0 shrink-0 flex-col">
             {isRealtime ? (
               <EditorRealtimeRecBar
                 clips={clips}
@@ -641,60 +652,47 @@ export function EditorPage() {
               />
             )}
           </section>
-
-          {/* 3. Clipping: title fixed, only the list of rows scrolls. */}
-          <section className="flex min-h-0 flex-1 flex-col gap-2 rounded-lg border border-secondary bg-secondary px-3">
-            <div className="flex shrink-0 items-center gap-2">
-              <h3 className="text-xs font-semibold uppercase tracking-wide text-tertiary">
-                Clipping
-              </h3>
-              <button
-                type="button"
-                onClick={handlePlayFullSequence}
-                disabled={clips.length === 0}
-                title="Play full sequence (order 1 to N)"
-                aria-label="Play full sequence"
-                className="flex size-8 cursor-pointer items-center justify-center rounded-lg border border-secondary bg-primary text-fg-secondary transition-colors hover:bg-secondary disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-primary"
-              >
-                <Play className="size-4" />
-              </button>
-            </div>
-            <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-              <EditorClipsList
-              clips={clips}
-              clipUrl={clipState.clipUrl}
-              channelId={channelId}
-              selectedClipId={selectedClipId}
-              onSelectClip={setSelectedClipId}
-              playingClipId={playingClipId}
-              isPlaying={isPlaying}
-              onPlaySubclip={handlePlaySubclip}
-              onPause={handlePause}
-              onOrderChange={handleOrderChange}
-              onRemove={handleRemoveClip}
-              onSeek={handleSeek}
-              thumbnailsEnabled={!isRealtime}
-              emptyHint={
-                isRealtime
-                  ? "Use REC to add Mark In / Mark Out segments."
-                  : "Use Mark In / Mark Out to add ranges."
-              }
-              realtimeWallClock={
-                isRealtime
-                  ? {
-                      sessionStartUnixSec: clipState.startTime,
-                      timeZone: clientTimeZone,
-                    }
-                  : undefined
-              }
-              />
-            </div>
-          </section>
         </div>
 
-        {/* Right column: Metadata only */}
-        <aside className="flex shrink-0 overflow-y-auto border-l border-secondary px-4 py-2">
-          <EditorRightPanel />
+        {/* Right column: session summary, metadata modal, clips list */}
+        <aside className="flex min-h-0 w-80 shrink-0 flex-col border-l border-secondary py-2 pr-4 pl-2">
+          <EditorRightPanel
+            channelTitle={clipState.channelTitle ?? ""}
+            selectionMode={selectionMode}
+            windowStartUnixSec={clipState.startTime}
+            windowEndUnixSec={clipState.endTime}
+            timelineDurationSec={durationSeconds}
+            timeZone={clientTimeZone}
+            metadata={vodMetadata}
+            onMetadataChange={setVodMetadata}
+            clips={clips}
+            clipUrl={clipState.clipUrl}
+            channelId={channelId}
+            selectedClipId={selectedClipId}
+            onSelectClip={setSelectedClipId}
+            playingClipId={playingClipId}
+            isPlaying={isPlaying}
+            onPlaySubclip={handlePlaySubclip}
+            onPause={handlePause}
+            onOrderChange={handleOrderChange}
+            onRemoveClip={handleRemoveClip}
+            onSeek={handleSeek}
+            onPlayFullSequence={handlePlayFullSequence}
+            thumbnailsEnabled={!isRealtime}
+            clipsEmptyHint={
+              isRealtime
+                ? "Use REC to add Mark In / Mark Out segments."
+                : "Use Mark In / Mark Out to add ranges."
+            }
+            realtimeWallClock={
+              isRealtime
+                ? {
+                    sessionStartUnixSec: clipState.startTime,
+                    timeZone: clientTimeZone,
+                  }
+                : undefined
+            }
+          />
         </aside>
       </main>
 

@@ -14,8 +14,17 @@ export interface EditorClipState {
   endTime: number;
   clipUrl: string;
   channelId?: string;
+  /** Display name from the channel list (e.g. Channel.title). */
+  channelTitle?: string;
   logoCorner?: string;
   selectionMode?: EditorSelectionMode;
+}
+
+/** User-editable VOD metadata (sidebar + export JSON). */
+export interface EditorVodMetadata {
+  title: string;
+  description: string;
+  tags: string;
 }
 
 /**
@@ -110,4 +119,5 @@ export interface EditorStateJson {
   }>;
   cropWindow?: EditorCropWindow;
   subtitles?: EditorSubtitlesConfig;
+  metadata?: EditorVodMetadata;
 }
