@@ -43,7 +43,7 @@ function ClipFilmstripTrimHandle({
   edge: "left" | "right";
   onMouseDown: (e: ReactMouseEvent) => void;
   ariaLabel: string;
-  /** "ad" = light gray bracket for ad slots (same shape as clip handles). */
+  /** "ad" = subtle rose/red bracket for ad slots (same shape as clip handles). */
   variant?: "clip" | "ad";
 }) {
   const position =
@@ -66,16 +66,16 @@ function ClipFilmstripTrimHandle({
           "pointer-events-none relative flex h-full min-h-0 w-[18px] shrink-0 flex-col items-center justify-center self-stretch",
           isAd
             ? [
-                "bg-[#e5e7eb]",
-                "border-2 border-[#9ca3af]",
-                "shadow-[0_2px_8px_rgba(0,0,0,0.12),inset_0_1px_0_rgba(255,255,255,0.7)]",
-                "dark:bg-[#4b5563]",
-                "dark:border-[#6b7280]",
-                "dark:shadow-[0_2px_10px_rgba(0,0,0,0.35),inset_0_1px_0_rgba(255,255,255,0.08)]",
-                "before:pointer-events-none before:absolute before:inset-y-1 before:left-px before:w-0.5 before:rounded-full before:bg-black/12",
-                "after:pointer-events-none after:absolute after:inset-y-1 after:right-px after:w-px after:rounded-full after:bg-black/15",
-                "group-hover:brightness-[1.02] group-hover:shadow-[0_3px_10px_rgba(0,0,0,0.16),inset_0_1px_0_rgba(255,255,255,0.75)]",
-                "dark:group-hover:shadow-[0_3px_12px_rgba(0,0,0,0.45),inset_0_1px_0_rgba(255,255,255,0.1)]",
+                "bg-[#fecdd3]",
+                "border-2 border-[#e11d48]/85",
+                "shadow-[0_2px_10px_rgba(225,29,72,0.22),inset_0_1px_0_rgba(255,255,255,0.55)]",
+                "dark:bg-[#9f1239]/90",
+                "dark:border-[#fb7185]/75",
+                "dark:shadow-[0_2px_12px_rgba(0,0,0,0.4),inset_0_1px_0_rgba(255,255,255,0.12)]",
+                "before:pointer-events-none before:absolute before:inset-y-1 before:left-px before:w-0.5 before:rounded-full before:bg-white/35",
+                "after:pointer-events-none after:absolute after:inset-y-1 after:right-px after:w-px after:rounded-full after:bg-rose-950/15",
+                "group-hover:brightness-[1.03] group-hover:shadow-[0_3px_14px_rgba(225,29,72,0.28),inset_0_1px_0_rgba(255,255,255,0.65)]",
+                "dark:group-hover:shadow-[0_3px_16px_rgba(0,0,0,0.5),inset_0_1px_0_rgba(255,255,255,0.16)]",
               ]
             : [
                 "bg-[#4b5563]",
@@ -105,19 +105,25 @@ function ClipFilmstripTrimHandle({
           <span
             className={cx(
               "h-[2px] w-[11px] rounded-[1px] shadow-[0_1px_0_rgba(0,0,0,0.2)]",
-              isAd ? "bg-[#6b7280]/55 dark:bg-white/35" : "bg-white/45 shadow-[0_1px_0_rgba(0,0,0,0.35)]",
+              isAd
+                ? "bg-white/55 shadow-[0_1px_0_rgba(190,18,60,0.35)] dark:bg-white/40 dark:shadow-[0_1px_0_rgba(0,0,0,0.35)]"
+                : "bg-white/45 shadow-[0_1px_0_rgba(0,0,0,0.35)]",
             )}
           />
           <span
             className={cx(
               "h-[2px] w-[11px] rounded-[1px] shadow-[0_1px_0_rgba(0,0,0,0.2)]",
-              isAd ? "bg-[#6b7280]/55 dark:bg-white/35" : "bg-white/45 shadow-[0_1px_0_rgba(0,0,0,0.35)]",
+              isAd
+                ? "bg-white/55 shadow-[0_1px_0_rgba(190,18,60,0.35)] dark:bg-white/40 dark:shadow-[0_1px_0_rgba(0,0,0,0.35)]"
+                : "bg-white/45 shadow-[0_1px_0_rgba(0,0,0,0.35)]",
             )}
           />
           <span
             className={cx(
               "h-[2px] w-[11px] rounded-[1px] shadow-[0_1px_0_rgba(0,0,0,0.2)]",
-              isAd ? "bg-[#6b7280]/55 dark:bg-white/35" : "bg-white/45 shadow-[0_1px_0_rgba(0,0,0,0.35)]",
+              isAd
+                ? "bg-white/55 shadow-[0_1px_0_rgba(190,18,60,0.35)] dark:bg-white/40 dark:shadow-[0_1px_0_rgba(0,0,0,0.35)]"
+                : "bg-white/45 shadow-[0_1px_0_rgba(0,0,0,0.35)]",
             )}
           />
         </div>
@@ -484,7 +490,7 @@ export function EditorTimeline({
             </span>
           )}
           {!adsLoading && ads.length > 0 && (
-            <span className="text-[10px] font-medium text-secondary">
+            <span className="text-[10px] font-medium text-rose-700 dark:text-rose-300">
               {ads.length} ad slot{ads.length !== 1 ? "s" : ""}
             </span>
           )}
@@ -590,7 +596,7 @@ export function EditorTimeline({
                 </div>
               );
             })}
-          {/* Ad slots (light gray, same trim handles as clips) */}
+          {/* Ad slots (subtle rose/red, same trim handles as clips) */}
           {ads.map((ad) => {
             const adLeft = ad.startTime * pixelsPerSecond;
             const adWidth = (ad.endTime - ad.startTime) * pixelsPerSecond;
@@ -628,8 +634,8 @@ export function EditorTimeline({
                 className={cx(
                   "absolute top-0 bottom-0 z-[9] transition-colors",
                   isAdSelected
-                    ? "bg-[#9ca3af]/45 ring-2 ring-[#6b7280] dark:bg-[#6b7280]/40 dark:ring-[#9ca3af]"
-                    : "bg-[#9ca3af]/25 hover:bg-[#9ca3af]/40 dark:bg-[#6b7280]/25 dark:hover:bg-[#6b7280]/38",
+                    ? "bg-rose-500/32 ring-2 ring-rose-400/55 dark:bg-rose-500/28 dark:ring-rose-400/45"
+                    : "bg-rose-500/18 hover:bg-rose-500/28 dark:bg-rose-500/15 dark:hover:bg-rose-500/26",
                 )}
                 style={{
                   left: adLeft,
@@ -639,7 +645,7 @@ export function EditorTimeline({
                 onMouseEnter={() => setHoverAdId(ad.id)}
                 onMouseLeave={() => setHoverAdId(null)}
               >
-                <div className="absolute top-1 left-1/2 z-20 -translate-x-1/2 whitespace-nowrap rounded border border-secondary_alt bg-secondary_alt px-1.5 py-0.5 text-[9px] font-semibold text-secondary shadow-sm">
+                <div className="absolute top-1 left-1/2 z-20 -translate-x-1/2 whitespace-nowrap rounded-md border border-rose-200/90 bg-rose-50/95 px-1.5 py-0.5 text-[9px] font-semibold text-rose-900 shadow-sm dark:border-rose-800/80 dark:bg-rose-950/92 dark:text-rose-100">
                   AD #{ad.index}
                 </div>
 
