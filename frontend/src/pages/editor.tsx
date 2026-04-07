@@ -30,6 +30,9 @@ import type {
 } from "@/types/editor";
 import { isValidWhisperSubtitlePair } from "@/types/editor-whisper-languages";
 
+/** Default length for a manually inserted ad slot (seconds). */
+const DEFAULT_NEW_AD_DURATION_SEC = 30;
+
 const DEFAULT_SUBTITLE_SETTINGS: EditorSubtitleSettings = {
   whisperSourceLanguage: "auto",
   whisperOutputLanguage: "same",
@@ -60,6 +63,8 @@ export function EditorPage() {
   const [playUntilTime, setPlayUntilTime] = useState<number | null>(null);
   /** Subclip in "edit" mode: Mark In/Out update this clip; Play plays only this subclip. */
   const [selectedClipId, setSelectedClipId] = useState<string | null>(null);
+  /** Ad slot selected on the timeline (trim handles + ring). Mutually exclusive with selectedClipId where enforced in UI. */
+  const [selectedAdId, setSelectedAdId] = useState<string | null>(null);
   /** Subclip currently playing (from list row Play). Cleared on pause or when play reaches end. */
   const [playingClipId, setPlayingClipId] = useState<string | null>(null);
   /** When set, we're playing the full sequence (order 1..N); value = current segment index. */
@@ -159,6 +164,16 @@ export function EditorPage() {
       const filtered = prev.filter((a) => a.id !== id);
       return filtered.map((a, i) => ({ ...a, index: i + 1 }));
     });
+    setSelectedAdId((cur) => (cur === id ? null : cur));
+  }, []);
+
+  const handleSelectClip = useCallback((id: string | null) => {
+    setSelectedAdId(null);
+    setSelectedClipId(id);
+  }, []);
+
+  const handleSelectAd = useCallback((id: string | null) => {
+    setSelectedAdId(id);
   }, []);
 
   const handleResizeAd = useCallback(
@@ -187,6 +202,12 @@ export function EditorPage() {
       setSelectedClipId(null);
     }
   }, [selectedClipId, clips]);
+
+  useEffect(() => {
+    if (selectedAdId && !ads.some((a) => a.id === selectedAdId)) {
+      setSelectedAdId(null);
+    }
+  }, [selectedAdId, ads]);
 
   // Arrow keys: move playhead by 1 frame (skip when focus is in input/textarea/select)
   useEffect(() => {
@@ -523,7 +544,26 @@ export function EditorPage() {
       : durationSeconds;
   const channelId = clipState.channelId ?? "";
 
-  const handleCreateAndFinish = async () => {
+  const handleAddAdSlot = () => {
+    if (isRealtime) return;
+    const dur = effectiveDuration;
+    if (dur <= 0) return;
+    const t = Math.max(0, Math.min(currentTime, dur - 0.05));
+    const end = Math.min(t + DEFAULT_NEW_AD_DURATION_SEC, dur);
+    if (end <= t + 0.01) return;
+    const id = crypto.randomUUID();
+    setAds((prev) => {
+      const next = [
+        ...prev,
+        { id, index: prev.length + 1, startTime: t, endTime: end },
+      ];
+      return next.map((a, i) => ({ ...a, index: i + 1 }));
+    });
+    setSelectedClipId(null);
+    setSelectedAdId(id);
+  };
+
+  const handleFinishCreate = async (includeAds: boolean) => {
     if (clips.length === 0) {
       setFinishError("Add at least one clip before creating a VOD.");
       return;
@@ -550,7 +590,8 @@ export function EditorPage() {
     setFinishLoading(true);
     try {
       if (!stateJson) return;
-      await startVodJob(stateJson);
+      const spec = includeAds ? stateJson : { ...stateJson, ads: [] };
+      await startVodJob(spec);
       navigate({ pathname: "/processing-clips", search: window.location.search });
     } catch (err) {
       setFinishError(httpClient.getErrorMessage(err));
@@ -634,16 +675,19 @@ export function EditorPage() {
                 onTrackClick={(time) => {
                   handleSeek(time);
                   setSelectedClipId(null);
+                  setSelectedAdId(null);
                 }}
                 clips={clips}
                 selectedClipId={selectedClipId}
-                onSelectClip={setSelectedClipId}
+                onSelectClip={handleSelectClip}
                 onRemoveClip={handleRemoveClip}
                 onResizeClip={handleResizeClip}
                 ads={ads}
                 adsLoading={adsLoading}
                 onRemoveAd={handleRemoveAd}
                 onResizeAd={handleResizeAd}
+                selectedAdId={selectedAdId}
+                onSelectAd={handleSelectAd}
                 clipStartUnixSec={clipState.startTime}
                 clientTimeZone={clientTimeZone}
                 markInTime={markInTime}
@@ -669,7 +713,7 @@ export function EditorPage() {
             clipUrl={clipState.clipUrl}
             channelId={channelId}
             selectedClipId={selectedClipId}
-            onSelectClip={setSelectedClipId}
+            onSelectClip={handleSelectClip}
             playingClipId={playingClipId}
             isPlaying={isPlaying}
             onPlaySubclip={handlePlaySubclip}
@@ -692,11 +736,17 @@ export function EditorPage() {
                   }
                 : undefined
             }
+            onAddAdSlot={handleAddAdSlot}
+            addAdSlotDisabled={isRealtime}
+            onCreateWithoutAds={() => void handleFinishCreate(false)}
+            onCreateWithAds={() => void handleFinishCreate(true)}
+            finishLoading={finishLoading}
+            finishError={finishError}
           />
         </aside>
       </main>
 
-      {/* Footer: Back (left), Create and Finish (right) */}
+      {/* Footer: Back (left), tools (right) */}
       <footer className="flex shrink-0 items-center justify-between border-t border-secondary px-4 py-2">
         <div className="flex gap-2">
           <button
@@ -707,31 +757,18 @@ export function EditorPage() {
             Back
           </button>
         </div>
-        <div className="flex flex-col items-end gap-1">
-          {finishError ? (
-            <p className="max-w-md text-right text-xs text-error-primary">{finishError}</p>
-          ) : null}
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={handleCreateAndFinish}
-              disabled={finishLoading}
-              className="rounded-lg bg-brand-solid px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-brand-solid-hover disabled:opacity-60"
-            >
-              {finishLoading ? "Starting…" : "Create and Finish"}
-            </button>
-            <ProcessingClipsNavButton />
-            <EditorVerticalCropButton
-              active={verticalCropMode}
-              onToggle={handleVerticalCropToggle}
-            />
-            <EditorSubtitleButton active={subtitleMode} onToggle={handleSubtitleToggle} />
-            <EditorJsonButton
-              stateJson={stateJson}
-              open={jsonPanelOpen}
-              onOpenChange={setJsonPanelOpen}
-            />
-          </div>
+        <div className="flex items-center gap-2">
+          <ProcessingClipsNavButton />
+          <EditorVerticalCropButton
+            active={verticalCropMode}
+            onToggle={handleVerticalCropToggle}
+          />
+          <EditorSubtitleButton active={subtitleMode} onToggle={handleSubtitleToggle} />
+          <EditorJsonButton
+            stateJson={stateJson}
+            open={jsonPanelOpen}
+            onOpenChange={setJsonPanelOpen}
+          />
         </div>
       </footer>
     </div>

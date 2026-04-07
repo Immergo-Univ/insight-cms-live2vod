@@ -101,10 +101,9 @@ export function EditorClipsList({
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-1">
+    <div className="flex flex-col gap-1">
       <p className="shrink-0 text-xs font-medium text-secondary">Sub-clips (output order)</p>
-      <div className="min-h-0 flex-1 overflow-y-auto">
-        <ul className="flex flex-col gap-1">
+      <ul className="flex flex-col gap-1">
         {sortedClips.map((c) => {
           const isEditing = editingId === c.id;
           const isSelected = selectedClipId === c.id;
@@ -250,8 +249,7 @@ export function EditorClipsList({
             </li>
           );
         })}
-        </ul>
-      </div>
+      </ul>
     </div>
   );
 }
