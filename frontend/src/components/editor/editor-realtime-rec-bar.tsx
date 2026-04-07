@@ -1,17 +1,14 @@
-import { useDateFormatter } from "react-aria";
+import { useMemo } from "react";
 import type { EditorSubClip } from "@/types/editor";
-import { formatTime } from "./editor-timeline";
 
 interface EditorRealtimeRecBarProps {
   clips: EditorSubClip[];
   markInTime: number | null;
   onRecPress: () => void;
-  /** Live buffer position (seconds) for display only. */
-  currentTimeSeconds: number;
-  /** Unix seconds when the realtime session started (t0 for wall-clock math). */
-  sessionStartUnixSec: number;
-  /** IANA zone from ?tz= (or browser); used to label wall-clock instants. */
-  clientTimeZone: string;
+  /** IANA zone from ?tz= (via useTimezone); drives wall-clock label. */
+  timeZone: string;
+  /** Bumps every second while realtime mode is active so the clock refreshes. */
+  clockTick: number;
   isDisabled?: boolean;
 }
 
@@ -19,47 +16,31 @@ export function EditorRealtimeRecBar({
   clips,
   markInTime,
   onRecPress,
-  currentTimeSeconds,
-  sessionStartUnixSec,
-  clientTimeZone,
+  timeZone,
+  clockTick,
   isDisabled,
 }: EditorRealtimeRecBarProps) {
   const awaitingOut = markInTime !== null;
-
-  const wallFormatter = useDateFormatter({
-    dateStyle: "medium",
-    timeStyle: "medium",
-    timeZone: clientTimeZone,
-  });
-
-  const formatWall = (unixSec: number) => wallFormatter.format(new Date(unixSec * 1000));
-
-  const sessionWallLabel = formatWall(sessionStartUnixSec);
-  const markInWallUnix =
-    awaitingOut && markInTime !== null ? sessionStartUnixSec + markInTime : null;
+  const liveNowLabel = useMemo(
+    () =>
+      new Intl.DateTimeFormat(undefined, {
+        timeZone,
+        dateStyle: "medium",
+        timeStyle: "medium",
+      }).format(new Date()),
+    [timeZone, clockTick],
+  );
 
   return (
-    <div className="flex flex-col gap-2 rounded-lg border border-secondary bg-secondary px-3 py-3">
+    <div className="rounded-lg border border-secondary bg-secondary px-3 py-3">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-          <div className="rounded-md border border-secondary bg-primary px-2 py-1.5">
-            <p className="text-[10px] font-semibold uppercase tracking-wide text-tertiary">
-              Clip timing (wall clock)
-            </p>
-            <p className="mt-0.5 text-[11px] text-tertiary">
-              Timezone <span className="font-mono text-secondary">{clientTimeZone}</span>. Sub-clips are seconds{" "}
-              <em>after</em> session start t0 (below). Absolute in/out = t0 + offset.
-            </p>
-            <p className="mt-1 text-xs font-medium tabular-nums text-primary" title={`t0 = Unix ${sessionStartUnixSec}`}>
-              t0 session start: {sessionWallLabel}
-            </p>
-          </div>
+        <div className="flex min-w-0 flex-1 flex-col gap-1">
           <span className="text-xs font-medium text-secondary tabular-nums">
-            Player buffer position — {formatTime(currentTimeSeconds)} (not the same as wall-clock marks)
+            Live — {liveNowLabel}
           </span>
-          {awaitingOut && markInWallUnix !== null ? (
+          {awaitingOut ? (
             <span className="text-[11px] font-medium text-amber-600">
-              Mark In wall time — {formatWall(markInWallUnix)} · press REC again for Mark Out
+              Press REC again for Mark Out
             </span>
           ) : (
             <span className="text-[11px] text-tertiary">
@@ -81,12 +62,6 @@ export function EditorRealtimeRecBar({
           />
           REC
         </button>
-      </div>
-      <div className="flex h-[120px] items-center justify-center rounded-md border border-dashed border-secondary bg-primary px-2">
-        <p className="max-w-md text-center text-xs text-tertiary">
-          No archive thumbnails. REC boundaries are wall-clock instants in {clientTimeZone}, computed as t0 (
-          {sessionWallLabel}) plus each stored offset.
-        </p>
       </div>
     </div>
   );

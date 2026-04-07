@@ -5,6 +5,22 @@ import { buildThumbnailUrl } from "./editor-constants";
 import { formatTime } from "./editor-timeline";
 
 const ROW_HEIGHT = 50;
+
+const wallClockFormatters = new Map<string, Intl.DateTimeFormat>();
+
+function formatUnixSecWallClock(unixSec: number, timeZone: string): string {
+  let fmt = wallClockFormatters.get(timeZone);
+  if (!fmt) {
+    fmt = new Intl.DateTimeFormat(undefined, {
+      timeZone,
+      dateStyle: "medium",
+      timeStyle: "medium",
+    });
+    wallClockFormatters.set(timeZone, fmt);
+  }
+  return fmt.format(new Date(unixSec * 1000));
+}
+
 const THUMB_HEIGHT = 36;
 const THUMB_WIDTH = Math.round(THUMB_HEIGHT * (16 / 9));
 
@@ -24,6 +40,14 @@ interface EditorClipsListProps {
   /** When false, skip VOD thumbnail URLs (e.g. live / realtime session offsets). */
   thumbnailsEnabled?: boolean;
   emptyHint?: string;
+  /**
+   * Realtime: sub-clip start/end are seconds after session start.
+   * Show mark in/out as wall-clock times in this IANA zone (e.g. from ?tz=).
+   */
+  realtimeWallClock?: {
+    sessionStartUnixSec: number;
+    timeZone: string;
+  };
 }
 
 export function EditorClipsList({
@@ -41,6 +65,7 @@ export function EditorClipsList({
   onSeek,
   thumbnailsEnabled = true,
   emptyHint = "Use Mark In / Mark Out to add ranges.",
+  realtimeWallClock,
 }: EditorClipsListProps) {
   const sortedClips = [...clips].sort((a, b) => a.order - b.order);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -167,8 +192,16 @@ export function EditorClipsList({
                 )}
               </button>
               {/* 4. Time from – Time to */}
-              <span className="min-w-0 shrink font-mono text-xs text-brand-secondary">
-                {formatTime(c.startTime)} → {formatTime(c.endTime)}
+              <span className="min-w-0 shrink text-xs leading-tight text-brand-secondary">
+                {realtimeWallClock
+                  ? `${formatUnixSecWallClock(
+                      realtimeWallClock.sessionStartUnixSec + c.startTime,
+                      realtimeWallClock.timeZone,
+                    )} → ${formatUnixSecWallClock(
+                      realtimeWallClock.sessionStartUnixSec + c.endTime,
+                      realtimeWallClock.timeZone,
+                    )}`
+                  : `${formatTime(c.startTime)} → ${formatTime(c.endTime)}`}
               </span>
               {/* Order (compact) */}
               <label

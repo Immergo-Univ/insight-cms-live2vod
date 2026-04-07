@@ -569,8 +569,7 @@ function RealtimeNextPanel({
     onOpenEditor(channel, { startTime: start, endTime: start + 1 }, streamUrl, "realtime");
   };
 
-  const nowUnix = Math.floor(Date.now() / 1000);
-  const nowWallLabel = wallFormatter.format(new Date(nowUnix * 1000));
+  const nowWallLabel = wallFormatter.format(new Date());
 
   return (
     <div className="flex h-full flex-col">
@@ -585,7 +584,6 @@ function RealtimeNextPanel({
         <div className="max-w-md rounded-lg border border-secondary bg-secondary px-4 py-3 text-center">
           <p className="text-[11px] font-medium uppercase tracking-wide text-tertiary">Current wall clock</p>
           <p className="mt-1 text-sm font-semibold tabular-nums text-primary">{nowWallLabel}</p>
-          <p className="mt-1 font-mono text-[10px] text-tertiary">Unix {nowUnix}</p>
           <p className="mt-2 text-xs text-tertiary">
             After Next, this clock defines where clip boundaries fall: Mark In/Out times are that reference plus the elapsed
             seconds shown in the editor.

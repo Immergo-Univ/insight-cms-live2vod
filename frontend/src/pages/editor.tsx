@@ -608,9 +608,8 @@ export function EditorPage() {
                 clips={clips}
                 markInTime={markInTime}
                 onRecPress={handleRealtimeRec}
-                currentTimeSeconds={currentTime}
-                sessionStartUnixSec={clipState.startTime}
-                clientTimeZone={clientTimeZone}
+                timeZone={clientTimeZone}
+                clockTick={realtimeTick}
               />
             ) : (
               <EditorTimeline
@@ -679,6 +678,14 @@ export function EditorPage() {
                 isRealtime
                   ? "Use REC to add Mark In / Mark Out segments."
                   : "Use Mark In / Mark Out to add ranges."
+              }
+              realtimeWallClock={
+                isRealtime
+                  ? {
+                      sessionStartUnixSec: clipState.startTime,
+                      timeZone: clientTimeZone,
+                    }
+                  : undefined
               }
               />
             </div>
