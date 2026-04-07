@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type MouseEvent as ReactMouseEvent,
+} from "react";
 import { ChevronLeft, ChevronRight, Trash01 } from "@untitledui/icons";
 import { useDateFormatter } from "react-aria";
 import {
@@ -9,6 +17,7 @@ import {
 } from "./editor-constants";
 import type { EditorAdMarker, EditorSubClip } from "@/types/editor";
 import { EditorMarkInOut } from "./editor-mark-in-out";
+import { cx } from "@/utils/cx";
 
 const TIMELINE_SCRUB_HEIGHT_PX = 24;
 const TIMELINE_FILMSTRIP_HEIGHT_PX = 120;
@@ -22,6 +31,65 @@ export function formatTime(seconds: number): string {
     return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
   }
   return `${m}:${String(s).padStart(2, "0")}`;
+}
+
+/** Wide hit target + NLE-style vertical trim grip (in/out brackets on the filmstrip). */
+function ClipFilmstripTrimHandle({
+  edge,
+  onMouseDown,
+  ariaLabel,
+}: {
+  edge: "left" | "right";
+  onMouseDown: (e: ReactMouseEvent) => void;
+  ariaLabel: string;
+}) {
+  const position =
+    edge === "left" ? "left-0 -translate-x-1/2" : "right-0 translate-x-1/2";
+
+  return (
+    <div
+      data-resize-handle
+      className={cx(
+        "group absolute top-0 z-30 flex h-full w-9 cursor-ew-resize touch-none select-none items-stretch justify-center",
+        position,
+      )}
+      onMouseDown={onMouseDown}
+      aria-label={ariaLabel}
+    >
+      {/* Full-height trim bracket — same base gray as site chrome (#4B5563, e.g. account color fallback) */}
+      <div
+        className={cx(
+          "pointer-events-none relative flex h-full min-h-0 w-[18px] shrink-0 flex-col items-center justify-center self-stretch",
+          "bg-[#4b5563]",
+          "border-2 border-[#374151]",
+          "shadow-[0_3px_12px_rgba(0,0,0,0.28),inset_0_1px_0_rgba(255,255,255,0.18)]",
+          "dark:shadow-[0_4px_16px_rgba(0,0,0,0.5),inset_0_1px_0_rgba(255,255,255,0.1)]",
+          "before:pointer-events-none before:absolute before:inset-y-1 before:left-px before:w-0.5 before:rounded-full before:bg-white/18",
+          "after:pointer-events-none after:absolute after:inset-y-1 after:right-px after:w-px after:rounded-full after:bg-black/20",
+          "transition-[transform,filter] duration-100 ease-out",
+          "group-hover:brightness-110 group-hover:shadow-[0_4px_16px_rgba(0,0,0,0.35),inset_0_1px_0_rgba(255,255,255,0.22)]",
+          "dark:group-hover:shadow-[0_5px_20px_rgba(0,0,0,0.6),inset_0_1px_0_rgba(255,255,255,0.14)]",
+          "group-active:scale-[0.97]",
+          edge === "left"
+            ? "rounded-bl-md rounded-br-sm rounded-tl-md rounded-tr-sm"
+            : "rounded-bl-sm rounded-br-md rounded-tl-sm rounded-tr-md",
+        )}
+        style={{
+          clipPath:
+            edge === "left"
+              ? "polygon(0% 5%, 18% 0%, 100% 0%, 100% 100%, 18% 100%, 0% 95%)"
+              : "polygon(0% 0%, 82% 0%, 100% 5%, 100% 95%, 82% 100%, 0% 100%)",
+        }}
+        aria-hidden
+      >
+        <div className="relative z-[1] flex flex-col gap-[3px] py-2">
+          <span className="h-[2px] w-[11px] rounded-[1px] bg-white/45 shadow-[0_1px_0_rgba(0,0,0,0.35)]" />
+          <span className="h-[2px] w-[11px] rounded-[1px] bg-white/45 shadow-[0_1px_0_rgba(0,0,0,0.35)]" />
+          <span className="h-[2px] w-[11px] rounded-[1px] bg-white/45 shadow-[0_1px_0_rgba(0,0,0,0.35)]" />
+        </div>
+      </div>
+    </div>
+  );
 }
 
 interface EditorTimelineProps {
@@ -333,7 +401,7 @@ export function EditorTimeline({
   );
 
   const handleTimelineClick = useCallback(
-    (e: React.MouseEvent<HTMLDivElement>) => {
+    (e: ReactMouseEvent<HTMLDivElement>) => {
       const target = e.target as HTMLElement;
       if (target.closest("[data-clip-overlay]") || target.closest("[data-resize-handle]")) return;
       seekFromClientX(e.clientX);
@@ -342,7 +410,7 @@ export function EditorTimeline({
   );
 
   const handleScrubStripClick = useCallback(
-    (e: React.MouseEvent<HTMLDivElement>) => {
+    (e: ReactMouseEvent<HTMLDivElement>) => {
       e.stopPropagation();
       seekFromClientX(e.clientX);
     },
@@ -597,25 +665,23 @@ export function EditorTimeline({
               >
                 {canResize && (
                   <>
-                    <div
-                      data-resize-handle
-                      className="absolute left-0 top-0 z-30 h-full w-0.5 cursor-ew-resize bg-blue-600 transition-[width] duration-100 hover:w-1"
+                    <ClipFilmstripTrimHandle
+                      edge="left"
+                      ariaLabel="Resize sub-clip start"
                       onMouseDown={(e) => {
                         e.preventDefault();
                         e.stopPropagation();
                         setDragging({ clipId: c.id, edge: "left", startTime: c.startTime, endTime: c.endTime });
                       }}
-                      aria-label="Resize sub-clip start"
                     />
-                    <div
-                      data-resize-handle
-                      className="absolute right-0 top-0 z-30 h-full w-0.5 cursor-ew-resize bg-blue-600 transition-[width] duration-100 hover:w-1"
+                    <ClipFilmstripTrimHandle
+                      edge="right"
+                      ariaLabel="Resize sub-clip end"
                       onMouseDown={(e) => {
                         e.preventDefault();
                         e.stopPropagation();
                         setDragging({ clipId: c.id, edge: "right", startTime: c.startTime, endTime: c.endTime });
                       }}
-                      aria-label="Resize sub-clip end"
                     />
                   </>
                 )}
