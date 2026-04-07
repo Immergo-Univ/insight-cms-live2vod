@@ -21,6 +21,9 @@ interface EditorClipsListProps {
   onOrderChange: (id: string, newOrder: number) => void;
   onRemove: (id: string) => void;
   onSeek?: (timeSeconds: number) => void;
+  /** When false, skip VOD thumbnail URLs (e.g. live / realtime session offsets). */
+  thumbnailsEnabled?: boolean;
+  emptyHint?: string;
 }
 
 export function EditorClipsList({
@@ -36,6 +39,8 @@ export function EditorClipsList({
   onOrderChange,
   onRemove,
   onSeek,
+  thumbnailsEnabled = true,
+  emptyHint = "Use Mark In / Mark Out to add ranges.",
 }: EditorClipsListProps) {
   const sortedClips = [...clips].sort((a, b) => a.order - b.order);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -58,7 +63,7 @@ export function EditorClipsList({
   if (clips.length === 0) {
     return (
       <div className="rounded-lg border border-secondary bg-secondary px-3 py-2 text-xs text-tertiary">
-        No sub-clips. Use Mark In / Mark Out to add ranges.
+        No sub-clips. {emptyHint}
       </div>
     );
   }
@@ -82,6 +87,11 @@ export function EditorClipsList({
           };
           const thumbInUrl = buildThumbnailUrl(clipUrl, c.startTime, channelId);
           const thumbOutUrl = buildThumbnailUrl(clipUrl, c.endTime, channelId);
+          const thumbPlaceholder = (label: string) => (
+            <div className="flex size-full items-center justify-center bg-quaternary text-[9px] font-medium text-tertiary">
+              {label}
+            </div>
+          );
           return (
             <li
               key={c.id}
@@ -107,14 +117,18 @@ export function EditorClipsList({
                 style={{ width: THUMB_WIDTH, height: THUMB_HEIGHT }}
                 onClick={(e) => e.stopPropagation()}
               >
-                <img
-                  src={thumbInUrl}
-                  alt="In"
-                  className="size-full object-cover"
-                  width={THUMB_WIDTH}
-                  height={THUMB_HEIGHT}
-                  loading="lazy"
-                />
+                {thumbnailsEnabled ? (
+                  <img
+                    src={thumbInUrl}
+                    alt="In"
+                    className="size-full object-cover"
+                    width={THUMB_WIDTH}
+                    height={THUMB_HEIGHT}
+                    loading="lazy"
+                  />
+                ) : (
+                  thumbPlaceholder("In")
+                )}
               </div>
               {/* 2. Thumbnail Mark Out */}
               <div
@@ -122,14 +136,18 @@ export function EditorClipsList({
                 style={{ width: THUMB_WIDTH, height: THUMB_HEIGHT }}
                 onClick={(e) => e.stopPropagation()}
               >
-                <img
-                  src={thumbOutUrl}
-                  alt="Out"
-                  className="size-full object-cover"
-                  width={THUMB_WIDTH}
-                  height={THUMB_HEIGHT}
-                  loading="lazy"
-                />
+                {thumbnailsEnabled ? (
+                  <img
+                    src={thumbOutUrl}
+                    alt="Out"
+                    className="size-full object-cover"
+                    width={THUMB_WIDTH}
+                    height={THUMB_HEIGHT}
+                    loading="lazy"
+                  />
+                ) : (
+                  thumbPlaceholder("Out")
+                )}
               </div>
               {/* 3. Play / Stop */}
               <button

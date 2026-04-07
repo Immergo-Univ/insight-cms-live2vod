@@ -5,6 +5,7 @@ import { useTimezone } from "@/hooks/use-timezone";
 import {
   EditorPlayer,
   EditorTimeline,
+  EditorRealtimeRecBar,
   EditorClipsList,
   EditorJsonButton,
   EditorRightPanel,
@@ -75,8 +76,26 @@ export function EditorPage() {
   const [adsLoading, setAdsLoading] = useState(false);
   const adsTriggeredRef = useRef(false);
 
+  const selectionMode = clipState?.selectionMode ?? "epg";
+  const isRealtime = selectionMode === "realtime";
+
+  const [realtimeTick, setRealtimeTick] = useState(0);
   useEffect(() => {
-    if (adsTriggeredRef.current || !clipState?.clipUrl) return;
+    if (!isRealtime) return;
+    const id = window.setInterval(() => setRealtimeTick((n) => n + 1), 1000);
+    return () => clearInterval(id);
+  }, [isRealtime]);
+
+  useEffect(() => {
+    if (!clipState?.clipUrl) return;
+    if (isRealtime) {
+      if (adsTriggeredRef.current) return;
+      adsTriggeredRef.current = true;
+      setAds([]);
+      setAdsLoading(false);
+      return;
+    }
+    if (adsTriggeredRef.current) return;
     adsTriggeredRef.current = true;
 
     const corner = clipState.logoCorner || "br";
@@ -128,7 +147,7 @@ export function EditorPage() {
       })
       .catch((err) => console.error("Ads load failed:", err))
       .finally(() => setAdsLoading(false));
-  }, [clipState]);
+  }, [clipState, isRealtime]);
 
   const handleRemoveAd = useCallback((id: string) => {
     setAds((prev) => {
@@ -310,6 +329,16 @@ export function EditorPage() {
     [selectedClipId, markInTime, clips.length]
   );
 
+  const handleRealtimeRec = useCallback(() => {
+    if (!clipState || clipState.selectionMode !== "realtime") return;
+    const offset = Math.floor(Date.now() / 1000) - clipState.startTime;
+    if (markInTime === null) {
+      handleMarkIn(offset);
+    } else {
+      handleMarkOut(offset);
+    }
+  }, [clipState, markInTime, handleMarkIn, handleMarkOut]);
+
   const handleRemoveClip = useCallback((id: string) => {
     setClips((prev) => prev.filter((c) => c.id !== id));
   }, []);
@@ -392,19 +421,29 @@ export function EditorPage() {
       const d = new Date(t * 1000);
       return Number.isFinite(d.getTime()) ? d.toISOString() : "";
     };
+    const startTime = clipState.startTime;
+    const endTime =
+      clipState.selectionMode === "realtime"
+        ? startTime +
+          Math.max(
+            60,
+            clips.length ? Math.max(...clips.map((c) => c.endTime)) : 0,
+            Math.floor(Date.now() / 1000) - startTime,
+          )
+        : clipState.endTime;
     return {
       clipUrl: clipState.clipUrl,
       sourceM3u8: clipState.sourceM3u8,
-      startTime: clipState.startTime,
-      endTime: clipState.endTime,
+      startTime,
+      endTime,
       posters,
       clips: clips.map((c) => ({ order: c.order, startTime: c.startTime, endTime: c.endTime })),
       ads: ads.map((a) => ({
         index: a.index,
         startTime: a.startTime,
         endTime: a.endTime,
-        startProgramDateTime: absEpochToIso(clipState.startTime + a.startTime),
-        endProgramDateTime: absEpochToIso(clipState.startTime + a.endTime),
+        startProgramDateTime: absEpochToIso(startTime + a.startTime),
+        endProgramDateTime: absEpochToIso(startTime + a.endTime),
       })),
       ...(verticalCropMode && cropWindow ? { cropWindow } : {}),
       ...(subtitleMode
@@ -427,7 +466,16 @@ export function EditorPage() {
     cropWindow,
     subtitleMode,
     subtitleSettings,
+    realtimeTick,
   ]);
+
+  useEffect(() => {
+    if (!clipState?.clipUrl || clipState.selectionMode !== "realtime") return;
+    const id = window.setTimeout(() => {
+      void playerRef.current?.play();
+    }, 500);
+    return () => clearTimeout(id);
+  }, [clipState?.clipUrl, clipState?.selectionMode]);
 
   if (!clipState?.clipUrl) {
     return (
@@ -454,8 +502,18 @@ export function EditorPage() {
     );
   }
 
-  const durationSeconds = clipState.endTime - clipState.startTime;
-  const effectiveDuration = duration > 0 ? duration : durationSeconds;
+  const durationSeconds = isRealtime
+    ? Math.max(
+        60,
+        clips.length ? Math.max(...clips.map((c) => c.endTime)) : 0,
+        Math.floor(Date.now() / 1000) - clipState.startTime,
+      )
+    : clipState.endTime - clipState.startTime;
+  const effectiveDuration = isRealtime
+    ? durationSeconds
+    : duration > 0 && Number.isFinite(duration)
+      ? duration
+      : durationSeconds;
   const channelId = clipState.channelId ?? "";
 
   const handleCreateAndFinish = async () => {
@@ -543,35 +601,46 @@ export function EditorPage() {
             </div>
           </section>
 
-          {/* 2. Timeline + Zoom */}
+          {/* 2. Timeline + Zoom — hidden for live realtime (REC bar instead) */}
           <section className="shrink-0">
-            <EditorTimeline
-              durationSeconds={effectiveDuration}
-              currentTimeSeconds={currentTime}
-              clipUrl={clipState.clipUrl}
-              channelId={channelId}
-              zoomIndex={zoomIndex}
-              onZoomIndexChange={setZoomIndex}
-              onSeek={handleSeek}
-              onTrackClick={(time) => {
-                handleSeek(time);
-                setSelectedClipId(null);
-              }}
-              clips={clips}
-              selectedClipId={selectedClipId}
-              onSelectClip={setSelectedClipId}
-              onRemoveClip={handleRemoveClip}
-              onResizeClip={handleResizeClip}
-              ads={ads}
-              adsLoading={adsLoading}
-              onRemoveAd={handleRemoveAd}
-              onResizeAd={handleResizeAd}
-              clipStartUnixSec={clipState.startTime}
-              clientTimeZone={clientTimeZone}
-              markInTime={markInTime}
-              onMarkIn={handleMarkIn}
-              onMarkOut={handleMarkOut}
-            />
+            {isRealtime ? (
+              <EditorRealtimeRecBar
+                clips={clips}
+                markInTime={markInTime}
+                onRecPress={handleRealtimeRec}
+                currentTimeSeconds={currentTime}
+                sessionStartUnixSec={clipState.startTime}
+                clientTimeZone={clientTimeZone}
+              />
+            ) : (
+              <EditorTimeline
+                durationSeconds={effectiveDuration}
+                currentTimeSeconds={currentTime}
+                clipUrl={clipState.clipUrl}
+                channelId={channelId}
+                zoomIndex={zoomIndex}
+                onZoomIndexChange={setZoomIndex}
+                onSeek={handleSeek}
+                onTrackClick={(time) => {
+                  handleSeek(time);
+                  setSelectedClipId(null);
+                }}
+                clips={clips}
+                selectedClipId={selectedClipId}
+                onSelectClip={setSelectedClipId}
+                onRemoveClip={handleRemoveClip}
+                onResizeClip={handleResizeClip}
+                ads={ads}
+                adsLoading={adsLoading}
+                onRemoveAd={handleRemoveAd}
+                onResizeAd={handleResizeAd}
+                clipStartUnixSec={clipState.startTime}
+                clientTimeZone={clientTimeZone}
+                markInTime={markInTime}
+                onMarkIn={handleMarkIn}
+                onMarkOut={handleMarkOut}
+              />
+            )}
           </section>
 
           {/* 3. Clipping: title fixed, only the list of rows scrolls. */}
@@ -605,6 +674,12 @@ export function EditorPage() {
               onOrderChange={handleOrderChange}
               onRemove={handleRemoveClip}
               onSeek={handleSeek}
+              thumbnailsEnabled={!isRealtime}
+              emptyHint={
+                isRealtime
+                  ? "Use REC to add Mark In / Mark Out segments."
+                  : "Use Mark In / Mark Out to add ranges."
+              }
               />
             </div>
           </section>

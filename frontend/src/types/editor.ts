@@ -2,6 +2,9 @@ import type { WhisperLanguageCode, WhisperSubtitleOutputLanguage } from "./edito
 
 export type { WhisperLanguageCode, WhisperSubtitleOutputLanguage } from "./editor-whisper-languages";
 
+/** How the user chose the clip window on Live2VOD (drives editor UI and export). */
+export type EditorSelectionMode = "epg" | "timePicker" | "realtime";
+
 /**
  * Editor clip data passed from the previous step (time window selection).
  */
@@ -12,6 +15,7 @@ export interface EditorClipState {
   clipUrl: string;
   channelId?: string;
   logoCorner?: string;
+  selectionMode?: EditorSelectionMode;
 }
 
 /**

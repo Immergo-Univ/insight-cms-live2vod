@@ -1,6 +1,7 @@
 export { EditorPlayer } from "./editor-player";
 export type { EditorPlayerRef } from "./editor-player";
 export { EditorTimeline, formatTime } from "./editor-timeline";
+export { EditorRealtimeRecBar } from "./editor-realtime-rec-bar";
 export { EditorPosterCapture } from "./editor-poster-capture";
 export { EditorTransportControls } from "./editor-transport-controls";
 export { EditorMarkInOut } from "./editor-mark-in-out";
