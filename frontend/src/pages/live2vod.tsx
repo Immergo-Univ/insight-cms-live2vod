@@ -13,6 +13,7 @@ import { ChannelList } from "@/components/live2vod/channel-list";
 import type { TimeWindow } from "@/components/live2vod/timeline/timeline-panel";
 import { TimelinePanel } from "@/components/live2vod/timeline/timeline-panel";
 import { VideoPreview } from "@/components/live2vod/video-preview";
+import { SexagesimalTimeInput } from "@/components/live2vod/sexagesimal-time-input";
 import { RadioGroup, RadioButton } from "@/components/base/radio-buttons/radio-buttons";
 import { useChannelDateRange } from "@/hooks/use-channel-date-range";
 import { useChannels } from "@/hooks/use-channels";
@@ -22,22 +23,12 @@ import type { EditorClipState, EditorSelectionMode } from "@/types/editor";
 
 type Live2VodWindowMode = "epg" | "timePicker" | "realtime";
 
-function formatSexagesimalTimeInput(raw: string): string {
-  const digits = raw.replace(/\D/g, "").slice(0, 4);
-  if (digits.length === 0) return "";
-  if (digits.length === 1) {
-    const n = parseInt(digits, 10);
-    if (n > 2) return `0${digits}`;
-    return digits;
-  }
-  if (digits.length === 2) {
-    let h = parseInt(digits, 10);
-    if (h > 23) h = 23;
-    return String(h).padStart(2, "0");
-  }
-  const h = Math.min(23, parseInt(digits.slice(0, 2), 10));
-  const m = Math.min(59, parseInt(digits.slice(2), 10));
-  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+function pickerDigitsToHHMM(d: string): string | null {
+  if (!/^\d{4}$/.test(d)) return null;
+  const hh = parseInt(d.slice(0, 2), 10);
+  const mm = parseInt(d.slice(2, 4), 10);
+  if (hh > 23 || mm > 59) return null;
+  return `${d.slice(0, 2)}:${d.slice(2, 4)}`;
 }
 
 function parseSexagesimalTime(value: string): { hour: number; minute: number } | null {
@@ -66,14 +57,6 @@ function calendarDateTimeToUnix(date: DateValue, hour: number, minute: number, t
   return Math.floor((dayStartMs + (hour * 3600 + minute * 60) * 1000) / 1000);
 }
 
-function normalizeTimeOnBlur(value: string): string {
-  const p = parseSexagesimalTime(value);
-  if (p) {
-    return `${String(p.hour).padStart(2, "0")}:${String(p.minute).padStart(2, "0")}`;
-  }
-  return "00:00";
-}
-
 function buildClipUrl(baseUrl: string, tw: TimeWindow): string {
   const url = new URL(baseUrl, window.location.origin);
   url.searchParams.set("startTime", String(tw.startTime));
@@ -95,7 +78,7 @@ export function Live2VodPage() {
   const [dateRange, setDateRange] = useState<RangeValue<DateValue> | null>(null);
   const [timeWindow, setTimeWindow] = useState<TimeWindow | null>(null);
   const [pickerDate, setPickerDate] = useState<DateValue | null>(null);
-  const [pickerTime, setPickerTime] = useState("00:00");
+  const [pickerDigits, setPickerDigits] = useState("0000");
   const [pickerMinutes, setPickerMinutes] = useState(60);
   const { range: availableRange } = useChannelDateRange(selectedChannel, tz);
 
@@ -103,7 +86,7 @@ export function Live2VodPage() {
     setDateRange(null);
     setTimeWindow(null);
     setPickerDate(null);
-    setPickerTime("00:00");
+    setPickerDigits("0000");
     setPickerMinutes(60);
   }, []);
 
@@ -120,7 +103,9 @@ export function Live2VodPage() {
 
   const timePickerWindow = useMemo((): TimeWindow | null => {
     if (windowMode !== "timePicker" || !pickerDate || !availableRange) return null;
-    const parts = parseSexagesimalTime(pickerTime);
+    const composed = pickerDigitsToHHMM(pickerDigits);
+    if (!composed) return null;
+    const parts = parseSexagesimalTime(composed);
     if (!parts) return null;
     const mins = Number(pickerMinutes);
     if (!Number.isFinite(mins) || mins <= 0 || mins > 24 * 60) return null;
@@ -132,7 +117,7 @@ export function Live2VodPage() {
       return null;
     }
     return { startTime: startUnix, endTime: endUnix };
-  }, [windowMode, pickerDate, pickerTime, pickerMinutes, availableRange, tz]);
+  }, [windowMode, pickerDate, pickerDigits, pickerMinutes, availableRange, tz]);
 
   const navigate = useNavigate();
 
@@ -231,19 +216,15 @@ export function Live2VodPage() {
                               onChange={setPickerDate}
                             />
                             <div className="flex flex-col gap-1">
-                              <label htmlFor="picker-start-time" className="text-xs font-medium text-secondary">
-                                Start time
-                              </label>
-                              <input
+                              <span className="text-xs font-medium text-secondary" id="picker-start-time-label">
+                                Start time (24h)
+                              </span>
+                              <SexagesimalTimeInput
                                 id="picker-start-time"
-                                type="text"
-                                inputMode="numeric"
-                                placeholder="00:00"
-                                autoComplete="off"
-                                value={pickerTime}
-                                onChange={(e) => setPickerTime(formatSexagesimalTimeInput(e.target.value))}
-                                onBlur={() => setPickerTime((t) => normalizeTimeOnBlur(t))}
-                                className="rounded-lg border border-secondary bg-primary px-2.5 py-2 font-mono text-sm text-primary tabular-nums placeholder:text-placeholder"
+                                aria-labelledby="picker-start-time-label"
+                                value={pickerDigits}
+                                onChange={setPickerDigits}
+                                className="w-full max-w-[7.5rem] rounded-lg border border-secondary bg-primary px-2.5 py-2 font-mono text-sm text-primary tabular-nums outline-none focus:ring-2 focus:ring-brand-solid"
                               />
                             </div>
                             <div className="flex flex-col gap-1">
@@ -260,7 +241,9 @@ export function Live2VodPage() {
                                 className="rounded-lg border border-secondary bg-primary px-2.5 py-2 text-sm text-primary"
                               />
                             </div>
-                            {pickerDate && timePickerWindow === null && parseSexagesimalTime(pickerTime) && (
+                            {pickerDate &&
+                              timePickerWindow === null &&
+                              pickerDigitsToHHMM(pickerDigits) && (
                               <p className="text-xs text-error-primary">
                                 Window must fall inside the available archive (max 24h duration check).
                               </p>
