@@ -4,7 +4,8 @@ import type { EditorSubClip } from "@/types/editor";
 import { buildThumbnailUrl } from "./editor-constants";
 import { formatTime } from "./editor-timeline";
 
-const ROW_HEIGHT = 50;
+const ROW_HEIGHT_DEFAULT = 50;
+const ROW_HEIGHT_COMPACT = 44;
 
 const wallClockFormatters = new Map<string, Intl.DateTimeFormat>();
 
@@ -21,8 +22,8 @@ function formatUnixSecWallClock(unixSec: number, timeZone: string): string {
   return fmt.format(new Date(unixSec * 1000));
 }
 
-const THUMB_HEIGHT = 36;
-const THUMB_WIDTH = Math.round(THUMB_HEIGHT * (16 / 9));
+const THUMB_HEIGHT_DEFAULT = 36;
+const THUMB_HEIGHT_COMPACT = 28;
 
 interface EditorClipsListProps {
   clips: EditorSubClip[];
@@ -48,6 +49,8 @@ interface EditorClipsListProps {
     sessionStartUnixSec: number;
     timeZone: string;
   };
+  /** Narrow sidebar layout (smaller thumbs, tighter row). */
+  compact?: boolean;
 }
 
 export function EditorClipsList({
@@ -66,7 +69,11 @@ export function EditorClipsList({
   thumbnailsEnabled = true,
   emptyHint = "Use Mark In / Mark Out to add ranges.",
   realtimeWallClock,
+  compact = false,
 }: EditorClipsListProps) {
+  const rowHeight = compact ? ROW_HEIGHT_COMPACT : ROW_HEIGHT_DEFAULT;
+  const thumbHeight = compact ? THUMB_HEIGHT_COMPACT : THUMB_HEIGHT_DEFAULT;
+  const thumbWidth = Math.round(thumbHeight * (16 / 9));
   const sortedClips = [...clips].sort((a, b) => a.order - b.order);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingValue, setEditingValue] = useState("");
@@ -94,10 +101,9 @@ export function EditorClipsList({
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-1">
+    <div className="flex flex-col gap-1">
       <p className="shrink-0 text-xs font-medium text-secondary">Sub-clips (output order)</p>
-      <div className="min-h-0 flex-1 overflow-y-auto">
-        <ul className="flex flex-col gap-1">
+      <ul className="flex flex-col gap-1">
         {sortedClips.map((c) => {
           const isEditing = editingId === c.id;
           const isSelected = selectedClipId === c.id;
@@ -112,6 +118,8 @@ export function EditorClipsList({
           };
           const thumbInUrl = buildThumbnailUrl(clipUrl, c.startTime, channelId);
           const thumbOutUrl = buildThumbnailUrl(clipUrl, c.endTime, channelId);
+          const tw = thumbWidth;
+          const th = thumbHeight;
           const thumbPlaceholder = (label: string) => (
             <div className="flex size-full items-center justify-center bg-quaternary text-[9px] font-medium text-tertiary">
               {label}
@@ -129,17 +137,17 @@ export function EditorClipsList({
                   handleRowClick();
                 }
               }}
-              className={`flex items-center gap-2 rounded-lg border px-2 transition-colors ${
+              className={`flex flex-wrap items-center gap-1.5 rounded-lg border px-1.5 py-1 transition-colors sm:flex-nowrap sm:gap-2 sm:px-2 ${
                 isSelected
                   ? "border-brand-solid bg-brand-solid/10"
                   : "border-secondary bg-secondary hover:bg-tertiary/50"
               }`}
-              style={{ minHeight: ROW_HEIGHT, maxHeight: ROW_HEIGHT }}
+              style={{ minHeight: rowHeight }}
             >
               {/* 1. Thumbnail Mark In */}
               <div
                 className="shrink-0 overflow-hidden rounded border border-secondary bg-quaternary"
-                style={{ width: THUMB_WIDTH, height: THUMB_HEIGHT }}
+                style={{ width: tw, height: th }}
                 onClick={(e) => e.stopPropagation()}
               >
                 {thumbnailsEnabled ? (
@@ -147,8 +155,8 @@ export function EditorClipsList({
                     src={thumbInUrl}
                     alt="In"
                     className="size-full object-cover"
-                    width={THUMB_WIDTH}
-                    height={THUMB_HEIGHT}
+                    width={tw}
+                    height={th}
                     loading="lazy"
                   />
                 ) : (
@@ -158,7 +166,7 @@ export function EditorClipsList({
               {/* 2. Thumbnail Mark Out */}
               <div
                 className="shrink-0 overflow-hidden rounded border border-secondary bg-quaternary"
-                style={{ width: THUMB_WIDTH, height: THUMB_HEIGHT }}
+                style={{ width: tw, height: th }}
                 onClick={(e) => e.stopPropagation()}
               >
                 {thumbnailsEnabled ? (
@@ -166,8 +174,8 @@ export function EditorClipsList({
                     src={thumbOutUrl}
                     alt="Out"
                     className="size-full object-cover"
-                    width={THUMB_WIDTH}
-                    height={THUMB_HEIGHT}
+                    width={tw}
+                    height={th}
                     loading="lazy"
                   />
                 ) : (
@@ -182,7 +190,7 @@ export function EditorClipsList({
                   if (isThisPlaying) onPause();
                   else onPlaySubclip(c);
                 }}
-                className="flex size-8 shrink-0 items-center justify-center rounded-lg border border-secondary bg-primary text-fg-secondary transition-colors hover:bg-secondary"
+                className={`flex shrink-0 items-center justify-center rounded-lg border border-secondary bg-primary text-fg-secondary transition-colors hover:bg-secondary ${compact ? "size-7" : "size-8"}`}
                 aria-label={isThisPlaying ? "Stop" : "Play"}
               >
                 {isThisPlaying ? (
@@ -192,7 +200,9 @@ export function EditorClipsList({
                 )}
               </button>
               {/* 4. Time from – Time to */}
-              <span className="min-w-0 shrink text-xs leading-tight text-brand-secondary">
+              <span
+                className={`min-w-0 max-w-full shrink leading-tight text-brand-secondary ${compact ? "text-[10px]" : "text-xs"}`}
+              >
                 {realtimeWallClock
                   ? `${formatUnixSecWallClock(
                       realtimeWallClock.sessionStartUnixSec + c.startTime,
@@ -239,8 +249,7 @@ export function EditorClipsList({
             </li>
           );
         })}
-        </ul>
-      </div>
+      </ul>
     </div>
   );
 }

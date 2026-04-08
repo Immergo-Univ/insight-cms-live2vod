@@ -1,12 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, Play } from "@untitledui/icons";
+import { ArrowLeft } from "@untitledui/icons";
 import { useLocation, useNavigate } from "react-router";
 import { useTimezone } from "@/hooks/use-timezone";
 import {
   EditorPlayer,
   EditorTimeline,
   EditorRealtimeRecBar,
-  EditorClipsList,
   EditorJsonButton,
   EditorRightPanel,
   EditorCapturePreview,
@@ -23,12 +22,16 @@ import type {
   EditorAdMarker,
   EditorClipState,
   EditorCropWindow,
+  EditorVodMetadata,
   EditorPosterEntry,
   EditorStateJson,
   EditorSubClip,
   EditorSubtitleSettings,
 } from "@/types/editor";
 import { isValidWhisperSubtitlePair } from "@/types/editor-whisper-languages";
+
+/** Default length for a manually inserted ad slot (seconds). */
+const DEFAULT_NEW_AD_DURATION_SEC = 30;
 
 const DEFAULT_SUBTITLE_SETTINGS: EditorSubtitleSettings = {
   whisperSourceLanguage: "auto",
@@ -60,6 +63,8 @@ export function EditorPage() {
   const [playUntilTime, setPlayUntilTime] = useState<number | null>(null);
   /** Subclip in "edit" mode: Mark In/Out update this clip; Play plays only this subclip. */
   const [selectedClipId, setSelectedClipId] = useState<string | null>(null);
+  /** Ad slot selected on the timeline (trim handles + ring). Mutually exclusive with selectedClipId where enforced in UI. */
+  const [selectedAdId, setSelectedAdId] = useState<string | null>(null);
   /** Subclip currently playing (from list row Play). Cleared on pause or when play reaches end. */
   const [playingClipId, setPlayingClipId] = useState<string | null>(null);
   /** When set, we're playing the full sequence (order 1..N); value = current segment index. */
@@ -71,6 +76,11 @@ export function EditorPage() {
   const [subtitleMode, setSubtitleMode] = useState(false);
   const [subtitleSettings, setSubtitleSettings] = useState<EditorSubtitleSettings>(DEFAULT_SUBTITLE_SETTINGS);
   const [jsonPanelOpen, setJsonPanelOpen] = useState(false);
+  const [vodMetadata, setVodMetadata] = useState<EditorVodMetadata>({
+    title: "",
+    description: "",
+    tags: "",
+  });
 
   const [ads, setAds] = useState<EditorAdMarker[]>([]);
   const [adsLoading, setAdsLoading] = useState(false);
@@ -154,6 +164,16 @@ export function EditorPage() {
       const filtered = prev.filter((a) => a.id !== id);
       return filtered.map((a, i) => ({ ...a, index: i + 1 }));
     });
+    setSelectedAdId((cur) => (cur === id ? null : cur));
+  }, []);
+
+  const handleSelectClip = useCallback((id: string | null) => {
+    setSelectedAdId(null);
+    setSelectedClipId(id);
+  }, []);
+
+  const handleSelectAd = useCallback((id: string | null) => {
+    setSelectedAdId(id);
   }, []);
 
   const handleResizeAd = useCallback(
@@ -182,6 +202,12 @@ export function EditorPage() {
       setSelectedClipId(null);
     }
   }, [selectedClipId, clips]);
+
+  useEffect(() => {
+    if (selectedAdId && !ads.some((a) => a.id === selectedAdId)) {
+      setSelectedAdId(null);
+    }
+  }, [selectedAdId, ads]);
 
   // Arrow keys: move playhead by 1 frame (skip when focus is in input/textarea/select)
   useEffect(() => {
@@ -445,6 +471,7 @@ export function EditorPage() {
         startProgramDateTime: absEpochToIso(startTime + a.startTime),
         endProgramDateTime: absEpochToIso(startTime + a.endTime),
       })),
+      metadata: { ...vodMetadata },
       ...(verticalCropMode && cropWindow ? { cropWindow } : {}),
       ...(subtitleMode
         ? {
@@ -462,6 +489,7 @@ export function EditorPage() {
     posters,
     clips,
     ads,
+    vodMetadata,
     verticalCropMode,
     cropWindow,
     subtitleMode,
@@ -516,9 +544,32 @@ export function EditorPage() {
       : durationSeconds;
   const channelId = clipState.channelId ?? "";
 
-  const handleCreateAndFinish = async () => {
+  const handleAddAdSlot = () => {
+    if (isRealtime) return;
+    const dur = effectiveDuration;
+    if (dur <= 0) return;
+    const t = Math.max(0, Math.min(currentTime, dur - 0.05));
+    const end = Math.min(t + DEFAULT_NEW_AD_DURATION_SEC, dur);
+    if (end <= t + 0.01) return;
+    const id = crypto.randomUUID();
+    setAds((prev) => {
+      const next = [
+        ...prev,
+        { id, index: prev.length + 1, startTime: t, endTime: end },
+      ];
+      return next.map((a, i) => ({ ...a, index: i + 1 }));
+    });
+    setSelectedClipId(null);
+    setSelectedAdId(id);
+  };
+
+  const handleFinishCreate = async (includeAds: boolean) => {
     if (clips.length === 0) {
       setFinishError("Add at least one clip before creating a VOD.");
+      return;
+    }
+    if (!vodMetadata.title.trim() || !vodMetadata.description.trim()) {
+      setFinishError("Set title and description in the sidebar (click the session card).");
       return;
     }
     if (
@@ -539,7 +590,8 @@ export function EditorPage() {
     setFinishLoading(true);
     try {
       if (!stateJson) return;
-      await startVodJob(stateJson);
+      const spec = includeAds ? stateJson : { ...stateJson, ads: [] };
+      await startVodJob(spec);
       navigate({ pathname: "/processing-clips", search: window.location.search });
     } catch (err) {
       setFinishError(httpClient.getErrorMessage(err));
@@ -562,10 +614,10 @@ export function EditorPage() {
       </header>
 
       <main className="flex min-h-0 flex-1 flex-row overflow-hidden">
-        {/* Left column: Player, Timeline, Clipping (only Clipping scrolls vertically) */}
-        <div className="flex min-w-0 flex-1 flex-col min-h-0 gap-3 overflow-hidden px-4 py-2">
+        {/* Left column: Player, Timeline — scroll if needed so timeline is never squashed under Preview */}
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-3 overflow-y-auto overflow-x-hidden px-4 py-2">
           {/* 1. Video player (~2/3) + Capture & Preview (~1/3) */}
-          <section className="flex shrink-0 gap-3">
+          <section className="flex shrink-0 items-start gap-3">
             <div className="min-w-0 flex-[2]">
               <EditorPlayer
                 ref={playerRef}
@@ -589,7 +641,7 @@ export function EditorPage() {
                 onSubtitleSettingsChange={setSubtitleSettings}
               />
             </div>
-            <div className="min-w-0 flex-1 basis-0">
+            <div className="min-h-0 min-w-0 flex-1 basis-0">
               <EditorCapturePreview
                 posters={posters}
                 currentTimeSeconds={currentTime}
@@ -601,8 +653,8 @@ export function EditorPage() {
             </div>
           </section>
 
-          {/* 2. Timeline + Zoom — hidden for live realtime (REC bar instead) */}
-          <section className="shrink-0">
+          {/* 2. Timeline + Zoom — natural height (no flex-1) so Mark In/Out never stacks under Preview */}
+          <section className="flex w-full min-w-0 shrink-0 flex-col">
             {isRealtime ? (
               <EditorRealtimeRecBar
                 clips={clips}
@@ -623,16 +675,19 @@ export function EditorPage() {
                 onTrackClick={(time) => {
                   handleSeek(time);
                   setSelectedClipId(null);
+                  setSelectedAdId(null);
                 }}
                 clips={clips}
                 selectedClipId={selectedClipId}
-                onSelectClip={setSelectedClipId}
+                onSelectClip={handleSelectClip}
                 onRemoveClip={handleRemoveClip}
                 onResizeClip={handleResizeClip}
                 ads={ads}
                 adsLoading={adsLoading}
                 onRemoveAd={handleRemoveAd}
                 onResizeAd={handleResizeAd}
+                selectedAdId={selectedAdId}
+                onSelectAd={handleSelectAd}
                 clipStartUnixSec={clipState.startTime}
                 clientTimeZone={clientTimeZone}
                 markInTime={markInTime}
@@ -641,64 +696,57 @@ export function EditorPage() {
               />
             )}
           </section>
-
-          {/* 3. Clipping: title fixed, only the list of rows scrolls. */}
-          <section className="flex min-h-0 flex-1 flex-col gap-2 rounded-lg border border-secondary bg-secondary px-3">
-            <div className="flex shrink-0 items-center gap-2">
-              <h3 className="text-xs font-semibold uppercase tracking-wide text-tertiary">
-                Clipping
-              </h3>
-              <button
-                type="button"
-                onClick={handlePlayFullSequence}
-                disabled={clips.length === 0}
-                title="Play full sequence (order 1 to N)"
-                aria-label="Play full sequence"
-                className="flex size-8 cursor-pointer items-center justify-center rounded-lg border border-secondary bg-primary text-fg-secondary transition-colors hover:bg-secondary disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-primary"
-              >
-                <Play className="size-4" />
-              </button>
-            </div>
-            <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-              <EditorClipsList
-              clips={clips}
-              clipUrl={clipState.clipUrl}
-              channelId={channelId}
-              selectedClipId={selectedClipId}
-              onSelectClip={setSelectedClipId}
-              playingClipId={playingClipId}
-              isPlaying={isPlaying}
-              onPlaySubclip={handlePlaySubclip}
-              onPause={handlePause}
-              onOrderChange={handleOrderChange}
-              onRemove={handleRemoveClip}
-              onSeek={handleSeek}
-              thumbnailsEnabled={!isRealtime}
-              emptyHint={
-                isRealtime
-                  ? "Use REC to add Mark In / Mark Out segments."
-                  : "Use Mark In / Mark Out to add ranges."
-              }
-              realtimeWallClock={
-                isRealtime
-                  ? {
-                      sessionStartUnixSec: clipState.startTime,
-                      timeZone: clientTimeZone,
-                    }
-                  : undefined
-              }
-              />
-            </div>
-          </section>
         </div>
 
-        {/* Right column: Metadata only */}
-        <aside className="flex shrink-0 overflow-y-auto border-l border-secondary px-4 py-2">
-          <EditorRightPanel />
+        {/* Right column: session summary, metadata modal, clips list */}
+        <aside className="flex min-h-0 w-80 shrink-0 flex-col border-l border-secondary py-2 pr-4 pl-2">
+          <EditorRightPanel
+            channelTitle={clipState.channelTitle ?? ""}
+            selectionMode={selectionMode}
+            windowStartUnixSec={clipState.startTime}
+            windowEndUnixSec={clipState.endTime}
+            timelineDurationSec={durationSeconds}
+            timeZone={clientTimeZone}
+            metadata={vodMetadata}
+            onMetadataChange={setVodMetadata}
+            clips={clips}
+            clipUrl={clipState.clipUrl}
+            channelId={channelId}
+            selectedClipId={selectedClipId}
+            onSelectClip={handleSelectClip}
+            playingClipId={playingClipId}
+            isPlaying={isPlaying}
+            onPlaySubclip={handlePlaySubclip}
+            onPause={handlePause}
+            onOrderChange={handleOrderChange}
+            onRemoveClip={handleRemoveClip}
+            onSeek={handleSeek}
+            onPlayFullSequence={handlePlayFullSequence}
+            thumbnailsEnabled={!isRealtime}
+            clipsEmptyHint={
+              isRealtime
+                ? "Use REC to add Mark In / Mark Out segments."
+                : "Use Mark In / Mark Out to add ranges."
+            }
+            realtimeWallClock={
+              isRealtime
+                ? {
+                    sessionStartUnixSec: clipState.startTime,
+                    timeZone: clientTimeZone,
+                  }
+                : undefined
+            }
+            onAddAdSlot={handleAddAdSlot}
+            addAdSlotDisabled={isRealtime}
+            onCreateWithoutAds={() => void handleFinishCreate(false)}
+            onCreateWithAds={() => void handleFinishCreate(true)}
+            finishLoading={finishLoading}
+            finishError={finishError}
+          />
         </aside>
       </main>
 
-      {/* Footer: Back (left), Create and Finish (right) */}
+      {/* Footer: Back (left), tools (right) */}
       <footer className="flex shrink-0 items-center justify-between border-t border-secondary px-4 py-2">
         <div className="flex gap-2">
           <button
@@ -709,31 +757,18 @@ export function EditorPage() {
             Back
           </button>
         </div>
-        <div className="flex flex-col items-end gap-1">
-          {finishError ? (
-            <p className="max-w-md text-right text-xs text-error-primary">{finishError}</p>
-          ) : null}
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={handleCreateAndFinish}
-              disabled={finishLoading}
-              className="rounded-lg bg-brand-solid px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-brand-solid-hover disabled:opacity-60"
-            >
-              {finishLoading ? "Starting…" : "Create and Finish"}
-            </button>
-            <ProcessingClipsNavButton />
-            <EditorVerticalCropButton
-              active={verticalCropMode}
-              onToggle={handleVerticalCropToggle}
-            />
-            <EditorSubtitleButton active={subtitleMode} onToggle={handleSubtitleToggle} />
-            <EditorJsonButton
-              stateJson={stateJson}
-              open={jsonPanelOpen}
-              onOpenChange={setJsonPanelOpen}
-            />
-          </div>
+        <div className="flex items-center gap-2">
+          <ProcessingClipsNavButton />
+          <EditorVerticalCropButton
+            active={verticalCropMode}
+            onToggle={handleVerticalCropToggle}
+          />
+          <EditorSubtitleButton active={subtitleMode} onToggle={handleSubtitleToggle} />
+          <EditorJsonButton
+            stateJson={stateJson}
+            open={jsonPanelOpen}
+            onOpenChange={setJsonPanelOpen}
+          />
         </div>
       </footer>
     </div>

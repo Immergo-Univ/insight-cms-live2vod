@@ -38,13 +38,18 @@ function ClipFilmstripTrimHandle({
   edge,
   onMouseDown,
   ariaLabel,
+  variant = "clip",
 }: {
   edge: "left" | "right";
   onMouseDown: (e: ReactMouseEvent) => void;
   ariaLabel: string;
+  /** "ad" = subtle rose/red bracket for ad slots (same shape as clip handles). */
+  variant?: "clip" | "ad";
 }) {
   const position =
     edge === "left" ? "left-0 -translate-x-1/2" : "right-0 translate-x-1/2";
+
+  const isAd = variant === "ad";
 
   return (
     <div
@@ -56,19 +61,33 @@ function ClipFilmstripTrimHandle({
       onMouseDown={onMouseDown}
       aria-label={ariaLabel}
     >
-      {/* Full-height trim bracket — same base gray as site chrome (#4B5563, e.g. account color fallback) */}
       <div
         className={cx(
           "pointer-events-none relative flex h-full min-h-0 w-[18px] shrink-0 flex-col items-center justify-center self-stretch",
-          "bg-[#4b5563]",
-          "border-2 border-[#374151]",
-          "shadow-[0_3px_12px_rgba(0,0,0,0.28),inset_0_1px_0_rgba(255,255,255,0.18)]",
-          "dark:shadow-[0_4px_16px_rgba(0,0,0,0.5),inset_0_1px_0_rgba(255,255,255,0.1)]",
-          "before:pointer-events-none before:absolute before:inset-y-1 before:left-px before:w-0.5 before:rounded-full before:bg-white/18",
-          "after:pointer-events-none after:absolute after:inset-y-1 after:right-px after:w-px after:rounded-full after:bg-black/20",
+          isAd
+            ? [
+                "bg-[#fecdd3]",
+                "border-2 border-[#e11d48]/85",
+                "shadow-[0_2px_10px_rgba(225,29,72,0.22),inset_0_1px_0_rgba(255,255,255,0.55)]",
+                "dark:bg-[#9f1239]/90",
+                "dark:border-[#fb7185]/75",
+                "dark:shadow-[0_2px_12px_rgba(0,0,0,0.4),inset_0_1px_0_rgba(255,255,255,0.12)]",
+                "before:pointer-events-none before:absolute before:inset-y-1 before:left-px before:w-0.5 before:rounded-full before:bg-white/35",
+                "after:pointer-events-none after:absolute after:inset-y-1 after:right-px after:w-px after:rounded-full after:bg-rose-950/15",
+                "group-hover:brightness-[1.03] group-hover:shadow-[0_3px_14px_rgba(225,29,72,0.28),inset_0_1px_0_rgba(255,255,255,0.65)]",
+                "dark:group-hover:shadow-[0_3px_16px_rgba(0,0,0,0.5),inset_0_1px_0_rgba(255,255,255,0.16)]",
+              ]
+            : [
+                "bg-[#4b5563]",
+                "border-2 border-[#374151]",
+                "shadow-[0_3px_12px_rgba(0,0,0,0.28),inset_0_1px_0_rgba(255,255,255,0.18)]",
+                "dark:shadow-[0_4px_16px_rgba(0,0,0,0.5),inset_0_1px_0_rgba(255,255,255,0.1)]",
+                "before:pointer-events-none before:absolute before:inset-y-1 before:left-px before:w-0.5 before:rounded-full before:bg-white/18",
+                "after:pointer-events-none after:absolute after:inset-y-1 after:right-px after:w-px after:rounded-full after:bg-black/20",
+                "group-hover:brightness-110 group-hover:shadow-[0_4px_16px_rgba(0,0,0,0.35),inset_0_1px_0_rgba(255,255,255,0.22)]",
+                "dark:group-hover:shadow-[0_5px_20px_rgba(0,0,0,0.6),inset_0_1px_0_rgba(255,255,255,0.14)]",
+              ],
           "transition-[transform,filter] duration-100 ease-out",
-          "group-hover:brightness-110 group-hover:shadow-[0_4px_16px_rgba(0,0,0,0.35),inset_0_1px_0_rgba(255,255,255,0.22)]",
-          "dark:group-hover:shadow-[0_5px_20px_rgba(0,0,0,0.6),inset_0_1px_0_rgba(255,255,255,0.14)]",
           "group-active:scale-[0.97]",
           edge === "left"
             ? "rounded-bl-md rounded-br-sm rounded-tl-md rounded-tr-sm"
@@ -83,9 +102,30 @@ function ClipFilmstripTrimHandle({
         aria-hidden
       >
         <div className="relative z-[1] flex flex-col gap-[3px] py-2">
-          <span className="h-[2px] w-[11px] rounded-[1px] bg-white/45 shadow-[0_1px_0_rgba(0,0,0,0.35)]" />
-          <span className="h-[2px] w-[11px] rounded-[1px] bg-white/45 shadow-[0_1px_0_rgba(0,0,0,0.35)]" />
-          <span className="h-[2px] w-[11px] rounded-[1px] bg-white/45 shadow-[0_1px_0_rgba(0,0,0,0.35)]" />
+          <span
+            className={cx(
+              "h-[2px] w-[11px] rounded-[1px] shadow-[0_1px_0_rgba(0,0,0,0.2)]",
+              isAd
+                ? "bg-white/55 shadow-[0_1px_0_rgba(190,18,60,0.35)] dark:bg-white/40 dark:shadow-[0_1px_0_rgba(0,0,0,0.35)]"
+                : "bg-white/45 shadow-[0_1px_0_rgba(0,0,0,0.35)]",
+            )}
+          />
+          <span
+            className={cx(
+              "h-[2px] w-[11px] rounded-[1px] shadow-[0_1px_0_rgba(0,0,0,0.2)]",
+              isAd
+                ? "bg-white/55 shadow-[0_1px_0_rgba(190,18,60,0.35)] dark:bg-white/40 dark:shadow-[0_1px_0_rgba(0,0,0,0.35)]"
+                : "bg-white/45 shadow-[0_1px_0_rgba(0,0,0,0.35)]",
+            )}
+          />
+          <span
+            className={cx(
+              "h-[2px] w-[11px] rounded-[1px] shadow-[0_1px_0_rgba(0,0,0,0.2)]",
+              isAd
+                ? "bg-white/55 shadow-[0_1px_0_rgba(190,18,60,0.35)] dark:bg-white/40 dark:shadow-[0_1px_0_rgba(0,0,0,0.35)]"
+                : "bg-white/45 shadow-[0_1px_0_rgba(0,0,0,0.35)]",
+            )}
+          />
         </div>
       </div>
     </div>
@@ -111,6 +151,8 @@ interface EditorTimelineProps {
   adsLoading?: boolean;
   onRemoveAd?: (id: string) => void;
   onResizeAd?: (id: string, newStartTime?: number, newEndTime?: number) => void;
+  selectedAdId?: string | null;
+  onSelectAd?: (id: string | null) => void;
   /** Unix seconds when the clip window starts (wall clock = this + playhead offset). */
   clipStartUnixSec?: number;
   /** IANA timezone (e.g. from ?tz= query). */
@@ -140,6 +182,8 @@ export function EditorTimeline({
   adsLoading = false,
   onRemoveAd,
   onResizeAd,
+  selectedAdId = null,
+  onSelectAd,
   clipStartUnixSec = 0,
   clientTimeZone,
   markInTime = null,
@@ -446,8 +490,8 @@ export function EditorTimeline({
             </span>
           )}
           {!adsLoading && ads.length > 0 && (
-            <span className="text-[10px] font-medium text-red-500">
-              {ads.length} ad{ads.length !== 1 ? "s" : ""} detected
+            <span className="text-[10px] font-medium text-rose-700 dark:text-rose-300">
+              {ads.length} ad slot{ads.length !== 1 ? "s" : ""}
             </span>
           )}
           {onMarkIn && onMarkOut ? (
@@ -552,18 +596,47 @@ export function EditorTimeline({
                 </div>
               );
             })}
-          {/* Ad markers (red) */}
+          {/* Ad slots (subtle rose/red, same trim handles as clips) */}
           {ads.map((ad) => {
             const adLeft = ad.startTime * pixelsPerSecond;
             const adWidth = (ad.endTime - ad.startTime) * pixelsPerSecond;
             const isAdHover = hoverAdId === ad.id;
+            const isAdSelected = selectedAdId === ad.id;
             const canResizeAd = onResizeAd && adWidth > 8;
+            const handleAdOverlayClick = () => {
+              if (!onSelectAd) return;
+              if (isAdSelected) {
+                onSelectAd(null);
+                return;
+              }
+              onSelectClip?.(null);
+              onSelectAd(ad.id);
+              onSeek(ad.startTime);
+            };
 
             return (
               <div
                 key={ad.id}
                 data-clip-overlay
-                className="absolute top-0 bottom-0 z-[9] bg-red-500/30"
+                role={onSelectAd ? "button" : undefined}
+                tabIndex={onSelectAd ? 0 : undefined}
+                onClick={onSelectAd ? handleAdOverlayClick : undefined}
+                onKeyDown={
+                  onSelectAd
+                    ? (e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          handleAdOverlayClick();
+                        }
+                      }
+                    : undefined
+                }
+                className={cx(
+                  "absolute top-0 bottom-0 z-[9] transition-colors",
+                  isAdSelected
+                    ? "bg-rose-500/32 ring-2 ring-rose-400/55 dark:bg-rose-500/28 dark:ring-rose-400/45"
+                    : "bg-rose-500/18 hover:bg-rose-500/28 dark:bg-rose-500/15 dark:hover:bg-rose-500/26",
+                )}
                 style={{
                   left: adLeft,
                   width: Math.max(adWidth, 4),
@@ -572,31 +645,33 @@ export function EditorTimeline({
                 onMouseEnter={() => setHoverAdId(ad.id)}
                 onMouseLeave={() => setHoverAdId(null)}
               >
-                <div className="absolute top-1 left-1/2 z-20 -translate-x-1/2 whitespace-nowrap rounded bg-red-600 px-1.5 py-0.5 text-[9px] font-semibold text-white shadow-sm">
+                <div className="absolute top-1 left-1/2 z-20 -translate-x-1/2 whitespace-nowrap rounded-md border border-rose-200/90 bg-rose-50/95 px-1.5 py-0.5 text-[9px] font-semibold text-rose-900 shadow-sm dark:border-rose-800/80 dark:bg-rose-950/92 dark:text-rose-100">
                   AD #{ad.index}
                 </div>
 
                 {canResizeAd && (
                   <>
-                    <div
-                      data-resize-handle
-                      className="absolute left-0 top-0 z-30 h-full w-0.5 cursor-ew-resize bg-red-600 transition-[width] duration-100 hover:w-1"
+                    <ClipFilmstripTrimHandle
+                      variant="ad"
+                      edge="left"
+                      ariaLabel="Resize ad slot start"
                       onMouseDown={(e) => {
                         e.preventDefault();
                         e.stopPropagation();
+                        onSelectAd?.(ad.id);
                         setAdDragging({ adId: ad.id, edge: "left", startTime: ad.startTime, endTime: ad.endTime });
                       }}
-                      aria-label="Resize ad start"
                     />
-                    <div
-                      data-resize-handle
-                      className="absolute right-0 top-0 z-30 h-full w-0.5 cursor-ew-resize bg-red-600 transition-[width] duration-100 hover:w-1"
+                    <ClipFilmstripTrimHandle
+                      variant="ad"
+                      edge="right"
+                      ariaLabel="Resize ad slot end"
                       onMouseDown={(e) => {
                         e.preventDefault();
                         e.stopPropagation();
+                        onSelectAd?.(ad.id);
                         setAdDragging({ adId: ad.id, edge: "right", startTime: ad.startTime, endTime: ad.endTime });
                       }}
-                      aria-label="Resize ad end"
                     />
                   </>
                 )}
@@ -611,7 +686,7 @@ export function EditorTimeline({
                     className={`absolute bottom-1 left-1/2 z-20 flex size-5 -translate-x-1/2 cursor-pointer items-center justify-center rounded-full bg-primary text-fg-secondary shadow transition-opacity ${
                       isAdHover ? "opacity-100" : "opacity-0"
                     }`}
-                    aria-label="Remove ad marker"
+                    aria-label="Remove ad slot"
                   >
                     <Trash01 className="size-3" />
                   </button>
@@ -629,6 +704,7 @@ export function EditorTimeline({
             const canResize = onResizeClip && width > 8;
             const handleOverlayClick = () => {
               if (onSelectClip) {
+                if (!isSelected) onSelectAd?.(null);
                 onSelectClip(isSelected ? null : c.id);
                 if (!isSelected) onSeek(c.startTime);
               }
@@ -671,6 +747,8 @@ export function EditorTimeline({
                       onMouseDown={(e) => {
                         e.preventDefault();
                         e.stopPropagation();
+                        onSelectAd?.(null);
+                        onSelectClip?.(c.id);
                         setDragging({ clipId: c.id, edge: "left", startTime: c.startTime, endTime: c.endTime });
                       }}
                     />
@@ -680,6 +758,8 @@ export function EditorTimeline({
                       onMouseDown={(e) => {
                         e.preventDefault();
                         e.stopPropagation();
+                        onSelectAd?.(null);
+                        onSelectClip?.(c.id);
                         setDragging({ clipId: c.id, edge: "right", startTime: c.startTime, endTime: c.endTime });
                       }}
                     />

@@ -133,6 +133,7 @@ export function Live2VodPage() {
       endTime: tw.endTime,
       clipUrl,
       channelId: channel.id,
+      channelTitle: channel.title,
       selectionMode: selectionModeFor(mode),
     };
     navigate("/editor" + window.location.search, { state });
