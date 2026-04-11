@@ -1,5 +1,5 @@
 import { useCallback, useState } from "react";
-import { Play, StopCircle, Trash01 } from "@untitledui/icons";
+import { Edit01, Play, StopCircle, Trash01 } from "@untitledui/icons";
 import type { EditorSubClip } from "@/types/editor";
 import { buildThumbnailUrl } from "./editor-constants";
 import { formatTime } from "./editor-timeline";
@@ -37,6 +37,7 @@ interface EditorClipsListProps {
   onPause: () => void;
   onOrderChange: (id: string, newOrder: number) => void;
   onRemove: (id: string) => void;
+  onEditMetadata?: (clip: EditorSubClip) => void;
   onSeek?: (timeSeconds: number) => void;
   /** When false, skip VOD thumbnail URLs (e.g. live / realtime session offsets). */
   thumbnailsEnabled?: boolean;
@@ -65,6 +66,7 @@ export function EditorClipsList({
   onPause,
   onOrderChange,
   onRemove,
+  onEditMetadata,
   onSeek,
   thumbnailsEnabled = true,
   emptyHint = "Use Mark In / Mark Out to add ranges.",
@@ -128,6 +130,7 @@ export function EditorClipsList({
           return (
             <li
               key={c.id}
+              data-editor-subclip-focus
               role="button"
               tabIndex={0}
               onClick={handleRowClick}
@@ -234,18 +237,33 @@ export function EditorClipsList({
                   Editing
                 </span>
               )}
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onRemove(c.id);
-                  if (selectedClipId === c.id) onSelectClip(null);
-                }}
-                className="ml-auto shrink-0 rounded p-1 text-fg-quaternary hover:bg-tertiary hover:text-fg-secondary"
-                aria-label="Remove sub-clip"
-              >
-                <Trash01 className="size-3.5" />
-              </button>
+              <div className="ml-auto flex shrink-0 items-center gap-0.5">
+                {onEditMetadata ? (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onEditMetadata(c);
+                    }}
+                    className="rounded p-1 text-fg-quaternary hover:bg-tertiary hover:text-fg-secondary"
+                    aria-label="Edit clip metadata"
+                  >
+                    <Edit01 className="size-3.5" />
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onRemove(c.id);
+                    if (selectedClipId === c.id) onSelectClip(null);
+                  }}
+                  className="rounded p-1 text-fg-quaternary hover:bg-tertiary hover:text-fg-secondary"
+                  aria-label="Remove sub-clip"
+                >
+                  <Trash01 className="size-3.5" />
+                </button>
+              </div>
             </li>
           );
         })}

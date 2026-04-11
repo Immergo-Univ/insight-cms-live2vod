@@ -17,6 +17,7 @@ backend/utils/logo-detector/logo-detector-debug-*.jpg
 # Channel logos uploaded from UI (images + per-channel settings JSON)
 backend/data/channel-logos/
 backend/data/channel-settings/
+backend/data/editor-posters/
 
 # Scheduler persistence (rebuilt at runtime)
 backend/data/*.json

@@ -50,6 +50,27 @@ export interface EditorPosterEntry {
   capturedAt: string;
 }
 
+/** Frame bookmark for a sub-clip (no image file; job may sample at timeSeconds). */
+export interface EditorClipPosterCapture {
+  kind: "capture";
+  id: string;
+  timeSeconds: number;
+  orientation: string;
+  capturedAt: string;
+}
+
+/** Uploaded still for a sub-clip (stored under S3/disk `posters/` like channel logos). */
+export interface EditorClipPosterUpload {
+  kind: "upload";
+  id: string;
+  originalName: string;
+  storedRelative: string;
+  previewUrl: string;
+  mime: string;
+}
+
+export type EditorClipPoster = EditorClipPosterCapture | EditorClipPosterUpload;
+
 /**
  * Sub-clip range (Mark In → Mark Out). Times relative to clip (0 to duration).
  * Order defines the final concatenation order in the output.
@@ -59,6 +80,9 @@ export interface EditorSubClip {
   order: number;
   startTime: number;
   endTime: number;
+  title?: string;
+  description?: string;
+  posters?: EditorClipPoster[];
 }
 
 /**
@@ -100,6 +124,16 @@ export interface EditorSubtitlesConfig {
   languageMode?: string;
 }
 
+/** Sub-clip row in exported editor JSON (includes optional per-clip metadata). */
+export interface EditorStateJsonClip {
+  order: number;
+  startTime: number;
+  endTime: number;
+  title?: string;
+  description?: string;
+  posters?: EditorClipPoster[];
+}
+
 /**
  * Full editor JSON state (for export / process).
  */
@@ -109,7 +143,7 @@ export interface EditorStateJson {
   startTime: number;
   endTime: number;
   posters: EditorPosterEntry[];
-  clips: Array<{ order: number; startTime: number; endTime: number }>;
+  clips: EditorStateJsonClip[];
   ads: Array<{
     index: number;
     startTime: number;

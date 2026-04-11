@@ -2,8 +2,7 @@ import type { EditorSubClip } from "@/types/editor";
 
 interface EditorMarkInOutProps {
   currentTimeSeconds: number;
-  markInTime: number | null;
-  /** When set, Mark In/Out edit this subclip's start/end. */
+  /** When set, Mark In moves start; Mark Out extends end (same subclip). */
   selectedClip?: EditorSubClip | null;
   onMarkIn: (timeSeconds: number) => void;
   onMarkOut: (timeSeconds: number) => void;
@@ -14,7 +13,6 @@ interface EditorMarkInOutProps {
 
 export function EditorMarkInOut({
   currentTimeSeconds,
-  markInTime,
   selectedClip = null,
   onMarkIn,
   onMarkOut,
@@ -26,20 +24,23 @@ export function EditorMarkInOut({
     : true;
   const canMarkOut = selectedClip
     ? currentTimeSeconds > selectedClip.startTime
-    : markInTime !== null && currentTimeSeconds > markInTime;
-  const isMarkInRangeSelectionActive = !selectedClip && markInTime !== null;
+    : false;
+  const isSubclipEditing = selectedClip !== null;
 
   if (variant === "timeline") {
     const baseBtn =
       "rounded-md border px-2 py-1 text-xs font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-brand-secondary/30 disabled:cursor-not-allowed disabled:opacity-50";
     return (
-      <div className="flex shrink-0 flex-wrap items-center gap-1.5">
+      <div
+        className="flex shrink-0 flex-wrap items-center gap-1.5"
+        data-editor-mark-in-out
+      >
         <button
           type="button"
           onClick={() => onMarkIn(currentTimeSeconds)}
           disabled={isDisabled || !canMarkIn}
           className={`${baseBtn} border-secondary bg-primary text-primary hover:bg-secondary ${
-            isMarkInRangeSelectionActive ? "border-blue-500 ring-2 ring-blue-500/35" : ""
+            isSubclipEditing ? "border-blue-500 ring-2 ring-blue-500/35" : ""
           }`}
           title="Mark In"
         >
@@ -59,7 +60,7 @@ export function EditorMarkInOut({
   }
 
   return (
-    <div className="flex flex-wrap items-center gap-2">
+    <div className="flex flex-wrap items-center gap-2" data-editor-mark-in-out>
       <button
         type="button"
         onClick={() => onMarkIn(currentTimeSeconds)}

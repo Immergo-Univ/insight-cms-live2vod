@@ -140,6 +140,11 @@ export const config = {
     logosDir: path.join(backendRoot, "data", "channel-logos"),
   },
 
+  /** Live2VOD editor clip poster images (disk + same S3 bucket/prefix as logos under `posters/`). */
+  editorPosters: {
+    dataDir: path.join(backendRoot, "data", "editor-posters"),
+  },
+
   s3Logos: s3LogosResolved,
 
   /**

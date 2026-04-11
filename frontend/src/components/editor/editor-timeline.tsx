@@ -23,6 +23,9 @@ const TIMELINE_SCRUB_HEIGHT_PX = 24;
 const TIMELINE_FILMSTRIP_HEIGHT_PX = 120;
 const TIMELINE_RAIL_HEIGHT_PX = 10;
 
+/** Pixels before a clip body mousedown counts as a horizontal move (vs click). */
+const CLIP_BODY_DRAG_THRESHOLD_PX = 4;
+
 export function formatTime(seconds: number): string {
   const h = Math.floor(seconds / 3600);
   const m = Math.floor((seconds % 3600) / 60);
@@ -158,7 +161,6 @@ interface EditorTimelineProps {
   /** IANA timezone (e.g. from ?tz= query). */
   clientTimeZone?: string;
   /** Mark In / Out (shown in the row under the player, next to time / ads). */
-  markInTime?: number | null;
   onMarkIn?: (timeSeconds: number) => void;
   onMarkOut?: (timeSeconds: number) => void;
   markInOutDisabled?: boolean;
@@ -186,7 +188,6 @@ export function EditorTimeline({
   onSelectAd,
   clipStartUnixSec = 0,
   clientTimeZone,
-  markInTime = null,
   onMarkIn,
   onMarkOut,
   markInOutDisabled,
@@ -215,6 +216,18 @@ export function EditorTimeline({
     startTime: number;
     endTime: number;
   } | null>(null);
+
+  type ClipBodyDragSession = {
+    clipId: string;
+    startTime: number;
+    endTime: number;
+    lastClientX: number;
+    activated: boolean;
+  };
+  const [clipBodyDrag, setClipBodyDrag] = useState<ClipBodyDragSession | null>(null);
+  const clipBodyDragRef = useRef<ClipBodyDragSession | null>(null);
+  /** True after a clip-body drag moved the range (suppresses click toggle). */
+  const clipBodyDragMovedRef = useRef(false);
 
   const zoomMs = ZOOM_LEVELS_MS[zoomIndex] ?? ZOOM_LEVELS_MS[0];
   const zoomSeconds = zoomMs / 1000;
@@ -434,6 +447,67 @@ export function EditorTimeline({
     };
   }, [adDragging, durationSeconds, onResizeAd, onSeek, pixelToTime]);
 
+  useEffect(() => {
+    if (!clipBodyDrag || !onResizeClip) return;
+    const minDuration = 1;
+    clipBodyDragRef.current = clipBodyDrag;
+
+    const onMouseMove = (e: MouseEvent) => {
+      const m = clipBodyDragRef.current;
+      if (!m) return;
+      const dx = e.clientX - m.lastClientX;
+      if (!m.activated) {
+        if (Math.abs(dx) < CLIP_BODY_DRAG_THRESHOLD_PX) return;
+        onSelectClip?.(m.clipId);
+        onSelectAd?.(null);
+      }
+      const dt = dx / pixelsPerSecond;
+      const len = m.endTime - m.startTime;
+      let newStart = m.startTime + dt;
+      let newEnd = m.endTime + dt;
+      if (newStart < 0) {
+        newStart = 0;
+        newEnd = len;
+      }
+      if (newEnd > durationSeconds) {
+        newEnd = durationSeconds;
+        newStart = Math.max(0, durationSeconds - len);
+      }
+      if (newEnd < newStart + minDuration) return;
+
+      onResizeClip(m.clipId, newStart, newEnd);
+      onSeek(newStart);
+      clipBodyDragMovedRef.current = true;
+      clipBodyDragRef.current = {
+        clipId: m.clipId,
+        startTime: newStart,
+        endTime: newEnd,
+        lastClientX: e.clientX,
+        activated: true,
+      };
+    };
+
+    const onMouseUp = () => {
+      setClipBodyDrag(null);
+      clipBodyDragRef.current = null;
+    };
+
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseup", onMouseUp);
+    return () => {
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", onMouseUp);
+    };
+  }, [
+    clipBodyDrag,
+    durationSeconds,
+    pixelsPerSecond,
+    onResizeClip,
+    onSeek,
+    onSelectClip,
+    onSelectAd,
+  ]);
+
   const seekFromClientX = useCallback(
     (clientX: number) => {
       if (!trackRef.current || durationSeconds <= 0) return;
@@ -459,6 +533,20 @@ export function EditorTimeline({
       seekFromClientX(e.clientX);
     },
     [seekFromClientX],
+  );
+
+  const handleClipOverlayClick = useCallback(
+    (c: EditorSubClip, isSelected: boolean) => {
+      if (clipBodyDragMovedRef.current) {
+        clipBodyDragMovedRef.current = false;
+        return;
+      }
+      if (!onSelectClip) return;
+      if (!isSelected) onSelectAd?.(null);
+      onSelectClip(isSelected ? null : c.id);
+      if (!isSelected) onSeek(c.startTime);
+    },
+    [onSelectClip, onSelectAd, onSeek],
   );
 
   if (durationSeconds <= 0) {
@@ -498,7 +586,6 @@ export function EditorTimeline({
             <EditorMarkInOut
               variant="timeline"
               currentTimeSeconds={currentTimeSeconds}
-              markInTime={markInTime}
               selectedClip={selectedClipId ? clips.find((c) => c.id === selectedClipId) ?? null : null}
               onMarkIn={onMarkIn}
               onMarkOut={onMarkOut}
@@ -609,7 +696,6 @@ export function EditorTimeline({
                 onSelectAd(null);
                 return;
               }
-              onSelectClip?.(null);
               onSelectAd(ad.id);
               onSeek(ad.startTime);
             };
@@ -702,35 +788,46 @@ export function EditorTimeline({
             const isHover = hoverClipId === c.id;
             const isSelected = selectedClipId === c.id;
             const canResize = onResizeClip && width > 8;
-            const handleOverlayClick = () => {
-              if (onSelectClip) {
-                if (!isSelected) onSelectAd?.(null);
-                onSelectClip(isSelected ? null : c.id);
-                if (!isSelected) onSeek(c.startTime);
-              }
-            };
             return (
               <div
                 key={c.id}
                 data-clip-overlay
+                data-editor-subclip-focus
                 role={onSelectClip ? "button" : undefined}
                 tabIndex={onSelectClip ? 0 : undefined}
-                onClick={onSelectClip ? handleOverlayClick : undefined}
+                onClick={onSelectClip ? () => handleClipOverlayClick(c, isSelected) : undefined}
                 onKeyDown={
                   onSelectClip
                     ? (e) => {
                         if (e.key === "Enter" || e.key === " ") {
                           e.preventDefault();
-                          handleOverlayClick();
+                          handleClipOverlayClick(c, isSelected);
                         }
                       }
                     : undefined
                 }
-                className={`absolute top-0 bottom-0 z-10 flex items-start justify-center transition-colors ${
+                onMouseDown={(e) => {
+                  if (!onResizeClip) return;
+                  const el = e.target as HTMLElement;
+                  if (el.closest("[data-resize-handle]") || el.closest("button")) return;
+                  e.preventDefault();
+                  e.stopPropagation();
+                  clipBodyDragMovedRef.current = false;
+                  setClipBodyDrag({
+                    clipId: c.id,
+                    startTime: c.startTime,
+                    endTime: c.endTime,
+                    lastClientX: e.clientX,
+                    activated: false,
+                  });
+                }}
+                className={cx(
+                  "absolute top-0 bottom-0 z-10 flex select-none touch-none items-start justify-center transition-colors",
+                  onResizeClip && "cursor-move",
                   isSelected
                     ? "ring-2 ring-brand-solid bg-blue-500/50"
-                    : "bg-blue-500/30 hover:bg-blue-500/50"
-                }`}
+                    : "bg-blue-500/30 hover:bg-blue-500/50",
+                )}
                 style={{
                   left,
                   width: Math.max(width, 4),

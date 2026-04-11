@@ -1,5 +1,5 @@
 import { useCallback, useRef } from "react";
-import { Camera01, Image01 } from "@untitledui/icons";
+import { Camera01 } from "@untitledui/icons";
 import type { EditorPosterEntry } from "@/types/editor";
 import { formatTime } from "./editor-timeline";
 
@@ -88,42 +88,32 @@ export function EditorCapturePreview({
         <Camera01 className="size-4" />
         Capture
       </button>
-      <h3 className="text-xs font-semibold uppercase tracking-wide text-tertiary">
-        Captured
-      </h3>
-      <div className="min-h-[60px] w-full rounded border border-secondary bg-primary">
-        {posters.length === 0 ? (
-          <div className="flex h-[60px] flex-col items-center justify-center gap-0.5 p-2 text-center text-tertiary">
-            <Image01 className="size-5 text-fg-quaternary" />
-            <span className="text-[10px]">Captured frames list</span>
-          </div>
-        ) : (
-          <ul className="flex max-h-[120px] flex-col gap-1 overflow-y-auto p-2">
-            {posters.map((p) => (
-              <li
-                key={p.id}
-                className="flex items-center justify-between rounded border border-secondary bg-secondary px-2 py-1 text-xs"
+      {posters.length > 0 ? (
+        <ul className="flex max-h-[120px] w-full flex-col gap-1 overflow-y-auto rounded border border-secondary bg-primary p-2">
+          {posters.map((p) => (
+            <li
+              key={p.id}
+              className="flex items-center justify-between rounded border border-secondary bg-secondary px-2 py-1 text-xs"
+            >
+              <button
+                type="button"
+                onClick={() => onSeek?.(p.timeSeconds)}
+                className="font-medium text-brand-secondary hover:underline"
               >
-                <button
-                  type="button"
-                  onClick={() => onSeek?.(p.timeSeconds)}
-                  className="font-medium text-brand-secondary hover:underline"
-                >
-                  {formatTime(p.timeSeconds)}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => onRemovePoster(p.id)}
-                  className="rounded p-0.5 text-fg-quaternary hover:bg-tertiary hover:text-fg-secondary"
-                  aria-label="Remove"
-                >
-                  ×
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
+                {formatTime(p.timeSeconds)}
+              </button>
+              <button
+                type="button"
+                onClick={() => onRemovePoster(p.id)}
+                className="rounded p-0.5 text-fg-quaternary hover:bg-tertiary hover:text-fg-secondary"
+                aria-label="Remove"
+              >
+                ×
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : null}
     </div>
   );
 }
