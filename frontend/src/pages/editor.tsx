@@ -15,7 +15,10 @@ import {
 import { ProcessingClipsNavButton } from "@/components/live2vod/processing-clips-nav-button";
 import { httpClient } from "@/services/http-client";
 import { startVodJob } from "@/services/vod.service";
-import { FRAME_DURATION_SEC } from "@/components/editor/editor-constants";
+import {
+  FRAME_DURATION_SEC,
+  ZOOM_LEVELS_MS,
+} from "@/components/editor/editor-constants";
 import type { EditorPlayerRef } from "@/components/editor";
 import { detectAds, getPrecalculatedAds } from "@/services/ads.service";
 import type {
@@ -58,7 +61,6 @@ export function EditorPage() {
   const [zoomIndex, setZoomIndex] = useState(1);
   const [posters, setPosters] = useState<EditorPosterEntry[]>([]);
   const [clips, setClips] = useState<EditorSubClip[]>([]);
-  const [markInTime, setMarkInTime] = useState<number | null>(null);
   /** When set, Play plays only up to this time then pauses (for "play subclip"). */
   const [playUntilTime, setPlayUntilTime] = useState<number | null>(null);
   /** Subclip in "edit" mode: Mark In/Out update this clip; Play plays only this subclip. */
@@ -311,63 +313,92 @@ export function EditorPage() {
 
   const handleMarkIn = useCallback(
     (timeSeconds: number) => {
+      if (!clipState) return;
+      setSelectedAdId(null);
       if (selectedClipId) {
         setClips((prev) =>
           prev.map((c) => {
             if (c.id !== selectedClipId) return c;
             if (timeSeconds >= c.endTime) return c;
             return { ...c, startTime: timeSeconds };
-          })
+          }),
         );
         return;
       }
-      setMarkInTime(timeSeconds);
+      const wallDuration = clipState.endTime - clipState.startTime;
+      const eff = isRealtime
+        ? Math.max(
+            60,
+            clips.length ? Math.max(...clips.map((c) => c.endTime)) : 0,
+            Math.floor(Date.now() / 1000) - clipState.startTime,
+          )
+        : duration > 0 && Number.isFinite(duration)
+          ? duration
+          : wallDuration;
+      const windowSec = (ZOOM_LEVELS_MS[zoomIndex] ?? ZOOM_LEVELS_MS[0]) / 1000;
+      let end = Math.min(timeSeconds + windowSec, eff);
+      if (end <= timeSeconds) {
+        end = Math.min(timeSeconds + FRAME_DURATION_SEC, eff);
+      }
+      if (end <= timeSeconds) return;
+      const id = crypto.randomUUID();
+      setClips((prev) => {
+        const nextOrder =
+          prev.length === 0 ? 1 : Math.max(...prev.map((c) => c.order)) + 1;
+        return [
+          ...prev,
+          {
+            id,
+            order: nextOrder,
+            startTime: timeSeconds,
+            endTime: end,
+          },
+        ];
+      });
+      setSelectedClipId(id);
     },
-    [selectedClipId]
+    [clipState, selectedClipId, isRealtime, clips, duration, zoomIndex],
   );
 
   const handleMarkOut = useCallback(
     (timeSeconds: number) => {
-      if (selectedClipId) {
-        setClips((prev) =>
-          prev.map((c) => {
-            if (c.id !== selectedClipId) return c;
-            if (timeSeconds <= c.startTime) return c;
-            return { ...c, endTime: timeSeconds };
-          })
-        );
-        return;
-      }
-      if (markInTime === null || timeSeconds <= markInTime) return;
-      const nextOrder =
-        clips.length === 0 ? 1 : Math.max(...clips.map((c) => c.order)) + 1;
-      setClips((prev) => [
-        ...prev,
-        {
-          id: crypto.randomUUID(),
-          order: nextOrder,
-          startTime: markInTime,
-          endTime: timeSeconds,
-        },
-      ]);
-      setMarkInTime(null);
+      if (!selectedClipId) return;
+      setClips((prev) =>
+        prev.map((c) => {
+          if (c.id !== selectedClipId) return c;
+          if (timeSeconds <= c.startTime) return c;
+          return { ...c, endTime: timeSeconds };
+        }),
+      );
     },
-    [selectedClipId, markInTime, clips.length]
+    [selectedClipId],
   );
 
   const handleRealtimeRec = useCallback(() => {
     if (!clipState || clipState.selectionMode !== "realtime") return;
     const offset = Math.floor(Date.now() / 1000) - clipState.startTime;
-    if (markInTime === null) {
+    if (!selectedClipId) {
       handleMarkIn(offset);
     } else {
       handleMarkOut(offset);
     }
-  }, [clipState, markInTime, handleMarkIn, handleMarkOut]);
+  }, [clipState, selectedClipId, handleMarkIn, handleMarkOut]);
 
   const handleRemoveClip = useCallback((id: string) => {
     setClips((prev) => prev.filter((c) => c.id !== id));
   }, []);
+
+  const handleUpdateClipMetadata = useCallback(
+    (
+      clipId: string,
+      patch: Pick<EditorSubClip, "title" | "description" | "posters">,
+    ) => {
+      setClips((prev) =>
+        prev.map((c) => (c.id === clipId ? { ...c, ...patch } : c)),
+      );
+    },
+    [],
+  );
 
   const handleResizeClip = useCallback(
     (id: string, newStartTime?: number, newEndTime?: number) => {
@@ -392,16 +423,40 @@ export function EditorPage() {
 
   const handleCapturePoster = useCallback(() => {
     const t = playerRef.current?.getCurrentTime() ?? currentTime;
+    const id = crypto.randomUUID();
+    const capturedAt = new Date().toISOString();
+    if (selectedClipId) {
+      setClips((prev) =>
+        prev.map((c) =>
+          c.id === selectedClipId
+            ? {
+                ...c,
+                posters: [
+                  ...(c.posters ?? []),
+                  {
+                    kind: "capture" as const,
+                    id,
+                    timeSeconds: t,
+                    orientation: "landscape",
+                    capturedAt,
+                  },
+                ],
+              }
+            : c,
+        ),
+      );
+      return;
+    }
     setPosters((prev) => [
       ...prev,
       {
-        id: crypto.randomUUID(),
+        id,
         timeSeconds: t,
         orientation: "landscape",
-        capturedAt: new Date().toISOString(),
+        capturedAt,
       },
     ]);
-  }, [currentTime]);
+  }, [currentTime, selectedClipId]);
 
   const handleRemovePoster = useCallback((id: string) => {
     setPosters((prev) => prev.filter((p) => p.id !== id));
@@ -463,7 +518,14 @@ export function EditorPage() {
       startTime,
       endTime,
       posters,
-      clips: clips.map((c) => ({ order: c.order, startTime: c.startTime, endTime: c.endTime })),
+      clips: clips.map((c) => ({
+        order: c.order,
+        startTime: c.startTime,
+        endTime: c.endTime,
+        ...(c.title?.trim() ? { title: c.title.trim() } : {}),
+        ...(c.description?.trim() ? { description: c.description.trim() } : {}),
+        ...(c.posters?.length ? { posters: c.posters } : {}),
+      })),
       ads: ads.map((a) => ({
         index: a.index,
         startTime: a.startTime,
@@ -559,7 +621,6 @@ export function EditorPage() {
       ];
       return next.map((a, i) => ({ ...a, index: i + 1 }));
     });
-    setSelectedClipId(null);
     setSelectedAdId(id);
   };
 
@@ -632,7 +693,7 @@ export function EditorPage() {
                 onTransportPlay={handlePlay}
                 onTransportPause={handlePause}
                 onTransportStop={handleStop}
-                markRangeAwaitingOut={!selectedClipId && markInTime !== null}
+                markRangeAwaitingOut={false}
                 verticalCropActive={verticalCropMode}
                 verticalCropCenterX={cropWindow?.centerX ?? 0.5}
                 onVerticalCropCenterXChange={handleVerticalCropCenterX}
@@ -658,7 +719,7 @@ export function EditorPage() {
             {isRealtime ? (
               <EditorRealtimeRecBar
                 clips={clips}
-                markInTime={markInTime}
+                selectedClipId={selectedClipId}
                 onRecPress={handleRealtimeRec}
                 timeZone={clientTimeZone}
                 clockTick={realtimeTick}
@@ -674,7 +735,6 @@ export function EditorPage() {
                 onSeek={handleSeek}
                 onTrackClick={(time) => {
                   handleSeek(time);
-                  setSelectedClipId(null);
                   setSelectedAdId(null);
                 }}
                 clips={clips}
@@ -690,7 +750,6 @@ export function EditorPage() {
                 onSelectAd={handleSelectAd}
                 clipStartUnixSec={clipState.startTime}
                 clientTimeZone={clientTimeZone}
-                markInTime={markInTime}
                 onMarkIn={handleMarkIn}
                 onMarkOut={handleMarkOut}
               />
@@ -720,6 +779,7 @@ export function EditorPage() {
             onPause={handlePause}
             onOrderChange={handleOrderChange}
             onRemoveClip={handleRemoveClip}
+            onUpdateClipMetadata={handleUpdateClipMetadata}
             onSeek={handleSeek}
             onPlayFullSequence={handlePlayFullSequence}
             thumbnailsEnabled={!isRealtime}

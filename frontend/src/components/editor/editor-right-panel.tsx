@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ChevronDown, Play } from "@untitledui/icons";
 import {
   Button as AriaButton,
@@ -9,6 +9,7 @@ import {
 } from "react-aria-components";
 import type { EditorSelectionMode, EditorSubClip, EditorVodMetadata } from "@/types/editor";
 import { cx } from "@/utils/cx";
+import { EditorClipMetadataModal } from "./editor-clip-metadata-modal";
 import { EditorClipsList } from "./editor-clips-list";
 import { EditorMetadataModal } from "./editor-metadata-modal";
 
@@ -49,6 +50,10 @@ interface EditorRightPanelProps {
   onPause: () => void;
   onOrderChange: (id: string, newOrder: number) => void;
   onRemoveClip: (id: string) => void;
+  onUpdateClipMetadata: (
+    clipId: string,
+    patch: Pick<EditorSubClip, "title" | "description" | "posters">,
+  ) => void;
   onSeek: (timeSeconds: number) => void;
   onPlayFullSequence: () => void;
   thumbnailsEnabled: boolean;
@@ -89,6 +94,7 @@ export function EditorRightPanel({
   onPause,
   onOrderChange,
   onRemoveClip,
+  onUpdateClipMetadata,
   onSeek,
   onPlayFullSequence,
   thumbnailsEnabled,
@@ -102,6 +108,18 @@ export function EditorRightPanel({
   finishError = null,
 }: EditorRightPanelProps) {
   const [metadataModalOpen, setMetadataModalOpen] = useState(false);
+  const [clipMetadataId, setClipMetadataId] = useState<string | null>(null);
+
+  const clipForMetadata = useMemo(
+    () => (clipMetadataId ? clips.find((c) => c.id === clipMetadataId) ?? null : null),
+    [clips, clipMetadataId],
+  );
+
+  useEffect(() => {
+    if (clipMetadataId && !clips.some((c) => c.id === clipMetadataId)) {
+      setClipMetadataId(null);
+    }
+  }, [clips, clipMetadataId]);
 
   const timeRangeLabel = useMemo(() => {
     const tz = timeZone;
@@ -162,6 +180,7 @@ export function EditorRightPanel({
             onPause={onPause}
             onOrderChange={onOrderChange}
             onRemove={onRemoveClip}
+            onEditMetadata={(c) => setClipMetadataId(c.id)}
             onSeek={onSeek}
             thumbnailsEnabled={thumbnailsEnabled}
             emptyHint={clipsEmptyHint}
@@ -241,6 +260,18 @@ export function EditorRightPanel({
         onOpenChange={setMetadataModalOpen}
         metadata={metadata}
         onSave={onMetadataChange}
+      />
+
+      <EditorClipMetadataModal
+        isOpen={clipForMetadata !== null}
+        onOpenChange={(open) => {
+          if (!open) setClipMetadataId(null);
+        }}
+        clip={clipForMetadata}
+        clipUrl={clipUrl}
+        channelId={channelId}
+        onSave={onUpdateClipMetadata}
+        onSeek={onSeek}
       />
     </div>
   );

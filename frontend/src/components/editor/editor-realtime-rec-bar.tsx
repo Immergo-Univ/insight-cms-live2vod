@@ -3,7 +3,8 @@ import type { EditorSubClip } from "@/types/editor";
 
 interface EditorRealtimeRecBarProps {
   clips: EditorSubClip[];
-  markInTime: number | null;
+  /** When set, REC performs Mark Out on that subclip; otherwise Mark In (new clip). */
+  selectedClipId: string | null;
   onRecPress: () => void;
   /** IANA zone from ?tz= (via useTimezone); drives wall-clock label. */
   timeZone: string;
@@ -14,13 +15,13 @@ interface EditorRealtimeRecBarProps {
 
 export function EditorRealtimeRecBar({
   clips,
-  markInTime,
+  selectedClipId,
   onRecPress,
   timeZone,
   clockTick,
   isDisabled,
 }: EditorRealtimeRecBarProps) {
-  const awaitingOut = markInTime !== null;
+  const awaitingOut = selectedClipId !== null;
   const liveNowLabel = useMemo(
     () =>
       new Intl.DateTimeFormat(undefined, {
@@ -32,7 +33,10 @@ export function EditorRealtimeRecBar({
   );
 
   return (
-    <div className="rounded-lg border border-secondary bg-secondary px-3 py-3">
+    <div
+      className="rounded-lg border border-secondary bg-secondary px-3 py-3"
+      data-editor-mark-in-out
+    >
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex min-w-0 flex-1 flex-col gap-1">
           <span className="text-xs font-medium text-secondary tabular-nums">
