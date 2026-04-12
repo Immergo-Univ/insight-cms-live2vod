@@ -5,7 +5,6 @@ import type {
   EditorPosterEntry,
   EditorSubClip,
   EditorSubtitleSettings,
-  EditorVodMetadata,
 } from "@/types/editor";
 
 /**
@@ -16,7 +15,6 @@ export interface EditorSessionDraft {
   clips: EditorSubClip[];
   posters: EditorPosterEntry[];
   ads: EditorAdMarker[];
-  vodMetadata: EditorVodMetadata;
   verticalCropMode: boolean;
   cropWindow: EditorCropWindow | null;
   subtitleMode: boolean;
@@ -88,7 +86,6 @@ export function readEditorSessionDraftForMount(key: string): EditorSessionMountS
     clips: d.clips.map((c) => ({ ...c, posters: c.posters ? [...c.posters] : undefined })),
     posters: d.posters.map((p) => ({ ...p })),
     ads: d.ads.map((a) => ({ ...a })),
-    vodMetadata: { ...d.vodMetadata },
     verticalCropMode: d.verticalCropMode,
     cropWindow: d.cropWindow ? { ...d.cropWindow } : null,
     subtitleMode: d.subtitleMode,

@@ -31,7 +31,6 @@ import type {
   EditorAdMarker,
   EditorClipState,
   EditorCropWindow,
-  EditorVodMetadata,
   EditorPosterEntry,
   EditorStateJson,
   EditorSubClip,
@@ -61,6 +60,125 @@ function mergeFetchedAdsWithManual(prev: EditorAdMarker[], fetched: EditorAdMark
   }
   const combined = [...fetched, ...manual].sort((a, b) => a.startTime - b.startTime);
   return combined.map((m, i) => ({ ...m, index: i + 1 }));
+}
+
+function buildClipWindowUrl(state: EditorClipState, wallStartUnix: number, wallEndUnix: number): string {
+  const base = state.sourceM3u8?.trim() || state.clipUrl;
+  try {
+    const url = new URL(base, typeof window !== "undefined" ? window.location.href : "http://localhost/");
+    url.searchParams.set("startTime", String(wallStartUnix));
+    url.searchParams.set("endTime", String(wallEndUnix));
+    return url.toString();
+  } catch {
+    return state.clipUrl;
+  }
+}
+
+/** Wall-clock end of the parent editor window (same as root startTime/endTime on the stream). */
+function parentWallEndUnix(clipState: EditorClipState, subClips: EditorSubClip[], nowUnix: number): number {
+  if (clipState.selectionMode === "realtime") {
+    return (
+      clipState.startTime +
+      Math.max(
+        60,
+        subClips.length ? Math.max(...subClips.map((c) => c.endTime)) : 0,
+        Math.floor(nowUnix) - clipState.startTime,
+      )
+    );
+  }
+  return clipState.endTime;
+}
+
+/** Ads intersecting the output clip, times stay relative to parent window (same axis as clips[].start/end). */
+function buildAdsForClipInParentWindow(
+  ads: EditorAdMarker[],
+  clipRelStart: number,
+  clipRelEnd: number,
+  parentWallStart: number,
+  absEpochToIso: (absSec: number) => string,
+): EditorStateJson["ads"] {
+  const out: EditorStateJson["ads"] = [];
+  for (const a of ads) {
+    const s = Math.max(clipRelStart, a.startTime);
+    const e = Math.min(clipRelEnd, a.endTime);
+    if (e <= s + 0.01) continue;
+    out.push({
+      index: out.length + 1,
+      startTime: s,
+      endTime: e,
+      startProgramDateTime: absEpochToIso(parentWallStart + s),
+      endProgramDateTime: absEpochToIso(parentWallStart + e),
+    });
+  }
+  return out;
+}
+
+function buildPerClipJobSpecs(
+  clipState: EditorClipState,
+  clips: EditorSubClip[],
+  sessionPosters: EditorPosterEntry[],
+  ads: EditorAdMarker[],
+  includeAds: boolean,
+  verticalCropMode: boolean,
+  cropWindow: EditorCropWindow | null,
+  subtitleMode: boolean,
+  subtitleSettings: EditorSubtitleSettings,
+  nowUnix: number,
+): EditorStateJson[] {
+  const absEpochToIso = (absSec: number) => {
+    const t = Number(absSec);
+    if (!Number.isFinite(t)) return "";
+    const d = new Date(t * 1000);
+    return Number.isFinite(d.getTime()) ? d.toISOString() : "";
+  };
+
+  const parentWallStart = clipState.startTime;
+  const parentWallEnd = parentWallEndUnix(clipState, clips, nowUnix);
+  const parentClipUrl = buildClipWindowUrl(clipState, parentWallStart, parentWallEnd);
+
+  return clips.map((c) => {
+    const clipMetadata = {
+      title: c.title?.trim() ?? "",
+      description: c.description?.trim() ?? "",
+      tags: "",
+    };
+
+    const postersForJob = sessionPosters.filter(
+      (p) => p.timeSeconds >= c.startTime && p.timeSeconds <= c.endTime,
+    );
+
+    const sub: EditorStateJson = {
+      clipUrl: parentClipUrl,
+      sourceM3u8: clipState.sourceM3u8,
+      startTime: parentWallStart,
+      endTime: parentWallEnd,
+      posters: postersForJob,
+      clips: [
+        {
+          order: c.order,
+          startTime: c.startTime,
+          endTime: c.endTime,
+          metadata: clipMetadata,
+          ...(c.posters?.length ? { posters: c.posters } : {}),
+        },
+      ],
+      ads: includeAds
+        ? buildAdsForClipInParentWindow(ads, c.startTime, c.endTime, parentWallStart, absEpochToIso)
+        : [],
+      ...(verticalCropMode && cropWindow ? { cropWindow } : {}),
+      ...(subtitleMode
+        ? {
+            subtitles: {
+              enabled: true as const,
+              whisperSourceLanguage: subtitleSettings.whisperSourceLanguage,
+              whisperOutputLanguage: subtitleSettings.whisperOutputLanguage,
+              style: { ...subtitleSettings.style },
+            },
+          }
+        : {}),
+    };
+    return sub;
+  });
 }
 
 export function EditorPage() {
@@ -112,8 +230,6 @@ export function EditorPage() {
   );
   /** Subclip currently playing (from list row Play). Cleared on pause or when play reaches end. */
   const [playingClipId, setPlayingClipId] = useState<string | null>(null);
-  /** When set, we're playing the full sequence (order 1..N); value = current segment index. */
-  const [playingSequenceIndex, setPlayingSequenceIndex] = useState<number | null>(null);
   const [finishLoading, setFinishLoading] = useState(false);
   const [finishError, setFinishError] = useState<string | null>(null);
   const [verticalCropMode, setVerticalCropMode] = useState(() =>
@@ -129,11 +245,6 @@ export function EditorPage() {
     mountSnapshot?.fromCache === true ? mountSnapshot.subtitleSettings : DEFAULT_SUBTITLE_SETTINGS,
   );
   const [jsonPanelOpen, setJsonPanelOpen] = useState(false);
-  const [vodMetadata, setVodMetadata] = useState<EditorVodMetadata>(() =>
-    mountSnapshot?.fromCache === true
-      ? mountSnapshot.vodMetadata
-      : { title: "", description: "", tags: "" },
-  );
 
   const [ads, setAds] = useState<EditorAdMarker[]>(() =>
     mountSnapshot?.fromCache === true ? mountSnapshot.ads : [],
@@ -152,7 +263,6 @@ export function EditorPage() {
       clips,
       posters,
       ads,
-      vodMetadata,
       verticalCropMode,
       cropWindow,
       subtitleMode,
@@ -168,7 +278,6 @@ export function EditorPage() {
     clips,
     posters,
     ads,
-    vodMetadata,
     verticalCropMode,
     cropWindow,
     subtitleMode,
@@ -298,11 +407,6 @@ export function EditorPage() {
     [],
   );
 
-  const sortedClips = useMemo(
-    () => [...clips].sort((a, b) => a.order - b.order),
-    [clips]
-  );
-
   // Clear selection if the selected clip was removed (e.g. from timeline)
   useEffect(() => {
     if (selectedClipId && !clips.some((c) => c.id === selectedClipId)) {
@@ -347,31 +451,6 @@ export function EditorPage() {
     }
   }, [isPlaying, playUntilTime, currentTime]);
 
-  // When playing full sequence (1..N), jump to next subclip start at each segment end
-  useEffect(() => {
-    if (!isPlaying || playingSequenceIndex === null || sortedClips.length === 0) return;
-    const seg = sortedClips[playingSequenceIndex];
-    if (!seg) return;
-    const endThreshold = seg.endTime - 0.05;
-    const playerTime = playerRef.current?.getCurrentTime();
-    const effectiveTime =
-      typeof playerTime === "number" && !Number.isNaN(playerTime) && Math.abs(playerTime - currentTime) <= 0.25
-        ? playerTime
-        : currentTime;
-    if (effectiveTime < endThreshold) return;
-    const nextIndex = playingSequenceIndex + 1;
-    if (nextIndex >= sortedClips.length) {
-      playerRef.current?.pause();
-      setPlayingSequenceIndex(null);
-      return;
-    }
-    setPlayingSequenceIndex(nextIndex);
-    const nextStartTime = sortedClips[nextIndex].startTime;
-    playerRef.current?.seek(nextStartTime);
-    setCurrentTime(nextStartTime);
-    playerRef.current?.play();
-  }, [isPlaying, playingSequenceIndex, currentTime, sortedClips]);
-
   const handlePlay = useCallback(() => {
     if (selectedClipId) {
       const clip = clips.find((c) => c.id === selectedClipId);
@@ -388,7 +467,6 @@ export function EditorPage() {
   const handlePause = useCallback(() => {
     playerRef.current?.pause();
     setPlayingClipId(null);
-    setPlayingSequenceIndex(null);
   }, []);
 
   const handlePlaySubclip = useCallback((clip: EditorSubClip) => {
@@ -403,18 +481,7 @@ export function EditorPage() {
     playerRef.current?.seek(0);
     setPlayUntilTime(null);
     setPlayingClipId(null);
-    setPlayingSequenceIndex(null);
   }, []);
-
-  const handlePlayFullSequence = useCallback(() => {
-    if (sortedClips.length === 0) return;
-    setPlayingClipId(null);
-    setPlayUntilTime(null);
-    setPlayingSequenceIndex(0);
-    playerRef.current?.seek(sortedClips[0].startTime);
-    setCurrentTime(sortedClips[0].startTime);
-    playerRef.current?.play();
-  }, [sortedClips]);
 
   const handleMarkIn = useCallback(
     (timeSeconds: number) => {
@@ -490,7 +557,11 @@ export function EditorPage() {
   }, [clipState, selectedClipId, handleMarkIn, handleMarkOut]);
 
   const handleRemoveClip = useCallback((id: string) => {
-    setClips((prev) => prev.filter((c) => c.id !== id));
+    setClips((prev) =>
+      prev
+        .filter((c) => c.id !== id)
+        .map((c, i) => ({ ...c, order: i + 1 })),
+    );
   }, []);
 
   const handleUpdateClipMetadata = useCallback(
@@ -519,12 +590,6 @@ export function EditorPage() {
     },
     []
   );
-
-  const handleOrderChange = useCallback((id: string, newOrder: number) => {
-    setClips((prev) =>
-      prev.map((c) => (c.id === id ? { ...c, order: newOrder } : c))
-    );
-  }, []);
 
   const handleCapturePoster = useCallback(() => {
     const t = playerRef.current?.getCurrentTime() ?? currentTime;
@@ -599,64 +664,26 @@ export function EditorPage() {
     );
   }, []);
 
-  const stateJson: EditorStateJson | null = useMemo(() => {
+  const jobSpecs: EditorStateJson[] | null = useMemo(() => {
     if (!clipState?.clipUrl) return null;
-    const absEpochToIso = (absSec: number) => {
-      const t = Number(absSec);
-      if (!Number.isFinite(t)) return "";
-      const d = new Date(t * 1000);
-      return Number.isFinite(d.getTime()) ? d.toISOString() : "";
-    };
-    const startTime = clipState.startTime;
-    const endTime =
-      clipState.selectionMode === "realtime"
-        ? startTime +
-          Math.max(
-            60,
-            clips.length ? Math.max(...clips.map((c) => c.endTime)) : 0,
-            Math.floor(Date.now() / 1000) - startTime,
-          )
-        : clipState.endTime;
-    return {
-      clipUrl: clipState.clipUrl,
-      sourceM3u8: clipState.sourceM3u8,
-      startTime,
-      endTime,
+    const nowSec = Math.floor(Date.now() / 1000);
+    return buildPerClipJobSpecs(
+      clipState,
+      clips,
       posters,
-      clips: clips.map((c) => ({
-        order: c.order,
-        startTime: c.startTime,
-        endTime: c.endTime,
-        ...(c.title?.trim() ? { title: c.title.trim() } : {}),
-        ...(c.description?.trim() ? { description: c.description.trim() } : {}),
-        ...(c.posters?.length ? { posters: c.posters } : {}),
-      })),
-      ads: ads.map((a) => ({
-        index: a.index,
-        startTime: a.startTime,
-        endTime: a.endTime,
-        startProgramDateTime: absEpochToIso(startTime + a.startTime),
-        endProgramDateTime: absEpochToIso(startTime + a.endTime),
-      })),
-      metadata: { ...vodMetadata },
-      ...(verticalCropMode && cropWindow ? { cropWindow } : {}),
-      ...(subtitleMode
-        ? {
-            subtitles: {
-              enabled: true as const,
-              whisperSourceLanguage: subtitleSettings.whisperSourceLanguage,
-              whisperOutputLanguage: subtitleSettings.whisperOutputLanguage,
-              style: { ...subtitleSettings.style },
-            },
-          }
-        : {}),
-    };
+      ads,
+      true,
+      verticalCropMode,
+      cropWindow,
+      subtitleMode,
+      subtitleSettings,
+      nowSec,
+    );
   }, [
     clipState,
-    posters,
     clips,
+    posters,
     ads,
-    vodMetadata,
     verticalCropMode,
     cropWindow,
     subtitleMode,
@@ -758,9 +785,22 @@ export function EditorPage() {
     setFinishError(null);
     setFinishLoading(true);
     try {
-      if (!stateJson) return;
-      const spec = includeAds ? stateJson : { ...stateJson, ads: [] };
-      await startVodJob(spec);
+      if (!clipState?.clipUrl) return;
+      const specs = buildPerClipJobSpecs(
+        clipState,
+        clips,
+        posters,
+        ads,
+        includeAds,
+        verticalCropMode,
+        cropWindow,
+        subtitleMode,
+        subtitleSettings,
+        Math.floor(Date.now() / 1000),
+      );
+      for (const spec of specs) {
+        await startVodJob(spec);
+      }
       navigate({ pathname: "/processing-clips", search: window.location.search });
     } catch (err) {
       setFinishError(httpClient.getErrorMessage(err));
@@ -865,17 +905,10 @@ export function EditorPage() {
           </section>
         </div>
 
-        {/* Right column: session summary, metadata modal, clips list */}
+        {/* Right column: clips list, ads, create actions */}
         <aside className="flex min-h-0 w-80 shrink-0 flex-col border-l border-secondary py-2 pr-4 pl-2">
           <EditorRightPanel
-            channelTitle={clipState.channelTitle ?? ""}
             selectionMode={selectionMode}
-            windowStartUnixSec={clipState.startTime}
-            windowEndUnixSec={clipState.endTime}
-            timelineDurationSec={durationSeconds}
-            timeZone={clientTimeZone}
-            metadata={vodMetadata}
-            onMetadataChange={setVodMetadata}
             clips={clips}
             clipUrl={clipState.clipUrl}
             channelId={channelId}
@@ -885,11 +918,9 @@ export function EditorPage() {
             isPlaying={isPlaying}
             onPlaySubclip={handlePlaySubclip}
             onPause={handlePause}
-            onOrderChange={handleOrderChange}
             onRemoveClip={handleRemoveClip}
             onUpdateClipMetadata={handleUpdateClipMetadata}
             onSeek={handleSeek}
-            onPlayFullSequence={handlePlayFullSequence}
             thumbnailsEnabled={!isRealtime}
             clipsEmptyHint={
               isRealtime
@@ -938,7 +969,7 @@ export function EditorPage() {
           />
           <EditorSubtitleButton active={subtitleMode} onToggle={handleSubtitleToggle} />
           <EditorJsonButton
-            stateJson={stateJson}
+            stateJson={jobSpecs}
             open={jsonPanelOpen}
             onOpenChange={setJsonPanelOpen}
           />

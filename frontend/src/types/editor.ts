@@ -20,7 +20,7 @@ export interface EditorClipState {
   selectionMode?: EditorSelectionMode;
 }
 
-/** User-editable VOD metadata (sidebar + export JSON). */
+/** Per-clip / export metadata (title, description, tags). */
 export interface EditorVodMetadata {
   title: string;
   description: string;
@@ -74,8 +74,8 @@ export interface EditorClipPosterUpload {
 export type EditorClipPoster = EditorClipPosterCapture | EditorClipPosterUpload;
 
 /**
- * Sub-clip range (Mark In → Mark Out). Times relative to clip (0 to duration).
- * Order defines the final concatenation order in the output.
+ * Sub-clip range (Mark In → Mark Out). Times relative to parent window (0 to duration).
+ * `order` is a stable 1-based index (list order); each clip is encoded as its own output file.
  */
 export interface EditorSubClip {
   id: string;
@@ -126,11 +126,14 @@ export interface EditorSubtitlesConfig {
   languageMode?: string;
 }
 
-/** Sub-clip row in exported editor JSON (includes optional per-clip metadata). */
+/** Sub-clip row in exported editor JSON (Mark In/Out relative to parent window t=0). */
 export interface EditorStateJsonClip {
   order: number;
   startTime: number;
   endTime: number;
+  /** Primary metadata for this output clip. */
+  metadata?: EditorVodMetadata;
+  /** @deprecated Prefer `metadata`; kept for older encoders */
   title?: string;
   description?: string;
   posters?: EditorClipPoster[];
@@ -155,5 +158,6 @@ export interface EditorStateJson {
   }>;
   cropWindow?: EditorCropWindow;
   subtitles?: EditorSubtitlesConfig;
+  /** @deprecated Use `clips[].metadata` per output clip */
   metadata?: EditorVodMetadata;
 }

@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback } from "react";
 import { Edit01, Play, StopCircle, Trash01 } from "@untitledui/icons";
 import type { EditorSubClip } from "@/types/editor";
 import { buildThumbnailUrl } from "./editor-constants";
@@ -35,7 +35,6 @@ interface EditorClipsListProps {
   isPlaying: boolean;
   onPlaySubclip: (clip: EditorSubClip) => void;
   onPause: () => void;
-  onOrderChange: (id: string, newOrder: number) => void;
   onRemove: (id: string) => void;
   onEditMetadata?: (clip: EditorSubClip) => void;
   onSeek?: (timeSeconds: number) => void;
@@ -64,7 +63,6 @@ export function EditorClipsList({
   isPlaying,
   onPlaySubclip,
   onPause,
-  onOrderChange,
   onRemove,
   onEditMetadata,
   onSeek,
@@ -76,22 +74,13 @@ export function EditorClipsList({
   const rowHeight = compact ? ROW_HEIGHT_COMPACT : ROW_HEIGHT_DEFAULT;
   const thumbHeight = compact ? THUMB_HEIGHT_COMPACT : THUMB_HEIGHT_DEFAULT;
   const thumbWidth = Math.round(thumbHeight * (16 / 9));
-  const sortedClips = [...clips].sort((a, b) => a.order - b.order);
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [editingValue, setEditingValue] = useState("");
 
-  const handleOrderFocus = useCallback((c: EditorSubClip) => {
-    setEditingId(c.id);
-    setEditingValue(String(c.order));
-  }, []);
-
-  const handleOrderBlur = useCallback(
-    (id: string, value: string) => {
-      const n = parseInt(value, 10);
-      if (!Number.isNaN(n) && n >= 1) onOrderChange(id, n);
-      setEditingId(null);
+  const handleRemove = useCallback(
+    (id: string) => {
+      onRemove(id);
+      if (selectedClipId === id) onSelectClip(null);
     },
-    [onOrderChange]
+    [onRemove, onSelectClip, selectedClipId],
   );
 
   if (clips.length === 0) {
@@ -104,10 +93,9 @@ export function EditorClipsList({
 
   return (
     <div className="flex flex-col gap-1">
-      <p className="shrink-0 text-xs font-medium text-secondary">Sub-clips (output order)</p>
+      <p className="shrink-0 text-xs font-medium text-secondary">Clips</p>
       <ul className="flex flex-col gap-1">
-        {sortedClips.map((c) => {
-          const isEditing = editingId === c.id;
+        {clips.map((c) => {
           const isSelected = selectedClipId === c.id;
           const isThisPlaying = playingClipId === c.id && isPlaying;
           const handleRowClick = () => {
@@ -147,7 +135,6 @@ export function EditorClipsList({
               }`}
               style={{ minHeight: rowHeight }}
             >
-              {/* 1. Thumbnail Mark In */}
               <div
                 className="shrink-0 overflow-hidden rounded border border-secondary bg-quaternary"
                 style={{ width: tw, height: th }}
@@ -166,7 +153,6 @@ export function EditorClipsList({
                   thumbPlaceholder("In")
                 )}
               </div>
-              {/* 2. Thumbnail Mark Out */}
               <div
                 className="shrink-0 overflow-hidden rounded border border-secondary bg-quaternary"
                 style={{ width: tw, height: th }}
@@ -185,7 +171,6 @@ export function EditorClipsList({
                   thumbPlaceholder("Out")
                 )}
               </div>
-              {/* 3. Play / Stop */}
               <button
                 type="button"
                 onClick={(e) => {
@@ -202,7 +187,6 @@ export function EditorClipsList({
                   <Play className="size-4" />
                 )}
               </button>
-              {/* 4. Time from – Time to */}
               <span
                 className={`min-w-0 max-w-full shrink leading-tight text-brand-secondary ${compact ? "text-[10px]" : "text-xs"}`}
               >
@@ -216,22 +200,14 @@ export function EditorClipsList({
                     )}`
                   : `${formatTime(c.startTime)} → ${formatTime(c.endTime)}`}
               </span>
-              {/* Order (compact) */}
-              <label
-                className="flex shrink-0 items-center gap-0.5"
-                onClick={(e) => e.stopPropagation()}
-              >
-                <span className="text-[10px] text-tertiary">#</span>
-                <input
-                  type="number"
-                  min={1}
-                  value={isEditing ? editingValue : c.order}
-                  onChange={(e) => isEditing && setEditingValue(e.target.value)}
-                  onFocus={() => handleOrderFocus(c)}
-                  onBlur={() => handleOrderBlur(c.id, isEditing ? editingValue : String(c.order))}
-                  className="w-8 rounded border border-secondary bg-primary px-1 py-0.5 text-[10px] text-primary"
-                />
-              </label>
+              {c.title?.trim() ? (
+                <span
+                  className={`min-w-0 max-w-[8rem] shrink truncate font-medium text-primary ${compact ? "text-[10px]" : "text-xs"}`}
+                  title={c.title.trim()}
+                >
+                  {c.title.trim()}
+                </span>
+              ) : null}
               {isSelected && (
                 <span className="shrink-0 text-[10px] font-medium uppercase text-brand-solid">
                   Editing
@@ -255,8 +231,7 @@ export function EditorClipsList({
                   type="button"
                   onClick={(e) => {
                     e.stopPropagation();
-                    onRemove(c.id);
-                    if (selectedClipId === c.id) onSelectClip(null);
+                    handleRemove(c.id);
                   }}
                   className="rounded p-1 text-fg-quaternary hover:bg-tertiary hover:text-fg-secondary"
                   aria-label="Remove sub-clip"

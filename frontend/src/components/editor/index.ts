@@ -11,7 +11,6 @@ export { EditorJsonButton } from "./editor-json-button";
 export { EditorVerticalCropButton } from "./editor-vertical-crop-button";
 export { EditorSubtitleButton } from "./editor-subtitle-button";
 export { EditorRightPanel } from "./editor-right-panel";
-export { EditorMetadataModal } from "./editor-metadata-modal";
 export { EditorCapturePreview } from "./editor-capture-preview";
 export {
   buildThumbnailUrl,
