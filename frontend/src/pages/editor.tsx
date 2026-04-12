@@ -89,31 +89,8 @@ function parentWallEndUnix(clipState: EditorClipState, subClips: EditorSubClip[]
   return clipState.endTime;
 }
 
-/** Ads intersecting the output clip, times stay relative to parent window (same axis as clips[].start/end). */
-function buildAdsForClipInParentWindow(
-  ads: EditorAdMarker[],
-  clipRelStart: number,
-  clipRelEnd: number,
-  parentWallStart: number,
-  absEpochToIso: (absSec: number) => string,
-): EditorStateJson["ads"] {
-  const out: EditorStateJson["ads"] = [];
-  for (const a of ads) {
-    const s = Math.max(clipRelStart, a.startTime);
-    const e = Math.min(clipRelEnd, a.endTime);
-    if (e <= s + 0.01) continue;
-    out.push({
-      index: out.length + 1,
-      startTime: s,
-      endTime: e,
-      startProgramDateTime: absEpochToIso(parentWallStart + s),
-      endProgramDateTime: absEpochToIso(parentWallStart + e),
-    });
-  }
-  return out;
-}
-
-function buildPerClipJobSpecs(
+/** Single editor encode spec: parent stream + all sub-clips + all ads (one POST /vod/jobs). */
+function buildEditorStateJson(
   clipState: EditorClipState,
   clips: EditorSubClip[],
   sessionPosters: EditorPosterEntry[],
@@ -124,7 +101,7 @@ function buildPerClipJobSpecs(
   subtitleMode: boolean,
   subtitleSettings: EditorSubtitleSettings,
   nowUnix: number,
-): EditorStateJson[] {
+): EditorStateJson {
   const absEpochToIso = (absSec: number) => {
     const t = Number(absSec);
     if (!Number.isFinite(t)) return "";
@@ -136,49 +113,48 @@ function buildPerClipJobSpecs(
   const parentWallEnd = parentWallEndUnix(clipState, clips, nowUnix);
   const parentClipUrl = buildClipWindowUrl(clipState, parentWallStart, parentWallEnd);
 
-  return clips.map((c) => {
-    const clipMetadata = {
-      title: c.title?.trim() ?? "",
-      description: c.description?.trim() ?? "",
-      tags: "",
-    };
+  const sortedClips = [...clips].sort((a, b) => a.order - b.order);
 
-    const postersForJob = sessionPosters.filter(
-      (p) => p.timeSeconds >= c.startTime && p.timeSeconds <= c.endTime,
-    );
+  const adsOut: EditorStateJson["ads"] = includeAds
+    ? ads.map((a, i) => ({
+        index: i + 1,
+        startTime: a.startTime,
+        endTime: a.endTime,
+        startProgramDateTime: absEpochToIso(parentWallStart + a.startTime),
+        endProgramDateTime: absEpochToIso(parentWallStart + a.endTime),
+      }))
+    : [];
 
-    const sub: EditorStateJson = {
-      clipUrl: parentClipUrl,
-      sourceM3u8: clipState.sourceM3u8,
-      startTime: parentWallStart,
-      endTime: parentWallEnd,
-      posters: postersForJob,
-      clips: [
-        {
-          order: c.order,
-          startTime: c.startTime,
-          endTime: c.endTime,
-          metadata: clipMetadata,
-          ...(c.posters?.length ? { posters: c.posters } : {}),
-        },
-      ],
-      ads: includeAds
-        ? buildAdsForClipInParentWindow(ads, c.startTime, c.endTime, parentWallStart, absEpochToIso)
-        : [],
-      ...(verticalCropMode && cropWindow ? { cropWindow } : {}),
-      ...(subtitleMode
-        ? {
-            subtitles: {
-              enabled: true as const,
-              whisperSourceLanguage: subtitleSettings.whisperSourceLanguage,
-              whisperOutputLanguage: subtitleSettings.whisperOutputLanguage,
-              style: { ...subtitleSettings.style },
-            },
-          }
-        : {}),
-    };
-    return sub;
-  });
+  return {
+    clipUrl: parentClipUrl,
+    sourceM3u8: clipState.sourceM3u8,
+    startTime: parentWallStart,
+    endTime: parentWallEnd,
+    posters: sessionPosters.map((p) => ({ ...p })),
+    clips: sortedClips.map((c) => ({
+      order: c.order,
+      startTime: c.startTime,
+      endTime: c.endTime,
+      metadata: {
+        title: c.title?.trim() ?? "",
+        description: c.description?.trim() ?? "",
+        tags: "",
+      },
+      ...(c.posters?.length ? { posters: c.posters } : {}),
+    })),
+    ads: adsOut,
+    ...(verticalCropMode && cropWindow ? { cropWindow } : {}),
+    ...(subtitleMode
+      ? {
+          subtitles: {
+            enabled: true as const,
+            whisperSourceLanguage: subtitleSettings.whisperSourceLanguage,
+            whisperOutputLanguage: subtitleSettings.whisperOutputLanguage,
+            style: { ...subtitleSettings.style },
+          },
+        }
+      : {}),
+  };
 }
 
 export function EditorPage() {
@@ -664,10 +640,10 @@ export function EditorPage() {
     );
   }, []);
 
-  const jobSpecs: EditorStateJson[] | null = useMemo(() => {
+  const stateJson: EditorStateJson | null = useMemo(() => {
     if (!clipState?.clipUrl) return null;
     const nowSec = Math.floor(Date.now() / 1000);
-    return buildPerClipJobSpecs(
+    return buildEditorStateJson(
       clipState,
       clips,
       posters,
@@ -786,7 +762,7 @@ export function EditorPage() {
     setFinishLoading(true);
     try {
       if (!clipState?.clipUrl) return;
-      const specs = buildPerClipJobSpecs(
+      const spec = buildEditorStateJson(
         clipState,
         clips,
         posters,
@@ -798,9 +774,7 @@ export function EditorPage() {
         subtitleSettings,
         Math.floor(Date.now() / 1000),
       );
-      for (const spec of specs) {
-        await startVodJob(spec);
-      }
+      await startVodJob(spec);
       navigate({ pathname: "/processing-clips", search: window.location.search });
     } catch (err) {
       setFinishError(httpClient.getErrorMessage(err));
@@ -937,8 +911,8 @@ export function EditorPage() {
             }
             onAddAdSlot={handleAddAdSlot}
             addAdSlotDisabled={isRealtime}
-            onCreateWithoutAds={() => void handleFinishCreate(false)}
-            onCreateWithAds={() => void handleFinishCreate(true)}
+            onCreateWithoutAds={() => void handleFinishCreate(true)}
+            onCreateWithAds={() => void handleFinishCreate(false)}
             finishLoading={finishLoading}
             finishError={finishError}
             ads={ads}
@@ -969,7 +943,7 @@ export function EditorPage() {
           />
           <EditorSubtitleButton active={subtitleMode} onToggle={handleSubtitleToggle} />
           <EditorJsonButton
-            stateJson={jobSpecs}
+            stateJson={stateJson}
             open={jsonPanelOpen}
             onOpenChange={setJsonPanelOpen}
           />

@@ -72,7 +72,7 @@ export async function runVodEncodeJob(opts) {
     });
 
     const encodeProgressCap = burnSubs ? 50 : 89;
-    const { localPath: encodedPath } = await encodeEditorJsonToMp4({
+    const { localPaths, localPath } = await encodeEditorJsonToMp4({
       spec,
       workDir,
       shouldCancel: () => shouldCancel(jobId),
@@ -95,33 +95,55 @@ export async function runVodEncodeJob(opts) {
       return;
     }
 
-    let uploadPath = encodedPath;
+    /** @type {string[]} */
+    let pathsToUpload =
+      Array.isArray(localPaths) && localPaths.length > 0 ? [...localPaths] : [localPath].filter(Boolean);
+
     if (burnSubs) {
-      updateJob(jobId, {
-        status: "processing",
-        progress: 52,
-        phase: "transcribing",
-        message: "Transcribing audio (whisper.cpp)",
-      });
       const style = spec.subtitles?.style || {};
-      const { localPath: subtitledPath } = await transcribeAndBurnSubtitles({
-        inputMp4: encodedPath,
-        workDir,
-        style,
-        subtitles: spec.subtitles,
-        shouldCancel: () => shouldCancel(jobId),
-        onProgress: (pct) => {
-          const phase = pct < 72 ? "transcribing" : "burning_subtitles";
-          const msg =
-            phase === "transcribing" ? "Transcribing audio (whisper.cpp)" : "Burning subtitles into video";
-          updateJob(jobId, {
-            progress: Math.max(50, Math.min(90, Math.round(pct))),
-            phase,
-            message: msg,
-          });
-        },
-      });
-      uploadPath = subtitledPath;
+      const n = pathsToUpload.length;
+      const subtitled = [];
+      for (let i = 0; i < n; i++) {
+        const subWorkDir = path.join(workDir, `subs_clip_${i}`);
+        await fs.mkdir(subWorkDir, { recursive: true });
+        updateJob(jobId, {
+          status: "processing",
+          progress: 50,
+          phase: "transcribing",
+          message:
+            n > 1
+              ? `Transcribing audio (whisper.cpp) — clip ${i + 1}/${n}`
+              : "Transcribing audio (whisper.cpp)",
+        });
+        const sliceStart = 50 + (i / n) * 38;
+        const sliceEnd = 50 + ((i + 1) / n) * 38;
+        const mapPct = (pct) => sliceStart + ((pct - 52) / (88 - 52)) * (sliceEnd - sliceStart);
+        const { localPath: subPath } = await transcribeAndBurnSubtitles({
+          inputMp4: pathsToUpload[i],
+          workDir: subWorkDir,
+          style,
+          subtitles: spec.subtitles,
+          shouldCancel: () => shouldCancel(jobId),
+          onProgress: (pct) => {
+            const phase = pct < 72 ? "transcribing" : "burning_subtitles";
+            const msg =
+              phase === "transcribing"
+                ? n > 1
+                  ? `Transcribing clip ${i + 1}/${n}`
+                  : "Transcribing audio (whisper.cpp)"
+                : n > 1
+                  ? `Burning subtitles (clip ${i + 1}/${n})`
+                  : "Burning subtitles into video";
+            updateJob(jobId, {
+              progress: Math.max(50, Math.min(89, Math.round(mapPct(pct)))),
+              phase,
+              message: msg,
+            });
+          },
+        });
+        subtitled.push(subPath);
+      }
+      pathsToUpload = subtitled;
     }
 
     if (shouldCancel(jobId)) {
@@ -141,19 +163,41 @@ export async function runVodEncodeJob(opts) {
       message: "Uploading to storage",
     });
 
-    const fileName = `${jobId}.mp4`;
-    const stream = createReadStream(uploadPath);
-    const { key, publicUrl } = await putVodMp4(tenantId, fileName, stream);
+    const clipsSorted = [...(spec.clips || [])].sort((a, b) => a.order - b.order);
+    /** @type {(string|null)[]} */
+    const outputUrls = [];
+    /** @type {string[]} */
+    const s3Keys = [];
+    const uploadTotal = pathsToUpload.length;
+    for (let i = 0; i < uploadTotal; i++) {
+      const order = clipsSorted[i]?.order ?? i + 1;
+      const fileName = uploadTotal > 1 ? `${jobId}-clip${order}.mp4` : `${jobId}.mp4`;
+      const stream = createReadStream(pathsToUpload[i]);
+      const { key, publicUrl } = await putVodMp4(tenantId, fileName, stream);
+      s3Keys.push(key);
+      outputUrls.push(publicUrl || null);
+      if (uploadTotal > 1) {
+        updateJob(jobId, {
+          progress: 92 + Math.round(((i + 1) / uploadTotal) * 7),
+          phase: "uploading",
+          message: `Uploading clip ${i + 1}/${uploadTotal}`,
+        });
+      }
+    }
 
     updateJob(jobId, {
       status: "completed",
       progress: 100,
       phase: "completed",
       message: "Done",
-      s3Key: key,
-      outputUrl: publicUrl || null,
+      s3Key: s3Keys[0],
+      s3Keys,
+      outputUrl: outputUrls[0] ?? null,
+      outputUrls,
     });
-    console.log(`[vod] done job=${jobId} tenant=${tenantId} key=${key}`);
+    console.log(
+      `[vod] done job=${jobId} tenant=${tenantId} keys=${s3Keys.join(",")}`,
+    );
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     if (msg === "CANCELLED" || shouldCancel(jobId)) {

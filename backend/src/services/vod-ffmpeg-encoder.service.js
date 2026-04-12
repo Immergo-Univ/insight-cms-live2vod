@@ -348,21 +348,21 @@ function runFfmpeg(args, shouldCancel) {
 /**
  * @typedef {object} EditorEncodeSpec
  * @property {string} clipUrl
- * @property {Array<{ order: number, startTime: number, endTime: number }>} clips
+ * @property {Array<{ order: number, startTime: number, endTime: number, metadata?: { title?: string, description?: string, tags?: string }, posters?: unknown[] }>} clips
  * @property {Array<{ startTime: number, endTime: number }>} [ads]
  * @property {{ aspectRatio: string, centerX: number }} [cropWindow]
  * @property {{ enabled: boolean, whisperSourceLanguage?: string, whisperOutputLanguage?: string, languageMode?: string, style?: { fontSizePx?: number, textColor?: string, outlineColor?: string, outlineWidthPx?: number } }} [subtitles]
  */
 
 /**
- * Builds one MP4 from ordered clips, removing ad windows inside each clip (times relative to clipUrl).
+ * One MP4 per entry in `spec.clips` (sorted by `order`). Ad windows are cut inside each clip's [startTime,endTime] (times relative to clipUrl).
  *
  * @param {object} ctx
  * @param {EditorEncodeSpec} ctx.spec
  * @param {string} ctx.workDir
  * @param {(pct: number) => void} [ctx.onProgress] 0–90 during encode
  * @param {() => boolean} ctx.shouldCancel
- * @returns {Promise<{ localPath: string }>}
+ * @returns {Promise<{ localPaths: string[], localPath: string }>}
  */
 export async function encodeEditorJsonToMp4(ctx) {
   const { spec, workDir, onProgress, shouldCancel } = ctx;
@@ -373,21 +373,14 @@ export async function encodeEditorJsonToMp4(ctx) {
 
   const ads = spec.ads || [];
   const clipsSorted = [...(spec.clips || [])].sort((a, b) => a.order - b.order);
+  if (clipsSorted.length === 0) throw new Error("No clips in spec");
 
-  /** @type {Array<{ start: number, end: number }>} */
-  const allParts = [];
+  let totalParts = 0;
   for (const clip of clipsSorted) {
-    const parts = subtractAdsFromInterval(
-      Number(clip.startTime),
-      Number(clip.endTime),
-      ads,
-    );
-    for (const [s, e] of parts) {
-      allParts.push({ start: s, end: e });
-    }
+    const parts = subtractAdsFromInterval(Number(clip.startTime), Number(clip.endTime), ads);
+    totalParts += parts.length;
   }
-
-  if (allParts.length === 0) {
+  if (totalParts === 0) {
     throw new Error("No segments to encode after applying clips and ad removal");
   }
 
@@ -400,71 +393,94 @@ export async function encodeEditorJsonToMp4(ctx) {
     videoFilter = `crop=${cropW}:${cropH}:${cropX}:${cropY}`;
   }
 
-  const totalSteps = allParts.length + 1;
-  const segmentFiles = [];
+  let doneParts = 0;
+  /** @type {string[]} */
+  const clipOutputPaths = [];
 
-  for (let i = 0; i < allParts.length; i++) {
-    if (shouldCancel()) throw new Error("CANCELLED");
-    const { start, end } = allParts[i];
-    const out = path.join(workDir, `seg_${i}.mp4`);
-    await runFfmpegSegment({
-      inputUrl: clipUrl,
-      start,
-      end,
-      outputPath: out,
-      shouldCancel,
-      videoFilter: videoFilter ?? undefined,
-    });
-    segmentFiles.push(out);
-    onProgress?.(Math.min(90, Math.round(((i + 1) / totalSteps) * 90)));
-  }
+  for (let ci = 0; ci < clipsSorted.length; ci++) {
+    const clip = clipsSorted[ci];
+    const parts = subtractAdsFromInterval(Number(clip.startTime), Number(clip.endTime), ads);
+    if (parts.length === 0) {
+      throw new Error(`Clip order ${clip.order} has no playable segments after ad removal`);
+    }
+    const clipOut = path.join(workDir, `clip_order_${clip.order}.mp4`);
 
-  if (shouldCancel()) throw new Error("CANCELLED");
-
-  const listPath = path.join(workDir, "concat.txt");
-  const lines = segmentFiles.map((f) => {
-    const abs = path.resolve(f);
-    const escaped = abs.replace(/'/g, `'\\''`);
-    return `file '${escaped}'`;
-  });
-  await fs.writeFile(listPath, `${lines.join("\n")}\n`, "utf8");
-
-  const outputPath = path.join(workDir, "output.mp4");
-  try {
-    await runFfmpegConcat({ listPath, outputPath, shouldCancel });
-  } catch (e) {
-    await runFfmpeg(
-      [
-        "-hide_banner",
-        "-loglevel",
-        "error",
-        "-y",
-        "-f",
-        "concat",
-        "-safe",
-        "0",
-        "-i",
-        listPath,
-        "-c:v",
-        "libx264",
-        "-preset",
-        "ultrafast",
-        "-profile:v",
-        "high",
-        "-pix_fmt",
-        "yuv420p",
-        "-c:a",
-        "aac",
-        "-b:a",
-        "128k",
-        "-movflags",
-        "+faststart",
-        outputPath,
-      ],
-      shouldCancel,
-    );
+    if (parts.length === 1) {
+      if (shouldCancel()) throw new Error("CANCELLED");
+      const [s, e] = parts[0];
+      await runFfmpegSegment({
+        inputUrl: clipUrl,
+        start: s,
+        end: e,
+        outputPath: clipOut,
+        shouldCancel,
+        videoFilter: videoFilter ?? undefined,
+      });
+      doneParts += 1;
+      onProgress?.(Math.min(90, Math.round((doneParts / totalParts) * 90)));
+    } else {
+      const segmentFiles = [];
+      for (let i = 0; i < parts.length; i++) {
+        if (shouldCancel()) throw new Error("CANCELLED");
+        const [s, e] = parts[i];
+        const segPath = path.join(workDir, `c${ci}_seg_${i}.mp4`);
+        await runFfmpegSegment({
+          inputUrl: clipUrl,
+          start: s,
+          end: e,
+          outputPath: segPath,
+          shouldCancel,
+          videoFilter: videoFilter ?? undefined,
+        });
+        segmentFiles.push(segPath);
+        doneParts += 1;
+        onProgress?.(Math.min(90, Math.round((doneParts / totalParts) * 90)));
+      }
+      const listPath = path.join(workDir, `concat_${ci}.txt`);
+      const lines = segmentFiles.map((f) => {
+        const abs = path.resolve(f);
+        const escaped = abs.replace(/'/g, `'\\''`);
+        return `file '${escaped}'`;
+      });
+      await fs.writeFile(listPath, `${lines.join("\n")}\n`, "utf8");
+      try {
+        await runFfmpegConcat({ listPath, outputPath: clipOut, shouldCancel });
+      } catch {
+        await runFfmpeg(
+          [
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-y",
+            "-f",
+            "concat",
+            "-safe",
+            "0",
+            "-i",
+            listPath,
+            "-c:v",
+            "libx264",
+            "-preset",
+            "ultrafast",
+            "-profile:v",
+            "high",
+            "-pix_fmt",
+            "yuv420p",
+            "-c:a",
+            "aac",
+            "-b:a",
+            "128k",
+            "-movflags",
+            "+faststart",
+            clipOut,
+          ],
+          shouldCancel,
+        );
+      }
+    }
+    clipOutputPaths.push(clipOut);
   }
 
   onProgress?.(90);
-  return { localPath: outputPath };
+  return { localPaths: clipOutputPaths, localPath: clipOutputPaths[0] };
 }

@@ -3,8 +3,7 @@ import { File06 } from "@untitledui/icons";
 import type { EditorStateJson } from "@/types/editor";
 
 interface EditorJsonButtonProps {
-  /** One spec per output job (multi-clip editor). */
-  stateJson: EditorStateJson | EditorStateJson[] | null;
+  stateJson: EditorStateJson | null;
   /** Controlled open state (closes when vertical crop mode is disabled, etc.). */
   open?: boolean;
   onOpenChange?: (open: boolean) => void;

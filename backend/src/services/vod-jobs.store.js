@@ -17,7 +17,9 @@
  * @property {string} [updatedAt]
  * @property {string} [clipUrl]
  * @property {string} [s3Key]
+ * @property {string[]} [s3Keys]
  * @property {string|null} [outputUrl]
+ * @property {(string|null)[]} [outputUrls]
  */
 
 /** @type {Map<string, VodJob>} */
@@ -77,7 +79,7 @@ export function createJob(partial) {
 
 /**
  * @param {string} id
- * @param {Partial<Pick<VodJob, 'status' | 'progress' | 'phase' | 'message' | 'error' | 's3Key' | 'outputUrl'>>} patch
+ * @param {Partial<Pick<VodJob, 'status' | 'progress' | 'phase' | 'message' | 'error' | 's3Key' | 's3Keys' | 'outputUrl' | 'outputUrls'>>} patch
  */
 export function updateJob(id, patch) {
   const job = jobsById.get(id);

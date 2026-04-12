@@ -19,5 +19,8 @@ export interface VodJobRecord {
   updatedAt?: string;
   clipUrl?: string;
   s3Key?: string;
+  s3Keys?: string[];
   outputUrl?: string | null;
+  /** One public URL per encoded clip (same order as spec.clips by order). */
+  outputUrls?: (string | null)[];
 }

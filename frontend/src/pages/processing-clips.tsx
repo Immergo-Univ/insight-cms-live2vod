@@ -192,7 +192,32 @@ export function ProcessingClipsPage() {
                         {job.clipUrl || "—"}
                       </td>
                       <td className="px-3 py-2 text-xs">
-                        {job.outputUrl ? (
+                        {job.outputUrls && job.outputUrls.length > 0 ? (
+                          <ul className="flex list-none flex-col gap-1.5 p-0">
+                            {job.outputUrls.map((url, idx) =>
+                              url ? (
+                                <li key={`${job.id}-out-${idx}`} className="flex flex-wrap items-center gap-2">
+                                  <span className="text-tertiary">Clip {idx + 1}</span>
+                                  <button
+                                    type="button"
+                                    onClick={() => setPlayerUrl(url)}
+                                    className="font-medium text-brand-secondary hover:underline"
+                                  >
+                                    Play
+                                  </button>
+                                  <a
+                                    href={url}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="text-tertiary hover:underline"
+                                  >
+                                    Open
+                                  </a>
+                                </li>
+                              ) : null,
+                            )}
+                          </ul>
+                        ) : job.outputUrl ? (
                           <div className="flex flex-wrap items-center gap-2">
                             <button
                               type="button"
