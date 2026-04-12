@@ -229,6 +229,17 @@ export function EditorTimeline({
   /** True after a clip-body drag moved the range (suppresses click toggle). */
   const clipBodyDragMovedRef = useRef(false);
 
+  type AdBodyDragSession = {
+    adId: string;
+    startTime: number;
+    endTime: number;
+    lastClientX: number;
+    activated: boolean;
+  };
+  const [adBodyDrag, setAdBodyDrag] = useState<AdBodyDragSession | null>(null);
+  const adBodyDragRef = useRef<AdBodyDragSession | null>(null);
+  const adBodyDragMovedRef = useRef(false);
+
   const zoomMs = ZOOM_LEVELS_MS[zoomIndex] ?? ZOOM_LEVELS_MS[0];
   const zoomSeconds = zoomMs / 1000;
   /**
@@ -508,6 +519,67 @@ export function EditorTimeline({
     onSelectAd,
   ]);
 
+  useEffect(() => {
+    if (!adBodyDrag || !onResizeAd) return;
+    const minDuration = 1;
+    adBodyDragRef.current = adBodyDrag;
+
+    const onMouseMove = (e: MouseEvent) => {
+      const m = adBodyDragRef.current;
+      if (!m) return;
+      const dx = e.clientX - m.lastClientX;
+      if (!m.activated) {
+        if (Math.abs(dx) < CLIP_BODY_DRAG_THRESHOLD_PX) return;
+        onSelectAd?.(m.adId);
+        onSelectClip?.(null);
+      }
+      const dt = dx / pixelsPerSecond;
+      const len = m.endTime - m.startTime;
+      let newStart = m.startTime + dt;
+      let newEnd = m.endTime + dt;
+      if (newStart < 0) {
+        newStart = 0;
+        newEnd = len;
+      }
+      if (newEnd > durationSeconds) {
+        newEnd = durationSeconds;
+        newStart = Math.max(0, durationSeconds - len);
+      }
+      if (newEnd < newStart + minDuration) return;
+
+      onResizeAd(m.adId, newStart, newEnd);
+      onSeek(newStart);
+      adBodyDragMovedRef.current = true;
+      adBodyDragRef.current = {
+        adId: m.adId,
+        startTime: newStart,
+        endTime: newEnd,
+        lastClientX: e.clientX,
+        activated: true,
+      };
+    };
+
+    const onMouseUp = () => {
+      setAdBodyDrag(null);
+      adBodyDragRef.current = null;
+    };
+
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseup", onMouseUp);
+    return () => {
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", onMouseUp);
+    };
+  }, [
+    adBodyDrag,
+    durationSeconds,
+    pixelsPerSecond,
+    onResizeAd,
+    onSeek,
+    onSelectAd,
+    onSelectClip,
+  ]);
+
   const seekFromClientX = useCallback(
     (clientX: number) => {
       if (!trackRef.current || durationSeconds <= 0) return;
@@ -547,6 +619,20 @@ export function EditorTimeline({
       if (!isSelected) onSeek(c.startTime);
     },
     [onSelectClip, onSelectAd, onSeek],
+  );
+
+  const handleAdOverlayClick = useCallback(
+    (ad: EditorAdMarker, isSelected: boolean) => {
+      if (adBodyDragMovedRef.current) {
+        adBodyDragMovedRef.current = false;
+        return;
+      }
+      if (!onSelectAd) return;
+      if (!isSelected) onSelectClip?.(null);
+      onSelectAd(isSelected ? null : ad.id);
+      if (!isSelected) onSeek(ad.startTime);
+    },
+    [onSelectAd, onSelectClip, onSeek],
   );
 
   if (durationSeconds <= 0) {
@@ -690,15 +776,6 @@ export function EditorTimeline({
             const isAdHover = hoverAdId === ad.id;
             const isAdSelected = selectedAdId === ad.id;
             const canResizeAd = onResizeAd && adWidth > 8;
-            const handleAdOverlayClick = () => {
-              if (!onSelectAd) return;
-              if (isAdSelected) {
-                onSelectAd(null);
-                return;
-              }
-              onSelectAd(ad.id);
-              onSeek(ad.startTime);
-            };
 
             return (
               <div
@@ -706,19 +783,35 @@ export function EditorTimeline({
                 data-clip-overlay
                 role={onSelectAd ? "button" : undefined}
                 tabIndex={onSelectAd ? 0 : undefined}
-                onClick={onSelectAd ? handleAdOverlayClick : undefined}
+                onClick={onSelectAd ? () => handleAdOverlayClick(ad, isAdSelected) : undefined}
                 onKeyDown={
                   onSelectAd
                     ? (e) => {
                         if (e.key === "Enter" || e.key === " ") {
                           e.preventDefault();
-                          handleAdOverlayClick();
+                          handleAdOverlayClick(ad, isAdSelected);
                         }
                       }
                     : undefined
                 }
+                onMouseDown={(e) => {
+                  if (!onResizeAd) return;
+                  const el = e.target as HTMLElement;
+                  if (el.closest("[data-resize-handle]") || el.closest("button")) return;
+                  e.preventDefault();
+                  e.stopPropagation();
+                  adBodyDragMovedRef.current = false;
+                  setAdBodyDrag({
+                    adId: ad.id,
+                    startTime: ad.startTime,
+                    endTime: ad.endTime,
+                    lastClientX: e.clientX,
+                    activated: false,
+                  });
+                }}
                 className={cx(
-                  "absolute top-0 bottom-0 z-[9] transition-colors",
+                  "absolute top-0 bottom-0 z-[9] select-none touch-none transition-colors",
+                  onResizeAd && "cursor-move",
                   isAdSelected
                     ? "bg-rose-500/32 ring-2 ring-rose-400/55 dark:bg-rose-500/28 dark:ring-rose-400/45"
                     : "bg-rose-500/18 hover:bg-rose-500/28 dark:bg-rose-500/15 dark:hover:bg-rose-500/26",

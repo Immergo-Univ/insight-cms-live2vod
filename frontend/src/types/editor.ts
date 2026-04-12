@@ -29,12 +29,14 @@ export interface EditorVodMetadata {
 
 /**
  * Ad marker detected by the ads detector. Times relative to clip (0 to duration).
+ * `addedManually`: user-placed slot (preserved when auto-detection results arrive).
  */
 export interface EditorAdMarker {
   id: string;
   index: number;
   startTime: number;
   endTime: number;
+  addedManually?: boolean;
 }
 
 /**

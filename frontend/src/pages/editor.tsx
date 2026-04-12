@@ -1,4 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  editorSessionKey,
+  readEditorSessionDraftForMount,
+  setEditorSessionDraft,
+} from "@/services/editor-session-cache";
+import type { EditorSessionDraft } from "@/services/editor-session-cache";
 import { ArrowLeft } from "@untitledui/icons";
 import { useLocation, useNavigate } from "react-router";
 import { useTimezone } from "@/hooks/use-timezone";
@@ -47,46 +53,131 @@ const DEFAULT_SUBTITLE_SETTINGS: EditorSubtitleSettings = {
   },
 };
 
+/** Keep user-placed slots when precalc/detect finishes (avoids wiping manual ads). */
+function mergeFetchedAdsWithManual(prev: EditorAdMarker[], fetched: EditorAdMarker[]): EditorAdMarker[] {
+  const manual = prev.filter((a) => a.addedManually);
+  if (manual.length === 0) {
+    return fetched.map((m, i) => ({ ...m, index: i + 1 }));
+  }
+  const combined = [...fetched, ...manual].sort((a, b) => a.startTime - b.startTime);
+  return combined.map((m, i) => ({ ...m, index: i + 1 }));
+}
+
 export function EditorPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const clipState = location.state as EditorClipState | null;
   const clientTimeZone = useTimezone();
 
+  const sessionKey = useMemo(
+    () => (clipState ? editorSessionKey(clipState) : ""),
+    [
+      clipState?.channelId,
+      clipState?.sourceM3u8,
+      clipState?.clipUrl,
+      clipState?.endTime,
+      clipState?.startTime,
+      clipState?.selectionMode,
+    ],
+  );
+
+  const mountSnapshot = useMemo(
+    () => (sessionKey ? readEditorSessionDraftForMount(sessionKey) : null),
+    [sessionKey],
+  );
+
+  const shouldSkipAdsFetchRef = useRef(!!mountSnapshot?.adsLoadComplete);
+
   const playerRef = useRef<EditorPlayerRef>(null);
   const [muted, setMuted] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
-  const [zoomIndex, setZoomIndex] = useState(1);
-  const [posters, setPosters] = useState<EditorPosterEntry[]>([]);
-  const [clips, setClips] = useState<EditorSubClip[]>([]);
+  const [zoomIndex, setZoomIndex] = useState(() => mountSnapshot?.fromCache === true ? mountSnapshot.zoomIndex : 1);
+  const [posters, setPosters] = useState<EditorPosterEntry[]>(() =>
+    mountSnapshot?.fromCache === true ? mountSnapshot.posters : [],
+  );
+  const [clips, setClips] = useState<EditorSubClip[]>(() =>
+    mountSnapshot?.fromCache === true ? mountSnapshot.clips : [],
+  );
   /** When set, Play plays only up to this time then pauses (for "play subclip"). */
   const [playUntilTime, setPlayUntilTime] = useState<number | null>(null);
   /** Subclip in "edit" mode: Mark In/Out update this clip; Play plays only this subclip. */
-  const [selectedClipId, setSelectedClipId] = useState<string | null>(null);
+  const [selectedClipId, setSelectedClipId] = useState<string | null>(() =>
+    mountSnapshot?.fromCache === true ? mountSnapshot.selectedClipId : null,
+  );
   /** Ad slot selected on the timeline (trim handles + ring). Mutually exclusive with selectedClipId where enforced in UI. */
-  const [selectedAdId, setSelectedAdId] = useState<string | null>(null);
+  const [selectedAdId, setSelectedAdId] = useState<string | null>(() =>
+    mountSnapshot?.fromCache === true ? mountSnapshot.selectedAdId : null,
+  );
   /** Subclip currently playing (from list row Play). Cleared on pause or when play reaches end. */
   const [playingClipId, setPlayingClipId] = useState<string | null>(null);
   /** When set, we're playing the full sequence (order 1..N); value = current segment index. */
   const [playingSequenceIndex, setPlayingSequenceIndex] = useState<number | null>(null);
   const [finishLoading, setFinishLoading] = useState(false);
   const [finishError, setFinishError] = useState<string | null>(null);
-  const [verticalCropMode, setVerticalCropMode] = useState(false);
-  const [cropWindow, setCropWindow] = useState<EditorCropWindow | null>(null);
-  const [subtitleMode, setSubtitleMode] = useState(false);
-  const [subtitleSettings, setSubtitleSettings] = useState<EditorSubtitleSettings>(DEFAULT_SUBTITLE_SETTINGS);
+  const [verticalCropMode, setVerticalCropMode] = useState(() =>
+    mountSnapshot?.fromCache === true ? mountSnapshot.verticalCropMode : false,
+  );
+  const [cropWindow, setCropWindow] = useState<EditorCropWindow | null>(() =>
+    mountSnapshot?.fromCache === true ? mountSnapshot.cropWindow : null,
+  );
+  const [subtitleMode, setSubtitleMode] = useState(() =>
+    mountSnapshot?.fromCache === true ? mountSnapshot.subtitleMode : false,
+  );
+  const [subtitleSettings, setSubtitleSettings] = useState<EditorSubtitleSettings>(() =>
+    mountSnapshot?.fromCache === true ? mountSnapshot.subtitleSettings : DEFAULT_SUBTITLE_SETTINGS,
+  );
   const [jsonPanelOpen, setJsonPanelOpen] = useState(false);
-  const [vodMetadata, setVodMetadata] = useState<EditorVodMetadata>({
-    title: "",
-    description: "",
-    tags: "",
-  });
+  const [vodMetadata, setVodMetadata] = useState<EditorVodMetadata>(() =>
+    mountSnapshot?.fromCache === true
+      ? mountSnapshot.vodMetadata
+      : { title: "", description: "", tags: "" },
+  );
 
-  const [ads, setAds] = useState<EditorAdMarker[]>([]);
-  const [adsLoading, setAdsLoading] = useState(false);
+  const [ads, setAds] = useState<EditorAdMarker[]>(() =>
+    mountSnapshot?.fromCache === true ? mountSnapshot.ads : [],
+  );
+  const [adsLoadComplete, setAdsLoadComplete] = useState(() => mountSnapshot?.adsLoadComplete ?? false);
+  const [adsLoading, setAdsLoading] = useState(() => {
+    if (!clipState?.clipUrl) return false;
+    if ((clipState.selectionMode ?? "epg") === "realtime") return false;
+    return !(mountSnapshot?.adsLoadComplete ?? false);
+  });
   const adsTriggeredRef = useRef(false);
+
+  useEffect(() => {
+    if (!sessionKey) return;
+    const draft: EditorSessionDraft = {
+      clips,
+      posters,
+      ads,
+      vodMetadata,
+      verticalCropMode,
+      cropWindow,
+      subtitleMode,
+      subtitleSettings,
+      zoomIndex,
+      selectedClipId,
+      selectedAdId,
+      adsLoadComplete,
+    };
+    setEditorSessionDraft(sessionKey, draft);
+  }, [
+    sessionKey,
+    clips,
+    posters,
+    ads,
+    vodMetadata,
+    verticalCropMode,
+    cropWindow,
+    subtitleMode,
+    subtitleSettings,
+    zoomIndex,
+    selectedClipId,
+    selectedAdId,
+    adsLoadComplete,
+  ]);
 
   const selectionMode = clipState?.selectionMode ?? "epg";
   const isRealtime = selectionMode === "realtime";
@@ -100,11 +191,13 @@ export function EditorPage() {
 
   useEffect(() => {
     if (!clipState?.clipUrl) return;
+    if (shouldSkipAdsFetchRef.current) return;
     if (isRealtime) {
       if (adsTriggeredRef.current) return;
       adsTriggeredRef.current = true;
       setAds([]);
       setAdsLoading(false);
+      setAdsLoadComplete(true);
       return;
     }
     if (adsTriggeredRef.current) return;
@@ -140,25 +233,28 @@ export function EditorPage() {
             endTime: hi - winStart,
           });
         }
-        setAds(markers.map((m, i) => ({ ...m, index: i + 1 })));
+        const fetched = markers.map((m, i) => ({ ...m, index: i + 1 }));
+        setAds((prev) => mergeFetchedAdsWithManual(prev, fetched));
       });
 
     mapPrecalcToMarkers()
       .catch((err) => {
         console.warn("Precalculated ads unavailable, falling back to detect:", err);
         return detectAds(clipState.clipUrl, corner).then((result) => {
-          setAds(
-            result.ads.map((ad, i) => ({
-              id: crypto.randomUUID(),
-              index: i + 1,
-              startTime: ad.startOffsetSec,
-              endTime: ad.endOffsetSec,
-            })),
-          );
+          const fetched = result.ads.map((ad, i) => ({
+            id: crypto.randomUUID(),
+            index: i + 1,
+            startTime: ad.startOffsetSec,
+            endTime: ad.endOffsetSec,
+          }));
+          setAds((prev) => mergeFetchedAdsWithManual(prev, fetched));
         });
       })
       .catch((err) => console.error("Ads load failed:", err))
-      .finally(() => setAdsLoading(false));
+      .finally(() => {
+        setAdsLoading(false);
+        setAdsLoadComplete(true);
+      });
   }, [clipState, isRealtime]);
 
   const handleRemoveAd = useCallback((id: string) => {
@@ -175,7 +271,16 @@ export function EditorPage() {
   }, []);
 
   const handleSelectAd = useCallback((id: string | null) => {
+    if (id !== null) {
+      setSelectedClipId(null);
+    }
     setSelectedAdId(id);
+  }, []);
+
+  const handleAdOrderChange = useCallback((adId: string, newIndex: number) => {
+    setAds((prev) =>
+      prev.map((a) => (a.id === adId ? { ...a, index: newIndex } : a)),
+    );
   }, []);
 
   const handleResizeAd = useCallback(
@@ -617,7 +722,7 @@ export function EditorPage() {
     setAds((prev) => {
       const next = [
         ...prev,
-        { id, index: prev.length + 1, startTime: t, endTime: end },
+        { id, index: prev.length + 1, startTime: t, endTime: end, addedManually: true },
       ];
       return next.map((a, i) => ({ ...a, index: i + 1 }));
     });
@@ -629,8 +734,11 @@ export function EditorPage() {
       setFinishError("Add at least one clip before creating a VOD.");
       return;
     }
-    if (!vodMetadata.title.trim() || !vodMetadata.description.trim()) {
-      setFinishError("Set title and description in the sidebar (click the session card).");
+    const clipsMissingTitle = clips.filter((c) => !c.title?.trim());
+    if (clipsMissingTitle.length > 0) {
+      setFinishError(
+        "Set a title for every clip (open the metadata control on each row in the Clips list).",
+      );
       return;
     }
     if (
@@ -802,6 +910,11 @@ export function EditorPage() {
             onCreateWithAds={() => void handleFinishCreate(true)}
             finishLoading={finishLoading}
             finishError={finishError}
+            ads={ads}
+            selectedAdId={selectedAdId}
+            onSelectAd={handleSelectAd}
+            onRemoveAd={handleRemoveAd}
+            onAdOrderChange={handleAdOrderChange}
           />
         </aside>
       </main>

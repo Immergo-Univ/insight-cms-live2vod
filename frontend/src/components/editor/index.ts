@@ -6,6 +6,7 @@ export { EditorPosterCapture } from "./editor-poster-capture";
 export { EditorTransportControls } from "./editor-transport-controls";
 export { EditorMarkInOut } from "./editor-mark-in-out";
 export { EditorClipsList } from "./editor-clips-list";
+export { EditorAdsList } from "./editor-ads-list";
 export { EditorJsonButton } from "./editor-json-button";
 export { EditorVerticalCropButton } from "./editor-vertical-crop-button";
 export { EditorSubtitleButton } from "./editor-subtitle-button";

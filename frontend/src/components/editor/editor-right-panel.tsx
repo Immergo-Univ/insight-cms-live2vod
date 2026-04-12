@@ -7,8 +7,14 @@ import {
   MenuTrigger,
   Popover as AriaPopover,
 } from "react-aria-components";
-import type { EditorSelectionMode, EditorSubClip, EditorVodMetadata } from "@/types/editor";
+import type {
+  EditorAdMarker,
+  EditorSelectionMode,
+  EditorSubClip,
+  EditorVodMetadata,
+} from "@/types/editor";
 import { cx } from "@/utils/cx";
+import { EditorAdsList } from "./editor-ads-list";
 import { EditorClipMetadataModal } from "./editor-clip-metadata-modal";
 import { EditorClipsList } from "./editor-clips-list";
 import { EditorMetadataModal } from "./editor-metadata-modal";
@@ -69,6 +75,12 @@ interface EditorRightPanelProps {
   onCreateWithAds?: () => void;
   finishLoading?: boolean;
   finishError?: string | null;
+  /** VOD timeline ad markers (EPG / time picker only). */
+  ads?: EditorAdMarker[];
+  selectedAdId?: string | null;
+  onSelectAd?: (id: string | null) => void;
+  onRemoveAd?: (id: string) => void;
+  onAdOrderChange?: (id: string, newIndex: number) => void;
 }
 
 /**
@@ -106,6 +118,11 @@ export function EditorRightPanel({
   onCreateWithAds,
   finishLoading = false,
   finishError = null,
+  ads = [],
+  selectedAdId = null,
+  onSelectAd,
+  onRemoveAd,
+  onAdOrderChange,
 }: EditorRightPanelProps) {
   const [metadataModalOpen, setMetadataModalOpen] = useState(false);
   const [clipMetadataId, setClipMetadataId] = useState<string | null>(null);
@@ -168,25 +185,45 @@ export function EditorRightPanel({
           </button>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
-          <EditorClipsList
-            clips={clips}
-            clipUrl={clipUrl}
-            channelId={channelId}
-            selectedClipId={selectedClipId}
-            onSelectClip={onSelectClip}
-            playingClipId={playingClipId}
-            isPlaying={isPlaying}
-            onPlaySubclip={onPlaySubclip}
-            onPause={onPause}
-            onOrderChange={onOrderChange}
-            onRemove={onRemoveClip}
-            onEditMetadata={(c) => setClipMetadataId(c.id)}
-            onSeek={onSeek}
-            thumbnailsEnabled={thumbnailsEnabled}
-            emptyHint={clipsEmptyHint}
-            realtimeWallClock={realtimeWallClock}
-            compact
-          />
+          <div className="flex flex-col gap-4">
+            <EditorClipsList
+              clips={clips}
+              clipUrl={clipUrl}
+              channelId={channelId}
+              selectedClipId={selectedClipId}
+              onSelectClip={onSelectClip}
+              playingClipId={playingClipId}
+              isPlaying={isPlaying}
+              onPlaySubclip={onPlaySubclip}
+              onPause={onPause}
+              onOrderChange={onOrderChange}
+              onRemove={onRemoveClip}
+              onEditMetadata={(c) => setClipMetadataId(c.id)}
+              onSeek={onSeek}
+              thumbnailsEnabled={thumbnailsEnabled}
+              emptyHint={clipsEmptyHint}
+              realtimeWallClock={realtimeWallClock}
+              compact
+            />
+            {selectionMode !== "realtime" &&
+            onSelectAd &&
+            onRemoveAd &&
+            onAdOrderChange ? (
+              <div className="border-t border-secondary pt-3">
+                <EditorAdsList
+                  ads={ads}
+                  clipUrl={clipUrl}
+                  channelId={channelId}
+                  selectedAdId={selectedAdId}
+                  onSelectAd={onSelectAd}
+                  onRemoveAd={onRemoveAd}
+                  onAdOrderChange={onAdOrderChange}
+                  onSeek={onSeek}
+                  thumbnailsEnabled={thumbnailsEnabled}
+                />
+              </div>
+            ) : null}
+          </div>
         </div>
 
         <div className="shrink-0 border-t border-secondary pt-3">
