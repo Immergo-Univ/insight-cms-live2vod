@@ -62,8 +62,8 @@ export function EditorCapturePreview({
   }, [getVideoElement, onCapture]);
 
   return (
-    <div className="flex min-w-0 flex-1 flex-col gap-2 rounded-lg border border-secondary bg-secondary p-3">
-      <h3 className="text-xs font-semibold uppercase tracking-wide text-tertiary">
+    <div className="flex min-w-0 w-full flex-col gap-1.5 rounded-lg border border-secondary bg-secondary p-2">
+      <h3 className="text-[10px] font-semibold uppercase tracking-wide text-tertiary">
         Preview
       </h3>
       <div className="flex w-full flex-col gap-0.5">
@@ -83,9 +83,9 @@ export function EditorCapturePreview({
         type="button"
         onClick={handleCapture}
         disabled={isDisabled}
-        className="w-full flex cursor-pointer items-center justify-center gap-2 rounded-lg bg-brand-solid px-3 py-2 text-sm font-semibold text-white transition-colors hover:bg-brand-solid-hover disabled:opacity-50"
+        className="flex w-full cursor-pointer items-center justify-center gap-1.5 rounded-lg bg-brand-solid px-2 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-brand-solid-hover disabled:opacity-50"
       >
-        <Camera01 className="size-4" />
+        <Camera01 className="size-3.5 shrink-0" />
         Capture
       </button>
       {posters.length > 0 ? (

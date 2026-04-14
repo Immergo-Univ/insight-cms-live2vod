@@ -74,20 +74,6 @@ export interface EditorClipPosterUpload {
 export type EditorClipPoster = EditorClipPosterCapture | EditorClipPosterUpload;
 
 /**
- * Sub-clip range (Mark In → Mark Out). Times relative to parent window (0 to duration).
- * `order` is a stable 1-based index (list order); each clip is encoded as its own output file.
- */
-export interface EditorSubClip {
-  id: string;
-  order: number;
-  startTime: number;
-  endTime: number;
-  title?: string;
-  description?: string;
-  posters?: EditorClipPoster[];
-}
-
-/**
  * Vertical (9:16) crop over a wide frame: full frame height, width = height × 9/16, horizontally positioned.
  * centerX is normalized to the source width (0 = left, 1 = right).
  */
@@ -126,6 +112,42 @@ export interface EditorSubtitlesConfig {
   languageMode?: string;
 }
 
+/** Default subtitle / whisper options for a new sub-clip or when fields are missing. */
+export const DEFAULT_EDITOR_SUBTITLE_SETTINGS: EditorSubtitleSettings = {
+  whisperSourceLanguage: "auto",
+  whisperOutputLanguage: "same",
+  style: {
+    fontSizePx: 28,
+    textColor: "#FFFFFF",
+    outlineColor: "#000000",
+    outlineWidthPx: 3,
+  },
+};
+
+/** Encode options stored per sub-clip (UI + exported JSON). */
+export interface EditorSubClipEncodeOptions {
+  /** When true, output uses 9:16 strip crop using `cropWindow`. */
+  verticalCropMode?: boolean;
+  cropWindow?: EditorCropWindow | null;
+  /** When true, whisper + burned-in subtitles using `subtitleSettings`. */
+  subtitleMode?: boolean;
+  subtitleSettings?: EditorSubtitleSettings;
+}
+
+/**
+ * Sub-clip range (Mark In → Mark Out). Times relative to parent window (0 to duration).
+ * `order` is a stable 1-based index (list order); each clip is encoded as its own output file.
+ */
+export interface EditorSubClip extends EditorSubClipEncodeOptions {
+  id: string;
+  order: number;
+  startTime: number;
+  endTime: number;
+  title?: string;
+  description?: string;
+  posters?: EditorClipPoster[];
+}
+
 /** Sub-clip row in exported editor JSON (Mark In/Out relative to parent window t=0). */
 export interface EditorStateJsonClip {
   order: number;
@@ -137,6 +159,10 @@ export interface EditorStateJsonClip {
   title?: string;
   description?: string;
   posters?: EditorClipPoster[];
+  /** Per-output-clip vertical crop (independent from other clips). */
+  cropWindow?: EditorCropWindow;
+  /** Per-output-clip burned-in subtitles (whisper). */
+  subtitles?: EditorSubtitlesConfig;
 }
 
 /**
@@ -156,8 +182,44 @@ export interface EditorStateJson {
     startProgramDateTime: string;
     endProgramDateTime: string;
   }>;
+  /**
+   * @deprecated Prefer `clips[].cropWindow` per output clip. Root value applies to all clips on old jobs only.
+   */
   cropWindow?: EditorCropWindow;
+  /**
+   * @deprecated Prefer `clips[].subtitles` per output clip. Root value applies to all clips on old jobs only.
+   */
   subtitles?: EditorSubtitlesConfig;
   /** @deprecated Use `clips[].metadata` per output clip */
   metadata?: EditorVodMetadata;
+}
+
+/** Defaults for encode-related fields when creating or hydrating a sub-clip. */
+export function defaultEditorSubClipEncodeFields(): Required<
+  Pick<EditorSubClipEncodeOptions, "verticalCropMode" | "cropWindow" | "subtitleMode">
+> & { subtitleSettings: EditorSubtitleSettings } {
+  return {
+    verticalCropMode: false,
+    cropWindow: null,
+    subtitleMode: false,
+    subtitleSettings: {
+      ...DEFAULT_EDITOR_SUBTITLE_SETTINGS,
+      style: { ...DEFAULT_EDITOR_SUBTITLE_SETTINGS.style },
+    },
+  };
+}
+
+/** Ensure optional encode fields exist (session cache / API hydration). */
+export function normalizeEditorSubClip(c: EditorSubClip): EditorSubClip {
+  const d = defaultEditorSubClipEncodeFields();
+  return {
+    ...c,
+    verticalCropMode: c.verticalCropMode ?? d.verticalCropMode,
+    cropWindow: c.cropWindow === undefined ? d.cropWindow : c.cropWindow,
+    subtitleMode: c.subtitleMode ?? d.subtitleMode,
+    subtitleSettings: c.subtitleSettings
+      ? { ...c.subtitleSettings, style: { ...c.subtitleSettings.style } }
+      : { ...d.subtitleSettings, style: { ...d.subtitleSettings.style } },
+    posters: c.posters ? [...c.posters] : undefined,
+  };
 }

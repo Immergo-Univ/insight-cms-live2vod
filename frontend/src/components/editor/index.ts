@@ -1,6 +1,7 @@
 export { EditorPlayer } from "./editor-player";
 export type { EditorPlayerRef } from "./editor-player";
 export { EditorTimeline, formatTime } from "./editor-timeline";
+export type { EditorTimelineHandle } from "./editor-timeline";
 export { EditorRealtimeRecBar } from "./editor-realtime-rec-bar";
 export { EditorPosterCapture } from "./editor-poster-capture";
 export { EditorTransportControls } from "./editor-transport-controls";
@@ -11,7 +12,6 @@ export { EditorJsonButton } from "./editor-json-button";
 export { EditorVerticalCropButton } from "./editor-vertical-crop-button";
 export { EditorSubtitleButton } from "./editor-subtitle-button";
 export { EditorRightPanel } from "./editor-right-panel";
-export { EditorCapturePreview } from "./editor-capture-preview";
 export {
   buildThumbnailUrl,
   ZOOM_LEVELS_MS,

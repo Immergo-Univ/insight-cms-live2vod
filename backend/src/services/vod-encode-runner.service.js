@@ -27,9 +27,20 @@ function shouldCancel(jobId) {
   return cancelFlags.get(jobId) === true;
 }
 
-function subtitlesEnabled(spec) {
+function anySubtitlesEnabled(spec) {
   const s = spec?.subtitles;
-  return !!(s && typeof s === "object" && s.enabled === true);
+  if (s && typeof s === "object" && s.enabled === true) return true;
+  return Array.isArray(spec?.clips) && spec.clips.some((c) => c?.subtitles?.enabled === true);
+}
+
+/**
+ * @param {object} spec
+ * @param {object | undefined} clip ordered row from spec.clips
+ */
+function subtitlesConfigForClip(spec, clip) {
+  if (clip?.subtitles?.enabled) return clip.subtitles;
+  if (spec?.subtitles?.enabled) return spec.subtitles;
+  return null;
 }
 
 /**
@@ -48,7 +59,7 @@ function logVodInfo(jobId, tenantId, burnSubs, clipHint) {
 export async function runVodEncodeJob(opts) {
   const { jobId, tenantId, spec } = opts;
   const workDir = path.join(os.tmpdir(), `vod-job-${jobId}`);
-  const burnSubs = subtitlesEnabled(spec);
+  const burnSubs = anySubtitlesEnabled(spec);
 
   try {
     logVodInfo(jobId, tenantId, burnSubs, typeof spec?.clipUrl === "string" ? spec.clipUrl : "");
@@ -100,10 +111,17 @@ export async function runVodEncodeJob(opts) {
       Array.isArray(localPaths) && localPaths.length > 0 ? [...localPaths] : [localPath].filter(Boolean);
 
     if (burnSubs) {
-      const style = spec.subtitles?.style || {};
+      const clipsSorted = [...(spec.clips || [])].sort((a, b) => a.order - b.order);
       const n = pathsToUpload.length;
       const subtitled = [];
       for (let i = 0; i < n; i++) {
+        const clipRow = clipsSorted[i];
+        const subs = subtitlesConfigForClip(spec, clipRow);
+        if (!subs) {
+          subtitled.push(pathsToUpload[i]);
+          continue;
+        }
+        const style = subs.style || {};
         const subWorkDir = path.join(workDir, `subs_clip_${i}`);
         await fs.mkdir(subWorkDir, { recursive: true });
         updateJob(jobId, {
@@ -122,7 +140,7 @@ export async function runVodEncodeJob(opts) {
           inputMp4: pathsToUpload[i],
           workDir: subWorkDir,
           style,
-          subtitles: spec.subtitles,
+          subtitles: subs,
           shouldCancel: () => shouldCancel(jobId),
           onProgress: (pct) => {
             const phase = pct < 72 ? "transcribing" : "burning_subtitles";
@@ -256,7 +274,7 @@ export function startBackgroundVodJob(opts) {
     clipUrl: clipUrlPreview || spec.clipUrl,
   });
 
-  const subs = subtitlesEnabled(spec);
+  const subs = anySubtitlesEnabled(spec);
   console.log(`[vod] queued job=${jobId} tenant=${tenantId} subtitles=${subs ? "yes" : "no"}`);
 
   queueMicrotask(() => {

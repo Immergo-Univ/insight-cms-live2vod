@@ -1,6 +1,8 @@
 import {
+  forwardRef,
   useCallback,
   useEffect,
+  useImperativeHandle,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -11,6 +13,7 @@ import { ChevronLeft, ChevronRight, Trash01 } from "@untitledui/icons";
 import { useDateFormatter } from "react-aria";
 import {
   COLUMN_WIDTH_PX,
+  FRAME_DURATION_SEC,
   ZOOM_LEVELS_MS,
   ZOOM_LABELS,
   buildThumbnailUrl,
@@ -34,6 +37,89 @@ export function formatTime(seconds: number): string {
     return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
   }
   return `${m}:${String(s).padStart(2, "0")}`;
+}
+
+/**
+ * Parse a time offset relative to the parent window (seconds).
+ * Accepts decimal seconds (e.g. "90.5") or m:ss / h:mm:ss with non-negative parts.
+ */
+export function parseRelativeTimeInput(raw: string): number | null {
+  const t = raw.trim();
+  if (t === "") return null;
+  const asNumber = Number(t);
+  if (t === String(asNumber) && Number.isFinite(asNumber)) {
+    return asNumber;
+  }
+  const parts = t.split(":").map((p) => p.trim());
+  if (parts.length < 2 || parts.length > 3) return null;
+  if (parts.some((p) => p === "")) return null;
+  const nums = parts.map((p) => Number(p));
+  if (nums.some((n) => !Number.isFinite(n) || n < 0)) return null;
+  if (parts.length === 2) return nums[0] * 60 + nums[1];
+  return nums[0] * 3600 + nums[1] * 60 + nums[2];
+}
+
+const DIGIT_TIME_INPUT_MAX_LEN = 12;
+
+/**
+ * Build m:ss or h:mm:ss from digits only (no colons), for masked typing.
+ * - 1–2 digits: total seconds (e.g. 90 → 1:30).
+ * - 3+ digits (no hours): last two = seconds, rest = minutes.
+ * - If maxSeconds ≥ 3600 and length ≥ 5: last four = mmss, prefix = hours.
+ */
+export function formatDigitsAsMaskedRelativeTime(digitsRaw: string, maxSeconds: number): string {
+  const d = digitsRaw.replace(/\D/g, "").slice(0, DIGIT_TIME_INPUT_MAX_LEN);
+  if (!d) return "";
+  const allowHours = maxSeconds >= 3600;
+
+  if (allowHours && d.length >= 5) {
+    const ss = Math.min(59, parseInt(d.slice(-2), 10) || 0);
+    const mm = Math.min(59, parseInt(d.slice(-4, -2), 10) || 0);
+    const hh = Math.max(0, parseInt(d.slice(0, -4), 10) || 0);
+    return `${hh}:${String(mm).padStart(2, "0")}:${String(ss).padStart(2, "0")}`;
+  }
+  if (d.length <= 2) {
+    const v = parseInt(d, 10) || 0;
+    const capped = Math.min(Math.max(0, Math.floor(maxSeconds)), v);
+    const m = Math.floor(capped / 60);
+    const s = capped % 60;
+    return `${m}:${String(s).padStart(2, "0")}`;
+  }
+  const ss = Math.min(59, parseInt(d.slice(-2), 10) || 0);
+  const mm = Math.max(0, parseInt(d.slice(0, -2), 10) || 0);
+  return `${mm}:${String(ss).padStart(2, "0")}`;
+}
+
+/** Allowed chars while typing with colons; otherwise digit-only mask applies. */
+export function filterRelativeTimeTyping(raw: string): string {
+  return raw.replace(/[^\d:]/g, "").slice(0, 32);
+}
+
+/** Clamp sub-clip [start,end] to [0,maxDuration] with minimum length; swap if start > end. */
+export function clampClipTimeRange(
+  start: number,
+  end: number,
+  maxDuration: number,
+  minDuration: number = FRAME_DURATION_SEC,
+): { startTime: number; endTime: number } | null {
+  const maxT = Math.max(0, maxDuration);
+  if (maxT <= 0) return null;
+  const minLen = Math.min(Math.max(minDuration, 1e-6), maxT);
+  let s = start;
+  let e = end;
+  if (s > e) {
+    const tmp = s;
+    s = e;
+    e = tmp;
+  }
+  s = Math.max(0, Math.min(s, maxT));
+  e = Math.max(0, Math.min(e, maxT));
+  if (e - s < minLen) {
+    e = Math.min(maxT, s + minLen);
+    s = Math.max(0, e - minLen);
+  }
+  if (e <= s) return null;
+  return { startTime: s, endTime: e };
 }
 
 /** Wide hit target + NLE-style vertical trim grip (in/out brackets on the filmstrip). */
@@ -166,32 +252,41 @@ interface EditorTimelineProps {
   markInOutDisabled?: boolean;
 }
 
-export function EditorTimeline({
-  durationSeconds,
-  currentTimeSeconds,
-  clipUrl,
-  channelId,
-  zoomIndex,
-  onZoomIndexChange,
-  onSeek,
-  onTrackClick,
-  clips = [],
-  selectedClipId = null,
-  onSelectClip,
-  onRemoveClip,
-  onResizeClip,
-  ads = [],
-  adsLoading = false,
-  onRemoveAd,
-  onResizeAd,
-  selectedAdId = null,
-  onSelectAd,
-  clipStartUnixSec = 0,
-  clientTimeZone,
-  onMarkIn,
-  onMarkOut,
-  markInOutDisabled,
-}: EditorTimelineProps) {
+export type EditorTimelineHandle = {
+  /** Horizontally scrolls the filmstrip so `timeSeconds` sits at the viewport center. */
+  scrollTimeToCenter: (timeSeconds: number) => void;
+};
+
+export const EditorTimeline = forwardRef<EditorTimelineHandle, EditorTimelineProps>(
+  function EditorTimeline(
+    {
+      durationSeconds,
+      currentTimeSeconds,
+      clipUrl,
+      channelId,
+      zoomIndex,
+      onZoomIndexChange,
+      onSeek,
+      onTrackClick,
+      clips = [],
+      selectedClipId = null,
+      onSelectClip,
+      onRemoveClip,
+      onResizeClip,
+      ads = [],
+      adsLoading = false,
+      onRemoveAd,
+      onResizeAd,
+      selectedAdId = null,
+      onSelectAd,
+      clipStartUnixSec = 0,
+      clientTimeZone,
+      onMarkIn,
+      onMarkOut,
+      markInOutDisabled,
+    },
+    ref,
+  ) {
   const scrollRef = useRef<HTMLDivElement>(null);
   /** Thin horizontal scrollbar below thumbnails, synced with scrollRef */
   const railRef = useRef<HTMLDivElement>(null);
@@ -279,6 +374,24 @@ export function EditorTimeline({
 
   const playheadPx =
     durationSeconds > 0 ? currentTimeSeconds * pixelsPerSecond : 0;
+
+  const scrollTimeToCenter = useCallback(
+    (timeSeconds: number) => {
+      const content = scrollRef.current;
+      const rail = railRef.current;
+      if (!content || durationSeconds <= 0) return;
+      const t = Math.max(0, Math.min(timeSeconds, durationSeconds));
+      const px = t * pixelsPerSecond;
+      const target = px - content.clientWidth / 2;
+      const maxScroll = Math.max(0, content.scrollWidth - content.clientWidth);
+      const next = Math.max(0, Math.min(target, maxScroll));
+      content.scrollTo({ left: next, behavior: "smooth" });
+      rail?.scrollTo({ left: next, behavior: "smooth" });
+    },
+    [durationSeconds, pixelsPerSecond],
+  );
+
+  useImperativeHandle(ref, () => ({ scrollTimeToCenter }), [scrollTimeToCenter]);
 
   const wallClockFormatter = useDateFormatter({
     month: "short",
@@ -616,9 +729,12 @@ export function EditorTimeline({
       if (!onSelectClip) return;
       if (!isSelected) onSelectAd?.(null);
       onSelectClip(isSelected ? null : c.id);
-      if (!isSelected) onSeek(c.startTime);
+      if (!isSelected) {
+        onSeek(c.startTime);
+        scrollTimeToCenter(c.startTime);
+      }
     },
-    [onSelectClip, onSelectAd, onSeek],
+    [onSelectClip, onSelectAd, onSeek, scrollTimeToCenter],
   );
 
   const handleAdOverlayClick = useCallback(
@@ -630,9 +746,12 @@ export function EditorTimeline({
       if (!onSelectAd) return;
       if (!isSelected) onSelectClip?.(null);
       onSelectAd(isSelected ? null : ad.id);
-      if (!isSelected) onSeek(ad.startTime);
+      if (!isSelected) {
+        onSeek(ad.startTime);
+        scrollTimeToCenter(ad.startTime);
+      }
     },
-    [onSelectAd, onSelectClip, onSeek],
+    [onSelectAd, onSelectClip, onSeek, scrollTimeToCenter],
   );
 
   if (durationSeconds <= 0) {
@@ -1017,4 +1136,7 @@ export function EditorTimeline({
       </div>
     </div>
   );
-}
+  },
+);
+
+EditorTimeline.displayName = "EditorTimeline";

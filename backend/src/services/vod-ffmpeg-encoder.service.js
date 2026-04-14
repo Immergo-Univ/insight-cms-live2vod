@@ -348,10 +348,10 @@ function runFfmpeg(args, shouldCancel) {
 /**
  * @typedef {object} EditorEncodeSpec
  * @property {string} clipUrl
- * @property {Array<{ order: number, startTime: number, endTime: number, metadata?: { title?: string, description?: string, tags?: string }, posters?: unknown[] }>} clips
+ * @property {Array<{ order: number, startTime: number, endTime: number, metadata?: { title?: string, description?: string, tags?: string }, posters?: unknown[], cropWindow?: { aspectRatio: string, centerX: number }, subtitles?: { enabled: boolean, whisperSourceLanguage?: string, whisperOutputLanguage?: string, languageMode?: string, style?: { fontSizePx?: number, textColor?: string, outlineColor?: string, outlineWidthPx?: number } } }>} clips
  * @property {Array<{ startTime: number, endTime: number }>} [ads]
- * @property {{ aspectRatio: string, centerX: number }} [cropWindow]
- * @property {{ enabled: boolean, whisperSourceLanguage?: string, whisperOutputLanguage?: string, languageMode?: string, style?: { fontSizePx?: number, textColor?: string, outlineColor?: string, outlineWidthPx?: number } }} [subtitles]
+ * @property {{ aspectRatio: string, centerX: number }} [cropWindow] legacy: applies to all clips if clips[].cropWindow missing
+ * @property {{ enabled: boolean, whisperSourceLanguage?: string, whisperOutputLanguage?: string, languageMode?: string, style?: { fontSizePx?: number, textColor?: string, outlineColor?: string, outlineWidthPx?: number } }} [subtitles] legacy: applies to all clips if clips[].subtitles missing
  */
 
 /**
@@ -384,13 +384,20 @@ export async function encodeEditorJsonToMp4(ctx) {
     throw new Error("No segments to encode after applying clips and ad removal");
   }
 
-  let videoFilter = null;
-  const cropWin = spec.cropWindow;
-  const centerXNum = cropWin ? Number(cropWin.centerX) : NaN;
-  if (cropWin && cropWin.aspectRatio === "9:16" && Number.isFinite(centerXNum)) {
-    const { width: iw, height: ih } = await runFfprobeVideoSize(clipUrl);
-    const { cropW, cropH, cropX, cropY } = computeNineSixteenStripCrop(iw, ih, centerXNum);
-    videoFilter = `crop=${cropW}:${cropH}:${cropX}:${cropY}`;
+  const { width: iw, height: ih } = await runFfprobeVideoSize(clipUrl);
+
+  /**
+   * @param {unknown} clip
+   * @returns {string | null}
+   */
+  function videoFilterForClip(clip) {
+    const cropWin = clip?.cropWindow ?? spec.cropWindow;
+    const centerXNum = cropWin ? Number(cropWin.centerX) : NaN;
+    if (cropWin && cropWin.aspectRatio === "9:16" && Number.isFinite(centerXNum)) {
+      const { cropW, cropH, cropX, cropY } = computeNineSixteenStripCrop(iw, ih, centerXNum);
+      return `crop=${cropW}:${cropH}:${cropX}:${cropY}`;
+    }
+    return null;
   }
 
   let doneParts = 0;
@@ -399,6 +406,7 @@ export async function encodeEditorJsonToMp4(ctx) {
 
   for (let ci = 0; ci < clipsSorted.length; ci++) {
     const clip = clipsSorted[ci];
+    const videoFilter = videoFilterForClip(clip);
     const parts = subtractAdsFromInterval(Number(clip.startTime), Number(clip.endTime), ads);
     if (parts.length === 0) {
       throw new Error(`Clip order ${clip.order} has no playable segments after ad removal`);
@@ -414,7 +422,7 @@ export async function encodeEditorJsonToMp4(ctx) {
         end: e,
         outputPath: clipOut,
         shouldCancel,
-        videoFilter: videoFilter ?? undefined,
+        videoFilter: videoFilter || undefined,
       });
       doneParts += 1;
       onProgress?.(Math.min(90, Math.round((doneParts / totalParts) * 90)));
@@ -430,7 +438,7 @@ export async function encodeEditorJsonToMp4(ctx) {
           end: e,
           outputPath: segPath,
           shouldCancel,
-          videoFilter: videoFilter ?? undefined,
+          videoFilter: videoFilter || undefined,
         });
         segmentFiles.push(segPath);
         doneParts += 1;

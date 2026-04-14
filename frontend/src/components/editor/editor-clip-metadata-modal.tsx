@@ -164,8 +164,8 @@ export function EditorClipMetadataModal({
               <div className="flex flex-col gap-2">
                 <span className="text-xs font-medium text-secondary">Posters</span>
                 <p className="text-[10px] text-tertiary">
-                  Upload images to the same storage as channel logos (posters folder on the bucket) or use
-                  Capture while this clip is selected in the list.
+                  Upload images to the same storage as channel logos (posters folder on the bucket), use the
+                  camera button on the clip row to bookmark the current playhead, or remove entries below.
                 </p>
                 <input
                   ref={fileRef}

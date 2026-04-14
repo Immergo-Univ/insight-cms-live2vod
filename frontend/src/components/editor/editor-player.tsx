@@ -228,7 +228,7 @@ export const EditorPlayer = forwardRef<EditorPlayerRef, EditorPlayerProps>(
     return (
       <div
         ref={outerRef}
-        className="relative aspect-video w-full max-w-3xl overflow-hidden rounded-lg bg-black"
+        className="relative aspect-video w-full max-w-full overflow-hidden rounded-lg bg-black"
       >
         <div ref={containerRef} className="video-js-container" />
         {verticalCropActive && onVerticalCropCenterXChange ? (

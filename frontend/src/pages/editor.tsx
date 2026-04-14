@@ -14,9 +14,6 @@ import {
   EditorRealtimeRecBar,
   EditorJsonButton,
   EditorRightPanel,
-  EditorCapturePreview,
-  EditorVerticalCropButton,
-  EditorSubtitleButton,
 } from "@/components/editor";
 import { ProcessingClipsNavButton } from "@/components/live2vod/processing-clips-nav-button";
 import { httpClient } from "@/services/http-client";
@@ -25,32 +22,21 @@ import {
   FRAME_DURATION_SEC,
   ZOOM_LEVELS_MS,
 } from "@/components/editor/editor-constants";
-import type { EditorPlayerRef } from "@/components/editor";
+import { clampClipTimeRange } from "@/components/editor/editor-timeline";
+import type { EditorPlayerRef, EditorTimelineHandle } from "@/components/editor";
 import { detectAds, getPrecalculatedAds } from "@/services/ads.service";
 import type {
   EditorAdMarker,
   EditorClipState,
-  EditorCropWindow,
-  EditorPosterEntry,
   EditorStateJson,
   EditorSubClip,
   EditorSubtitleSettings,
 } from "@/types/editor";
+import { DEFAULT_EDITOR_SUBTITLE_SETTINGS, defaultEditorSubClipEncodeFields } from "@/types/editor";
 import { isValidWhisperSubtitlePair } from "@/types/editor-whisper-languages";
 
 /** Default length for a manually inserted ad slot (seconds). */
 const DEFAULT_NEW_AD_DURATION_SEC = 30;
-
-const DEFAULT_SUBTITLE_SETTINGS: EditorSubtitleSettings = {
-  whisperSourceLanguage: "auto",
-  whisperOutputLanguage: "same",
-  style: {
-    fontSizePx: 28,
-    textColor: "#FFFFFF",
-    outlineColor: "#000000",
-    outlineWidthPx: 3,
-  },
-};
 
 /** Keep user-placed slots when precalc/detect finishes (avoids wiping manual ads). */
 function mergeFetchedAdsWithManual(prev: EditorAdMarker[], fetched: EditorAdMarker[]): EditorAdMarker[] {
@@ -93,13 +79,8 @@ function parentWallEndUnix(clipState: EditorClipState, subClips: EditorSubClip[]
 function buildEditorStateJson(
   clipState: EditorClipState,
   clips: EditorSubClip[],
-  sessionPosters: EditorPosterEntry[],
   ads: EditorAdMarker[],
   includeAds: boolean,
-  verticalCropMode: boolean,
-  cropWindow: EditorCropWindow | null,
-  subtitleMode: boolean,
-  subtitleSettings: EditorSubtitleSettings,
   nowUnix: number,
 ): EditorStateJson {
   const absEpochToIso = (absSec: number) => {
@@ -130,31 +111,55 @@ function buildEditorStateJson(
     sourceM3u8: clipState.sourceM3u8,
     startTime: parentWallStart,
     endTime: parentWallEnd,
-    posters: sessionPosters.map((p) => ({ ...p })),
-    clips: sortedClips.map((c) => ({
-      order: c.order,
-      startTime: c.startTime,
-      endTime: c.endTime,
-      metadata: {
-        title: c.title?.trim() ?? "",
-        description: c.description?.trim() ?? "",
-        tags: "",
-      },
-      ...(c.posters?.length ? { posters: c.posters } : {}),
-    })),
+    posters: [],
+    clips: sortedClips.map((c) => {
+      const st = c.subtitleSettings ?? DEFAULT_EDITOR_SUBTITLE_SETTINGS;
+      return {
+        order: c.order,
+        startTime: c.startTime,
+        endTime: c.endTime,
+        metadata: {
+          title: c.title?.trim() ?? "",
+          description: c.description?.trim() ?? "",
+          tags: "",
+        },
+        ...(c.posters?.length ? { posters: c.posters } : {}),
+        ...(c.verticalCropMode && c.cropWindow ? { cropWindow: { ...c.cropWindow } } : {}),
+        ...(c.subtitleMode
+          ? {
+              subtitles: {
+                enabled: true as const,
+                whisperSourceLanguage: st.whisperSourceLanguage,
+                whisperOutputLanguage: st.whisperOutputLanguage,
+                style: { ...st.style },
+              },
+            }
+          : {}),
+      };
+    }),
     ads: adsOut,
-    ...(verticalCropMode && cropWindow ? { cropWindow } : {}),
-    ...(subtitleMode
-      ? {
-          subtitles: {
-            enabled: true as const,
-            whisperSourceLanguage: subtitleSettings.whisperSourceLanguage,
-            whisperOutputLanguage: subtitleSettings.whisperOutputLanguage,
-            style: { ...subtitleSettings.style },
-          },
-        }
-      : {}),
   };
+}
+
+function getEditorEffectiveDuration(
+  clipState: EditorClipState,
+  clips: EditorSubClip[],
+  duration: number,
+  isRealtime: boolean,
+  nowUnixSec: number,
+): number {
+  const durationSeconds = isRealtime
+    ? Math.max(
+        60,
+        clips.length ? Math.max(...clips.map((c) => c.endTime)) : 0,
+        Math.floor(nowUnixSec) - clipState.startTime,
+      )
+    : clipState.endTime - clipState.startTime;
+  return isRealtime
+    ? durationSeconds
+    : duration > 0 && Number.isFinite(duration)
+      ? duration
+      : durationSeconds;
 }
 
 export function EditorPage() {
@@ -183,14 +188,12 @@ export function EditorPage() {
   const shouldSkipAdsFetchRef = useRef(!!mountSnapshot?.adsLoadComplete);
 
   const playerRef = useRef<EditorPlayerRef>(null);
+  const timelineRef = useRef<EditorTimelineHandle>(null);
   const [muted, setMuted] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [zoomIndex, setZoomIndex] = useState(() => mountSnapshot?.fromCache === true ? mountSnapshot.zoomIndex : 1);
-  const [posters, setPosters] = useState<EditorPosterEntry[]>(() =>
-    mountSnapshot?.fromCache === true ? mountSnapshot.posters : [],
-  );
   const [clips, setClips] = useState<EditorSubClip[]>(() =>
     mountSnapshot?.fromCache === true ? mountSnapshot.clips : [],
   );
@@ -208,18 +211,6 @@ export function EditorPage() {
   const [playingClipId, setPlayingClipId] = useState<string | null>(null);
   const [finishLoading, setFinishLoading] = useState(false);
   const [finishError, setFinishError] = useState<string | null>(null);
-  const [verticalCropMode, setVerticalCropMode] = useState(() =>
-    mountSnapshot?.fromCache === true ? mountSnapshot.verticalCropMode : false,
-  );
-  const [cropWindow, setCropWindow] = useState<EditorCropWindow | null>(() =>
-    mountSnapshot?.fromCache === true ? mountSnapshot.cropWindow : null,
-  );
-  const [subtitleMode, setSubtitleMode] = useState(() =>
-    mountSnapshot?.fromCache === true ? mountSnapshot.subtitleMode : false,
-  );
-  const [subtitleSettings, setSubtitleSettings] = useState<EditorSubtitleSettings>(() =>
-    mountSnapshot?.fromCache === true ? mountSnapshot.subtitleSettings : DEFAULT_SUBTITLE_SETTINGS,
-  );
   const [jsonPanelOpen, setJsonPanelOpen] = useState(false);
 
   const [ads, setAds] = useState<EditorAdMarker[]>(() =>
@@ -237,35 +228,28 @@ export function EditorPage() {
     if (!sessionKey) return;
     const draft: EditorSessionDraft = {
       clips,
-      posters,
+      posters: [],
       ads,
-      verticalCropMode,
-      cropWindow,
-      subtitleMode,
-      subtitleSettings,
       zoomIndex,
       selectedClipId,
       selectedAdId,
       adsLoadComplete,
     };
     setEditorSessionDraft(sessionKey, draft);
-  }, [
-    sessionKey,
-    clips,
-    posters,
-    ads,
-    verticalCropMode,
-    cropWindow,
-    subtitleMode,
-    subtitleSettings,
-    zoomIndex,
-    selectedClipId,
-    selectedAdId,
-    adsLoadComplete,
-  ]);
+  }, [sessionKey, clips, ads, zoomIndex, selectedClipId, selectedAdId, adsLoadComplete]);
 
   const selectionMode = clipState?.selectionMode ?? "epg";
   const isRealtime = selectionMode === "realtime";
+
+  const selectedEncodeClip = useMemo(
+    () => (selectedClipId ? clips.find((c) => c.id === selectedClipId) ?? null : null),
+    [clips, selectedClipId],
+  );
+  const verticalCropActive = !!(selectedEncodeClip?.verticalCropMode && selectedEncodeClip?.cropWindow);
+  const verticalCropCenterX = selectedEncodeClip?.cropWindow?.centerX ?? 0.5;
+  const subtitleOverlayActive = !!(selectedEncodeClip?.subtitleMode);
+  const subtitleSettingsForPlayer =
+    selectedEncodeClip?.subtitleSettings ?? DEFAULT_EDITOR_SUBTITLE_SETTINGS;
 
   const [realtimeTick, setRealtimeTick] = useState(0);
   useEffect(() => {
@@ -353,7 +337,15 @@ export function EditorPage() {
   const handleSelectClip = useCallback((id: string | null) => {
     setSelectedAdId(null);
     setSelectedClipId(id);
-  }, []);
+    if (id === null) return;
+    const clip = clips.find((c) => c.id === id);
+    if (!clip) return;
+    const t = clip.startTime;
+    // After React commit / layout so scrollWidth and zoom track match the visible timeline.
+    requestAnimationFrame(() => {
+      timelineRef.current?.scrollTimeToCenter(t);
+    });
+  }, [clips]);
 
   const handleSelectAd = useCallback((id: string | null) => {
     if (id !== null) {
@@ -473,16 +465,13 @@ export function EditorPage() {
         );
         return;
       }
-      const wallDuration = clipState.endTime - clipState.startTime;
-      const eff = isRealtime
-        ? Math.max(
-            60,
-            clips.length ? Math.max(...clips.map((c) => c.endTime)) : 0,
-            Math.floor(Date.now() / 1000) - clipState.startTime,
-          )
-        : duration > 0 && Number.isFinite(duration)
-          ? duration
-          : wallDuration;
+      const eff = getEditorEffectiveDuration(
+        clipState,
+        clips,
+        duration,
+        isRealtime,
+        Date.now() / 1000,
+      );
       const windowSec = (ZOOM_LEVELS_MS[zoomIndex] ?? ZOOM_LEVELS_MS[0]) / 1000;
       let end = Math.min(timeSeconds + windowSec, eff);
       if (end <= timeSeconds) {
@@ -500,12 +489,62 @@ export function EditorPage() {
             order: nextOrder,
             startTime: timeSeconds,
             endTime: end,
+            ...defaultEditorSubClipEncodeFields(),
           },
         ];
       });
       setSelectedClipId(id);
     },
     [clipState, selectedClipId, isRealtime, clips, duration, zoomIndex],
+  );
+
+  /** Append a new sub-clip at the current playhead (same span logic as Mark In without selection). */
+  const handleAddClipAtPlayhead = useCallback(
+    (variant: "vertical" | "horizontal") => {
+      if (!clipState?.clipUrl) return;
+      setSelectedAdId(null);
+      const timeSeconds = playerRef.current?.getCurrentTime() ?? currentTime;
+      const eff = getEditorEffectiveDuration(
+        clipState,
+        clips,
+        duration,
+        isRealtime,
+        Date.now() / 1000,
+      );
+      const windowSec = (ZOOM_LEVELS_MS[zoomIndex] ?? ZOOM_LEVELS_MS[0]) / 1000;
+      let end = Math.min(timeSeconds + windowSec, eff);
+      if (end <= timeSeconds) {
+        end = Math.min(timeSeconds + FRAME_DURATION_SEC, eff);
+      }
+      if (end <= timeSeconds) return;
+      const encodeBase = defaultEditorSubClipEncodeFields();
+      const encode =
+        variant === "vertical"
+          ? {
+              ...encodeBase,
+              verticalCropMode: true,
+              cropWindow: { aspectRatio: "9:16" as const, centerX: 0.5 },
+            }
+          : encodeBase;
+      const id = crypto.randomUUID();
+      setClips((prev) => {
+        const nextOrder =
+          prev.length === 0 ? 1 : Math.max(...prev.map((c) => c.order)) + 1;
+        return [
+          ...prev,
+          {
+            id,
+            order: nextOrder,
+            startTime: timeSeconds,
+            endTime: end,
+            ...encode,
+          },
+        ];
+      });
+      setSelectedClipId(id);
+      timelineRef.current?.scrollTimeToCenter(timeSeconds);
+    },
+    [clipState, clips, duration, isRealtime, zoomIndex, currentTime],
   );
 
   const handleMarkOut = useCallback(
@@ -567,14 +606,43 @@ export function EditorPage() {
     []
   );
 
-  const handleCapturePoster = useCallback(() => {
-    const t = playerRef.current?.getCurrentTime() ?? currentTime;
-    const id = crypto.randomUUID();
-    const capturedAt = new Date().toISOString();
-    if (selectedClipId) {
+  const handleClipTimesCommitFromList = useCallback(
+    (clipId: string, startTime: number, endTime: number): { startTime: number; endTime: number } | null => {
+      if (!clipState?.clipUrl) return null;
+      const maxT = getEditorEffectiveDuration(
+        clipState,
+        clips,
+        duration,
+        isRealtime,
+        Date.now() / 1000,
+      );
+      const r = clampClipTimeRange(startTime, endTime, maxT, FRAME_DURATION_SEC);
+      if (!r) return null;
+      const cur = clips.find((c) => c.id === clipId);
+      if (!cur) return null;
+      if (cur.startTime === r.startTime && cur.endTime === r.endTime) return null;
+      setClips((prev) =>
+        prev.map((c) => (c.id === clipId ? { ...c, ...r } : c)),
+      );
+      playerRef.current?.seek(r.startTime);
+      timelineRef.current?.scrollTimeToCenter(r.startTime);
+      return r;
+    },
+    [clipState, clips, duration, isRealtime, realtimeTick],
+  );
+
+  const handleCaptureClipPoster = useCallback(
+    (clipId: string) => {
+      const t = playerRef.current?.getCurrentTime() ?? currentTime;
+      const clip = clips.find((c) => c.id === clipId);
+      if (!clip) return;
+      const clamped = Math.min(Math.max(t, clip.startTime), clip.endTime);
+      const id = crypto.randomUUID();
+      const capturedAt = new Date().toISOString();
+      const orientation = clip.verticalCropMode ? "portrait" : "landscape";
       setClips((prev) =>
         prev.map((c) =>
-          c.id === selectedClipId
+          c.id === clipId
             ? {
                 ...c,
                 posters: [
@@ -582,8 +650,8 @@ export function EditorPage() {
                   {
                     kind: "capture" as const,
                     id,
-                    timeSeconds: t,
-                    orientation: "landscape",
+                    timeSeconds: clamped,
+                    orientation,
                     capturedAt,
                   },
                 ],
@@ -591,81 +659,96 @@ export function EditorPage() {
             : c,
         ),
       );
-      return;
-    }
-    setPosters((prev) => [
-      ...prev,
-      {
-        id,
-        timeSeconds: t,
-        orientation: "landscape",
-        capturedAt,
-      },
-    ]);
-  }, [currentTime, selectedClipId]);
-
-  const handleRemovePoster = useCallback((id: string) => {
-    setPosters((prev) => prev.filter((p) => p.id !== id));
-  }, []);
+    },
+    [clips, currentTime],
+  );
 
   const handleSeek = useCallback((timeSeconds: number) => {
     playerRef.current?.seek(timeSeconds);
   }, []);
 
-  const handleVerticalCropToggle = useCallback(() => {
-    setVerticalCropMode((prev) => {
-      if (prev) {
-        setCropWindow(null);
-        setJsonPanelOpen(false);
-        return false;
-      }
-      setCropWindow({ aspectRatio: "9:16", centerX: 0.5 });
-      return true;
+  const handleSeekWithTimelineScroll = useCallback(
+    (timeSeconds: number) => {
+      handleSeek(timeSeconds);
+      timelineRef.current?.scrollTimeToCenter(timeSeconds);
+    },
+    [handleSeek],
+  );
+
+  const handleToggleClipVerticalCrop = useCallback((clipId: string) => {
+    let turningOff = false;
+    setClips((prev) => {
+      const cur = prev.find((c) => c.id === clipId);
+      turningOff = !!(cur?.verticalCropMode);
+      return prev.map((c) => {
+        if (c.id !== clipId) return c;
+        if (turningOff) return { ...c, verticalCropMode: false, cropWindow: null };
+        return {
+          ...c,
+          verticalCropMode: true,
+          cropWindow: c.cropWindow ?? { aspectRatio: "9:16", centerX: 0.5 },
+        };
+      });
     });
+    if (turningOff) setJsonPanelOpen(false);
   }, []);
 
-  const handleSubtitleToggle = useCallback(() => {
-    setSubtitleMode((prev) => {
-      if (prev) {
-        setJsonPanelOpen(false);
-        return false;
-      }
-      return true;
+  const handleToggleClipSubtitle = useCallback((clipId: string) => {
+    let turningOff = false;
+    setClips((prev) => {
+      const cur = prev.find((c) => c.id === clipId);
+      turningOff = !!(cur?.subtitleMode);
+      return prev.map((c) => {
+        if (c.id !== clipId) return c;
+        if (turningOff) return { ...c, subtitleMode: false };
+        return {
+          ...c,
+          subtitleMode: true,
+          subtitleSettings: c.subtitleSettings ?? {
+            ...DEFAULT_EDITOR_SUBTITLE_SETTINGS,
+            style: { ...DEFAULT_EDITOR_SUBTITLE_SETTINGS.style },
+          },
+        };
+      });
     });
+    if (turningOff) setJsonPanelOpen(false);
   }, []);
 
-  const handleVerticalCropCenterX = useCallback((centerX: number) => {
-    setCropWindow((cw) =>
-      cw ? { ...cw, centerX } : { aspectRatio: "9:16", centerX },
-    );
-  }, []);
+  const handleVerticalCropCenterX = useCallback(
+    (centerX: number) => {
+      if (!selectedClipId) return;
+      setClips((prev) =>
+        prev.map((c) => {
+          if (c.id !== selectedClipId) return c;
+          if (c.cropWindow && c.verticalCropMode) {
+            return { ...c, cropWindow: { ...c.cropWindow, centerX } };
+          }
+          return {
+            ...c,
+            verticalCropMode: true,
+            cropWindow: { aspectRatio: "9:16", centerX },
+          };
+        }),
+      );
+    },
+    [selectedClipId],
+  );
+
+  const handleSelectedClipSubtitleSettingsChange = useCallback(
+    (settings: EditorSubtitleSettings) => {
+      if (!selectedClipId) return;
+      setClips((prev) =>
+        prev.map((c) => (c.id === selectedClipId ? { ...c, subtitleSettings: settings } : c)),
+      );
+    },
+    [selectedClipId],
+  );
 
   const stateJson: EditorStateJson | null = useMemo(() => {
     if (!clipState?.clipUrl) return null;
     const nowSec = Math.floor(Date.now() / 1000);
-    return buildEditorStateJson(
-      clipState,
-      clips,
-      posters,
-      ads,
-      true,
-      verticalCropMode,
-      cropWindow,
-      subtitleMode,
-      subtitleSettings,
-      nowSec,
-    );
-  }, [
-    clipState,
-    clips,
-    posters,
-    ads,
-    verticalCropMode,
-    cropWindow,
-    subtitleMode,
-    subtitleSettings,
-    realtimeTick,
-  ]);
+    return buildEditorStateJson(clipState, clips, ads, true, nowSec);
+  }, [clipState, clips, ads, realtimeTick]);
 
   useEffect(() => {
     if (!clipState?.clipUrl || clipState.selectionMode !== "realtime") return;
@@ -700,18 +783,13 @@ export function EditorPage() {
     );
   }
 
-  const durationSeconds = isRealtime
-    ? Math.max(
-        60,
-        clips.length ? Math.max(...clips.map((c) => c.endTime)) : 0,
-        Math.floor(Date.now() / 1000) - clipState.startTime,
-      )
-    : clipState.endTime - clipState.startTime;
-  const effectiveDuration = isRealtime
-    ? durationSeconds
-    : duration > 0 && Number.isFinite(duration)
-      ? duration
-      : durationSeconds;
+  const effectiveDuration = getEditorEffectiveDuration(
+    clipState,
+    clips,
+    duration,
+    isRealtime,
+    Date.now() / 1000,
+  );
   const channelId = clipState.channelId ?? "";
 
   const handleAddAdSlot = () => {
@@ -744,14 +822,19 @@ export function EditorPage() {
       );
       return;
     }
-    if (
-      subtitleMode &&
-      !isValidWhisperSubtitlePair(
-        subtitleSettings.whisperSourceLanguage,
-        subtitleSettings.whisperOutputLanguage,
-      )
-    ) {
-      setFinishError("Fix subtitle languages in the subtitle style dialog (invalid video vs subtitle combination).");
+    const clipBadSubtitles = clips.find(
+      (c) =>
+        c.subtitleMode &&
+        !isValidWhisperSubtitlePair(
+          (c.subtitleSettings ?? DEFAULT_EDITOR_SUBTITLE_SETTINGS).whisperSourceLanguage,
+          (c.subtitleSettings ?? DEFAULT_EDITOR_SUBTITLE_SETTINGS).whisperOutputLanguage,
+        ),
+    );
+    if (clipBadSubtitles) {
+      const label = clipBadSubtitles.title?.trim() || `order ${clipBadSubtitles.order}`;
+      setFinishError(
+        `Fix subtitle languages for clip "${label}" (subtitle style dialog: invalid video vs subtitle combination).`,
+      );
       return;
     }
     if (!httpClient.getTenantId()) {
@@ -765,13 +848,8 @@ export function EditorPage() {
       const spec = buildEditorStateJson(
         clipState,
         clips,
-        posters,
         ads,
         includeAds,
-        verticalCropMode,
-        cropWindow,
-        subtitleMode,
-        subtitleSettings,
         Math.floor(Date.now() / 1000),
       );
       await startVodJob(spec);
@@ -796,132 +874,114 @@ export function EditorPage() {
         <h1 className="text-lg font-semibold text-primary">Live2VOD Editor</h1>
       </header>
 
-      <main className="flex min-h-0 flex-1 flex-row overflow-hidden">
-        {/* Left column: Player, Timeline — scroll if needed so timeline is never squashed under Preview */}
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-3 overflow-y-auto overflow-x-hidden px-4 py-2">
-          {/* 1. Video player (~2/3) + Capture & Preview (~1/3) */}
-          <section className="flex shrink-0 items-start gap-3">
-            <div className="min-w-0 flex-[2]">
-              <EditorPlayer
-                ref={playerRef}
-                clipUrl={clipState.clipUrl}
-                muted={muted}
-                onMutedChange={setMuted}
-                onTimeUpdate={setCurrentTime}
-                onDurationChange={setDuration}
-                onPlay={() => setIsPlaying(true)}
-                onPause={() => setIsPlaying(false)}
-                isPlaying={isPlaying}
-                onTransportPlay={handlePlay}
-                onTransportPause={handlePause}
-                onTransportStop={handleStop}
-                markRangeAwaitingOut={false}
-                verticalCropActive={verticalCropMode}
-                verticalCropCenterX={cropWindow?.centerX ?? 0.5}
+      <main className="flex min-h-0 flex-1 flex-col overflow-hidden">
+        {/* Row 1: Player | Clips (clips column scrolls inside) */}
+        <div className="flex min-h-0 flex-1 flex-row items-stretch gap-1.5 overflow-hidden px-4 py-2 sm:gap-2">
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col self-start">
+            <EditorPlayer
+              ref={playerRef}
+              clipUrl={clipState.clipUrl}
+              muted={muted}
+              onMutedChange={setMuted}
+              onTimeUpdate={setCurrentTime}
+              onDurationChange={setDuration}
+              onPlay={() => setIsPlaying(true)}
+              onPause={() => setIsPlaying(false)}
+              isPlaying={isPlaying}
+              onTransportPlay={handlePlay}
+              onTransportPause={handlePause}
+              onTransportStop={handleStop}
+              markRangeAwaitingOut={false}
+                verticalCropActive={verticalCropActive}
+                verticalCropCenterX={verticalCropCenterX}
                 onVerticalCropCenterXChange={handleVerticalCropCenterX}
-                subtitleOverlayActive={subtitleMode}
-                subtitleSettings={subtitleSettings}
-                onSubtitleSettingsChange={setSubtitleSettings}
-              />
-            </div>
-            <div className="min-h-0 min-w-0 flex-1 basis-0">
-              <EditorCapturePreview
-                posters={posters}
-                currentTimeSeconds={currentTime}
-                onCapture={handleCapturePoster}
-                onRemovePoster={handleRemovePoster}
-                onSeek={handleSeek}
-                getVideoElement={() => playerRef.current?.getVideoElement() ?? null}
-              />
-            </div>
-          </section>
-
-          {/* 2. Timeline + Zoom — natural height (no flex-1) so Mark In/Out never stacks under Preview */}
-          <section className="flex w-full min-w-0 shrink-0 flex-col">
-            {isRealtime ? (
-              <EditorRealtimeRecBar
-                clips={clips}
-                selectedClipId={selectedClipId}
-                onRecPress={handleRealtimeRec}
-                timeZone={clientTimeZone}
-                clockTick={realtimeTick}
-              />
-            ) : (
-              <EditorTimeline
-                durationSeconds={effectiveDuration}
-                currentTimeSeconds={currentTime}
-                clipUrl={clipState.clipUrl}
-                channelId={channelId}
-                zoomIndex={zoomIndex}
-                onZoomIndexChange={setZoomIndex}
-                onSeek={handleSeek}
-                onTrackClick={(time) => {
-                  handleSeek(time);
-                  setSelectedAdId(null);
-                }}
-                clips={clips}
-                selectedClipId={selectedClipId}
-                onSelectClip={handleSelectClip}
-                onRemoveClip={handleRemoveClip}
-                onResizeClip={handleResizeClip}
-                ads={ads}
-                adsLoading={adsLoading}
-                onRemoveAd={handleRemoveAd}
-                onResizeAd={handleResizeAd}
-                selectedAdId={selectedAdId}
-                onSelectAd={handleSelectAd}
-                clipStartUnixSec={clipState.startTime}
-                clientTimeZone={clientTimeZone}
-                onMarkIn={handleMarkIn}
-                onMarkOut={handleMarkOut}
-              />
-            )}
-          </section>
+                subtitleOverlayActive={subtitleOverlayActive}
+                subtitleSettings={subtitleSettingsForPlayer}
+                onSubtitleSettingsChange={handleSelectedClipSubtitleSettingsChange}
+            />
+          </div>
+          <aside className="flex min-h-0 min-w-0 flex-1 basis-0 flex-col border-l border-secondary py-0 pl-2">
+            <EditorRightPanel
+              selectionMode={selectionMode}
+              clips={clips}
+              clipUrl={clipState.clipUrl}
+              channelId={channelId}
+              selectedClipId={selectedClipId}
+              onSelectClip={handleSelectClip}
+              playingClipId={playingClipId}
+              isPlaying={isPlaying}
+              onPlaySubclip={handlePlaySubclip}
+              onPause={handlePause}
+              onRemoveClip={handleRemoveClip}
+              onUpdateClipMetadata={handleUpdateClipMetadata}
+              onSeek={handleSeekWithTimelineScroll}
+              thumbnailsEnabled={!isRealtime}
+              clipsEmptyHint={
+                isRealtime
+                  ? "Use REC to add Mark In / Mark Out segments."
+                  : "Use Mark In / Mark Out to add ranges."
+              }
+              parentWindowDurationSec={effectiveDuration}
+              onClipTimesCommit={handleClipTimesCommitFromList}
+              onAddVerticalClip={() => handleAddClipAtPlayhead("vertical")}
+              onAddHorizontalClip={() => handleAddClipAtPlayhead("horizontal")}
+              onAddAdSlot={handleAddAdSlot}
+              addAdSlotDisabled={isRealtime}
+              finishError={finishError}
+              ads={ads}
+              selectedAdId={selectedAdId}
+              onSelectAd={handleSelectAd}
+              onRemoveAd={handleRemoveAd}
+            onAdOrderChange={handleAdOrderChange}
+              onToggleClipVerticalCrop={handleToggleClipVerticalCrop}
+              onToggleClipSubtitle={handleToggleClipSubtitle}
+              onCaptureClipPoster={handleCaptureClipPoster}
+          />
+          </aside>
         </div>
 
-        {/* Right column: clips list, ads, create actions */}
-        <aside className="flex min-h-0 w-80 shrink-0 flex-col border-l border-secondary py-2 pr-4 pl-2">
-          <EditorRightPanel
-            selectionMode={selectionMode}
-            clips={clips}
-            clipUrl={clipState.clipUrl}
-            channelId={channelId}
-            selectedClipId={selectedClipId}
-            onSelectClip={handleSelectClip}
-            playingClipId={playingClipId}
-            isPlaying={isPlaying}
-            onPlaySubclip={handlePlaySubclip}
-            onPause={handlePause}
-            onRemoveClip={handleRemoveClip}
-            onUpdateClipMetadata={handleUpdateClipMetadata}
-            onSeek={handleSeek}
-            thumbnailsEnabled={!isRealtime}
-            clipsEmptyHint={
-              isRealtime
-                ? "Use REC to add Mark In / Mark Out segments."
-                : "Use Mark In / Mark Out to add ranges."
-            }
-            realtimeWallClock={
-              isRealtime
-                ? {
-                    sessionStartUnixSec: clipState.startTime,
-                    timeZone: clientTimeZone,
-                  }
-                : undefined
-            }
-            onAddAdSlot={handleAddAdSlot}
-            addAdSlotDisabled={isRealtime}
-            onCreateWithoutAds={() => void handleFinishCreate(true)}
-            onCreateWithAds={() => void handleFinishCreate(false)}
-            finishLoading={finishLoading}
-            finishError={finishError}
-            ads={ads}
-            selectedAdId={selectedAdId}
-            onSelectAd={handleSelectAd}
-            onRemoveAd={handleRemoveAd}
-            onAdOrderChange={handleAdOrderChange}
-          />
-        </aside>
+        {/* Row 2: timeline full width below player + preview + clips */}
+        <section className="flex w-full min-w-0 shrink-0 flex-col border-t border-dashed border-secondary px-4 py-2">
+          {isRealtime ? (
+            <EditorRealtimeRecBar
+              clips={clips}
+              selectedClipId={selectedClipId}
+              onRecPress={handleRealtimeRec}
+              timeZone={clientTimeZone}
+              clockTick={realtimeTick}
+            />
+          ) : (
+            <EditorTimeline
+              ref={timelineRef}
+              durationSeconds={effectiveDuration}
+              currentTimeSeconds={currentTime}
+              clipUrl={clipState.clipUrl}
+              channelId={channelId}
+              zoomIndex={zoomIndex}
+              onZoomIndexChange={setZoomIndex}
+              onSeek={handleSeek}
+              onTrackClick={(time) => {
+                handleSeek(time);
+                setSelectedAdId(null);
+              }}
+              clips={clips}
+              selectedClipId={selectedClipId}
+              onSelectClip={handleSelectClip}
+              onRemoveClip={handleRemoveClip}
+              onResizeClip={handleResizeClip}
+              ads={ads}
+              adsLoading={adsLoading}
+              onRemoveAd={handleRemoveAd}
+              onResizeAd={handleResizeAd}
+              selectedAdId={selectedAdId}
+              onSelectAd={handleSelectAd}
+              clipStartUnixSec={clipState.startTime}
+              clientTimeZone={clientTimeZone}
+              onMarkIn={handleMarkIn}
+              onMarkOut={handleMarkOut}
+            />
+          )}
+        </section>
       </main>
 
       {/* Footer: Back (left), tools (right) */}
@@ -935,13 +995,24 @@ export function EditorPage() {
             Back
           </button>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center justify-end gap-2">
           <ProcessingClipsNavButton />
-          <EditorVerticalCropButton
-            active={verticalCropMode}
-            onToggle={handleVerticalCropToggle}
-          />
-          <EditorSubtitleButton active={subtitleMode} onToggle={handleSubtitleToggle} />
+          <button
+            type="button"
+            disabled={finishLoading}
+            onClick={() => void handleFinishCreate(false)}
+            className="rounded-lg border border-secondary bg-primary px-3 py-2 text-xs font-medium text-primary transition-colors hover:bg-secondary disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Create without Ads
+          </button>
+          <button
+            type="button"
+            disabled={finishLoading}
+            onClick={() => void handleFinishCreate(true)}
+            className="rounded-lg border border-secondary bg-primary px-3 py-2 text-xs font-medium text-primary transition-colors hover:bg-secondary disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Create with Ads
+          </button>
           <EditorJsonButton
             stateJson={stateJson}
             open={jsonPanelOpen}

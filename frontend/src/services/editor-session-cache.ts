@@ -1,11 +1,5 @@
-import type {
-  EditorAdMarker,
-  EditorClipState,
-  EditorCropWindow,
-  EditorPosterEntry,
-  EditorSubClip,
-  EditorSubtitleSettings,
-} from "@/types/editor";
+import type { EditorAdMarker, EditorClipState, EditorPosterEntry, EditorSubClip } from "@/types/editor";
+import { normalizeEditorSubClip } from "@/types/editor";
 
 /**
  * In-memory draft for one Live2VOD editor session (same browser tab lifecycle as the module).
@@ -15,10 +9,6 @@ export interface EditorSessionDraft {
   clips: EditorSubClip[];
   posters: EditorPosterEntry[];
   ads: EditorAdMarker[];
-  verticalCropMode: boolean;
-  cropWindow: EditorCropWindow | null;
-  subtitleMode: boolean;
-  subtitleSettings: EditorSubtitleSettings;
   zoomIndex: number;
   selectedClipId: string | null;
   selectedAdId: string | null;
@@ -64,13 +54,6 @@ export function setEditorSessionDraft(key: string, draft: EditorSessionDraft): v
   store.set(key, draft);
 }
 
-function cloneSubtitleSettings(s: EditorSubtitleSettings): EditorSubtitleSettings {
-  return {
-    ...s,
-    style: { ...s.style },
-  };
-}
-
 export type EditorSessionMountSnapshot =
   | { fromCache: false; adsLoadComplete: false }
   | (Omit<EditorSessionDraft, "adsLoadComplete"> & { fromCache: true; adsLoadComplete: boolean });
@@ -83,13 +66,9 @@ export function readEditorSessionDraftForMount(key: string): EditorSessionMountS
   }
   return {
     fromCache: true,
-    clips: d.clips.map((c) => ({ ...c, posters: c.posters ? [...c.posters] : undefined })),
+    clips: d.clips.map((c) => normalizeEditorSubClip(c)),
     posters: d.posters.map((p) => ({ ...p })),
     ads: d.ads.map((a) => ({ ...a })),
-    verticalCropMode: d.verticalCropMode,
-    cropWindow: d.cropWindow ? { ...d.cropWindow } : null,
-    subtitleMode: d.subtitleMode,
-    subtitleSettings: cloneSubtitleSettings(d.subtitleSettings),
     zoomIndex: d.zoomIndex,
     selectedClipId: d.selectedClipId,
     selectedAdId: d.selectedAdId,

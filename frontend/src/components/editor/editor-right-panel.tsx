@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { ChevronDown } from "@untitledui/icons";
+import { Plus } from "@untitledui/icons";
 import {
   Button as AriaButton,
   Menu,
@@ -32,16 +32,17 @@ interface EditorRightPanelProps {
   onSeek: (timeSeconds: number) => void;
   thumbnailsEnabled: boolean;
   clipsEmptyHint: string;
-  realtimeWallClock?: {
-    sessionStartUnixSec: number;
-    timeZone: string;
-  };
-  /** Bottom bar: add ad slot (VOD timeline only) and create job with/without ads. */
+  /** Max seconds in the parent window (for clamping clip in/out in the list). */
+  parentWindowDurationSec: number;
+  onClipTimesCommit: (
+    clipId: string,
+    startTime: number,
+    endTime: number,
+  ) => { startTime: number; endTime: number } | null;
+  onAddVerticalClip: () => void;
+  onAddHorizontalClip: () => void;
   onAddAdSlot?: () => void;
   addAdSlotDisabled?: boolean;
-  onCreateWithoutAds?: () => void;
-  onCreateWithAds?: () => void;
-  finishLoading?: boolean;
   finishError?: string | null;
   /** VOD timeline ad markers (EPG / time picker only). */
   ads?: EditorAdMarker[];
@@ -49,6 +50,10 @@ interface EditorRightPanelProps {
   onSelectAd?: (id: string | null) => void;
   onRemoveAd?: (id: string) => void;
   onAdOrderChange?: (id: string, newIndex: number) => void;
+  onToggleClipVerticalCrop?: (clipId: string) => void;
+  onToggleClipSubtitle?: (clipId: string) => void;
+  /** Append a frame bookmark at the current playhead for this sub-clip. */
+  onCaptureClipPoster?: (clipId: string) => void;
 }
 
 /**
@@ -70,18 +75,21 @@ export function EditorRightPanel({
   onSeek,
   thumbnailsEnabled,
   clipsEmptyHint,
-  realtimeWallClock,
+  parentWindowDurationSec,
+  onClipTimesCommit,
+  onAddVerticalClip,
+  onAddHorizontalClip,
   onAddAdSlot,
   addAdSlotDisabled = false,
-  onCreateWithoutAds,
-  onCreateWithAds,
-  finishLoading = false,
   finishError = null,
   ads = [],
   selectedAdId = null,
   onSelectAd,
   onRemoveAd,
   onAdOrderChange,
+  onToggleClipVerticalCrop,
+  onToggleClipSubtitle,
+  onCaptureClipPoster,
 }: EditorRightPanelProps) {
   const [clipMetadataId, setClipMetadataId] = useState<string | null>(null);
 
@@ -116,8 +124,13 @@ export function EditorRightPanel({
               onSeek={onSeek}
               thumbnailsEnabled={thumbnailsEnabled}
               emptyHint={clipsEmptyHint}
-              realtimeWallClock={realtimeWallClock}
+              parentWindowDurationSec={parentWindowDurationSec}
+              onClipTimesCommit={onClipTimesCommit}
               compact
+              onToggleClipVerticalCrop={onToggleClipVerticalCrop}
+              onToggleClipSubtitle={onToggleClipSubtitle}
+              onUpdateClipTitle={(clipId, title) => onUpdateClipMetadata(clipId, { title })}
+              onCaptureClipPoster={onCaptureClipPoster}
             />
             {selectionMode !== "realtime" &&
             onSelectAd &&
@@ -140,26 +153,24 @@ export function EditorRightPanel({
           </div>
         </div>
 
-        <div className="shrink-0 border-t border-secondary pt-3">
+        <div className="flex shrink-0 flex-col items-center gap-2 border-t border-secondary pt-3">
           {finishError ? (
-            <p className="mb-2 text-xs text-error-primary">{finishError}</p>
+            <p className="w-full text-center text-xs text-error-primary">{finishError}</p>
           ) : null}
           <MenuTrigger>
             <AriaButton
+              aria-label="Add clip or ad slot"
               className={({ isPressed, isFocusVisible }) =>
                 cx(
-                  "flex w-full cursor-pointer items-center justify-center gap-2 rounded-lg border border-secondary bg-primary px-3 py-2.5 text-sm font-semibold text-primary transition-colors hover:bg-secondary",
+                  "flex size-11 shrink-0 cursor-pointer items-center justify-center rounded-full border-2 border-brand bg-brand-solid text-white shadow-md transition-colors hover:bg-brand-solid-hover",
                   (isPressed || isFocusVisible) && "outline-2 outline-offset-2 outline-focus-ring",
-                  finishLoading && "cursor-not-allowed opacity-60",
                 )
               }
-              isDisabled={finishLoading}
             >
-              Actions
-              <ChevronDown data-icon className="size-4 text-fg-quaternary" aria-hidden />
+              <Plus className="size-5" strokeWidth={2} aria-hidden />
             </AriaButton>
             <AriaPopover
-              placement="top start"
+              placement="top"
               offset={8}
               className={({ isEntering, isExiting }) =>
                 cx(
@@ -172,33 +183,31 @@ export function EditorRightPanel({
               }
             >
               <Menu
-                className="min-w-52 rounded-lg border border-secondary_alt bg-primary p-1 shadow-lg outline-none"
+                className="min-w-56 rounded-lg border border-secondary_alt bg-primary p-1 shadow-lg outline-none"
                 onAction={(key) => {
+                  if (key === "add-vertical") onAddVerticalClip();
+                  if (key === "add-horizontal") onAddHorizontalClip();
                   if (key === "add-ad") onAddAdSlot?.();
-                  if (key === "create-no-ads") onCreateWithoutAds?.();
-                  if (key === "create-with-ads") onCreateWithAds?.();
                 }}
               >
+                <MenuItem
+                  id="add-vertical"
+                  className="cursor-pointer rounded-md px-3 py-2 text-left text-sm text-primary outline-none data-[focused]:bg-secondary"
+                >
+                  Add Vertical Clip
+                </MenuItem>
+                <MenuItem
+                  id="add-horizontal"
+                  className="cursor-pointer rounded-md px-3 py-2 text-left text-sm text-primary outline-none data-[focused]:bg-secondary"
+                >
+                  Add Horizontal Clip
+                </MenuItem>
                 <MenuItem
                   id="add-ad"
                   isDisabled={addAdSlotDisabled || !onAddAdSlot}
                   className="cursor-pointer rounded-md px-3 py-2 text-left text-sm text-primary outline-none data-[focused]:bg-secondary"
                 >
-                  Add new AD Slot
-                </MenuItem>
-                <MenuItem
-                  id="create-no-ads"
-                  isDisabled={!onCreateWithoutAds}
-                  className="cursor-pointer rounded-md px-3 py-2 text-left text-sm text-primary outline-none data-[focused]:bg-secondary"
-                >
-                  Create without Ads
-                </MenuItem>
-                <MenuItem
-                  id="create-with-ads"
-                  isDisabled={!onCreateWithAds}
-                  className="cursor-pointer rounded-md px-3 py-2 text-left text-sm text-primary outline-none data-[focused]:bg-secondary"
-                >
-                  Create with Ads
+                  Add Ad Slot
                 </MenuItem>
               </Menu>
             </AriaPopover>
