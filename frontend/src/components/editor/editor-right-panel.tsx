@@ -8,6 +8,7 @@ import {
   Popover as AriaPopover,
 } from "react-aria-components";
 import type { EditorAdMarker, EditorSelectionMode, EditorSubClip } from "@/types/editor";
+import type { VodJobRecord } from "@/types/vod-job";
 import { cx } from "@/utils/cx";
 import { EditorAdsList } from "./editor-ads-list";
 import { EditorClipMetadataModal } from "./editor-clip-metadata-modal";
@@ -43,7 +44,10 @@ interface EditorRightPanelProps {
   onAddHorizontalClip: () => void;
   onAddAdSlot?: () => void;
   addAdSlotDisabled?: boolean;
-  finishError?: string | null;
+  vodJobs: VodJobRecord[];
+  clipVodEncodeErrors: Record<string, string>;
+  onClipStartVodEncode: (clipId: string, includeAds: boolean) => void | Promise<void>;
+  onClipCancelVodEncode: (clipId: string) => void | Promise<void>;
   /** VOD timeline ad markers (EPG / time picker only). */
   ads?: EditorAdMarker[];
   selectedAdId?: string | null;
@@ -81,7 +85,10 @@ export function EditorRightPanel({
   onAddHorizontalClip,
   onAddAdSlot,
   addAdSlotDisabled = false,
-  finishError = null,
+  vodJobs,
+  clipVodEncodeErrors,
+  onClipStartVodEncode,
+  onClipCancelVodEncode,
   ads = [],
   selectedAdId = null,
   onSelectAd,
@@ -97,6 +104,22 @@ export function EditorRightPanel({
     () => (clipMetadataId ? clips.find((c) => c.id === clipMetadataId) ?? null : null),
     [clips, clipMetadataId],
   );
+
+  const clipMetadataReadOnly = useMemo(() => {
+    if (!clipMetadataId) return false;
+    let best: VodJobRecord | undefined;
+    for (const j of vodJobs) {
+      if (j.editorClipId !== clipMetadataId) continue;
+      if (!best || j.createdAt > best.createdAt) best = j;
+    }
+    if (!best) return false;
+    return (
+      best.status === "queued" ||
+      best.status === "processing" ||
+      best.status === "uploading" ||
+      best.status === "cancelling"
+    );
+  }, [clipMetadataId, vodJobs]);
 
   useEffect(() => {
     if (clipMetadataId && !clips.some((c) => c.id === clipMetadataId)) {
@@ -131,6 +154,10 @@ export function EditorRightPanel({
               onToggleClipSubtitle={onToggleClipSubtitle}
               onUpdateClipTitle={(clipId, title) => onUpdateClipMetadata(clipId, { title })}
               onCaptureClipPoster={onCaptureClipPoster}
+              vodJobs={vodJobs}
+              clipVodEncodeErrors={clipVodEncodeErrors}
+              onClipStartVodEncode={onClipStartVodEncode}
+              onClipCancelVodEncode={onClipCancelVodEncode}
             />
             {selectionMode !== "realtime" &&
             onSelectAd &&
@@ -154,9 +181,6 @@ export function EditorRightPanel({
         </div>
 
         <div className="flex shrink-0 flex-col items-center gap-2 border-t border-secondary pt-3">
-          {finishError ? (
-            <p className="w-full text-center text-xs text-error-primary">{finishError}</p>
-          ) : null}
           <MenuTrigger>
             <AriaButton
               aria-label="Add clip or ad slot"
@@ -225,6 +249,7 @@ export function EditorRightPanel({
         channelId={channelId}
         onSave={onUpdateClipMetadata}
         onSeek={onSeek}
+        readOnly={clipMetadataReadOnly}
       />
     </div>
   );

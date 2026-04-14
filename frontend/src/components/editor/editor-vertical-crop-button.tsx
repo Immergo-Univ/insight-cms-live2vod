@@ -5,19 +5,26 @@ interface EditorVerticalCropButtonProps {
   onToggle: () => void;
   /** `inline` = compact control for a clip row; `toolbar` = footer-sized (default). */
   variant?: "toolbar" | "inline";
+  disabled?: boolean;
 }
 
 export function EditorVerticalCropButton({
   active,
   onToggle,
   variant = "toolbar",
+  disabled = false,
 }: EditorVerticalCropButtonProps) {
   const isInline = variant === "inline";
   return (
     <button
       type="button"
+      disabled={disabled}
       onClick={onToggle}
-      className={`flex shrink-0 cursor-pointer items-center justify-center border bg-primary transition-colors hover:bg-secondary ${
+      className={`flex shrink-0 items-center justify-center border bg-primary transition-colors ${
+        disabled
+          ? "cursor-not-allowed opacity-45"
+          : "cursor-pointer hover:bg-secondary"
+      } ${
         isInline
           ? `size-8 rounded-full ${active ? "border-brand border-2 ring-1 ring-brand-secondary/40" : "border-secondary"}`
           : `size-10 rounded-full shadow-lg ${active ? "border-brand border-2 ring-2 ring-brand-secondary/40" : "border-secondary"}`

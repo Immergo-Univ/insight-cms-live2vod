@@ -15,6 +15,8 @@ export interface VodJobRecord {
   phase: string;
   message?: string;
   error?: string;
+  /** When set, this job was started from the editor for a specific sub-clip row. */
+  editorClipId?: string;
   createdAt: string;
   updatedAt?: string;
   clipUrl?: string;

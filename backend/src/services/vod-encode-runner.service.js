@@ -259,10 +259,11 @@ export async function runVodEncodeJob(opts) {
  * @param {string} opts.tenantId
  * @param {import('./vod-ffmpeg-encoder.service.js').EditorEncodeSpec} opts.spec
  * @param {string} [opts.clipUrlPreview]
+ * @param {string} [opts.editorClipId]
  */
 export function startBackgroundVodJob(opts) {
   const jobId = randomUUID();
-  const { tenantId, spec, clipUrlPreview } = opts;
+  const { tenantId, spec, clipUrlPreview, editorClipId } = opts;
 
   createJob({
     id: jobId,
@@ -272,6 +273,7 @@ export function startBackgroundVodJob(opts) {
     phase: "queued",
     message: "Queued",
     clipUrl: clipUrlPreview || spec.clipUrl,
+    ...(editorClipId ? { editorClipId } : {}),
   });
 
   const subs = anySubtitlesEnabled(spec);

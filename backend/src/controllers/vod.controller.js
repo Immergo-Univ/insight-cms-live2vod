@@ -27,10 +27,15 @@ vodRouter.post("/jobs", async (req, res) => {
       return res.status(400).json({ error: "Body must include a VOD spec with clipUrl (send as { spec } or raw object)" });
     }
 
+    const rawClipId = req.body?.editorClipId;
+    const editorClipId =
+      typeof rawClipId === "string" && rawClipId.trim().length > 0 ? rawClipId.trim() : undefined;
+
     const jobId = startBackgroundVodJob({
       tenantId,
       spec,
       clipUrlPreview: spec.clipUrl,
+      editorClipId,
     });
 
     res.status(202).json({ jobId, status: "queued" });

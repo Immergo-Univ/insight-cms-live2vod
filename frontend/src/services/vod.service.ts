@@ -2,12 +2,19 @@ import { httpClient } from "./http-client";
 import type { EditorStateJson } from "@/types/editor";
 import type { VodJobRecord } from "@/types/vod-job";
 
-export async function startVodJob(spec: EditorStateJson): Promise<{ jobId: string; status: string }> {
+export async function startVodJob(
+  spec: EditorStateJson,
+  opts?: { editorClipId?: string },
+): Promise<{ jobId: string; status: string }> {
   const client = httpClient.getBffClient();
   const tenantId = httpClient.getTenantId();
+  const body =
+    opts?.editorClipId && opts.editorClipId.trim().length > 0
+      ? { spec, editorClipId: opts.editorClipId.trim() }
+      : { spec };
   const { data } = await client.post<{ jobId: string; status: string }>(
     "/vod/jobs",
-    { spec },
+    body,
     { params: { tenantId } },
   );
   return data;

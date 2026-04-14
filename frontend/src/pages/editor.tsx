@@ -17,7 +17,9 @@ import {
 } from "@/components/editor";
 import { ProcessingClipsNavButton } from "@/components/live2vod/processing-clips-nav-button";
 import { httpClient } from "@/services/http-client";
-import { startVodJob } from "@/services/vod.service";
+import { cancelVodJob, startVodJob } from "@/services/vod.service";
+import { useVodProcessing } from "@/providers/vod-processing-provider";
+import type { VodJobRecord } from "@/types/vod-job";
 import {
   FRAME_DURATION_SEC,
   ZOOM_LEVELS_MS,
@@ -29,6 +31,7 @@ import type {
   EditorAdMarker,
   EditorClipState,
   EditorStateJson,
+  EditorStateJsonClip,
   EditorSubClip,
   EditorSubtitleSettings,
 } from "@/types/editor";
@@ -75,6 +78,97 @@ function parentWallEndUnix(clipState: EditorClipState, subClips: EditorSubClip[]
   return clipState.endTime;
 }
 
+function editorSubClipToStateJsonClip(c: EditorSubClip): EditorStateJsonClip {
+  const st = c.subtitleSettings ?? DEFAULT_EDITOR_SUBTITLE_SETTINGS;
+  return {
+    order: c.order,
+    startTime: c.startTime,
+    endTime: c.endTime,
+    metadata: {
+      title: c.title?.trim() ?? "",
+      description: c.description?.trim() ?? "",
+      tags: "",
+    },
+    ...(c.posters?.length ? { posters: c.posters } : {}),
+    ...(c.verticalCropMode && c.cropWindow ? { cropWindow: { ...c.cropWindow } } : {}),
+    ...(c.subtitleMode
+      ? {
+          subtitles: {
+            enabled: true as const,
+            whisperSourceLanguage: st.whisperSourceLanguage,
+            whisperOutputLanguage: st.whisperOutputLanguage,
+            style: { ...st.style },
+          },
+        }
+      : {}),
+  };
+}
+
+function buildSingleClipEditorStateJson(
+  clipState: EditorClipState,
+  allClips: EditorSubClip[],
+  target: EditorSubClip,
+  adsMarkers: EditorAdMarker[],
+  includeAds: boolean,
+  nowUnix: number,
+): EditorStateJson {
+  const absEpochToIso = (absSec: number) => {
+    const t = Number(absSec);
+    if (!Number.isFinite(t)) return "";
+    const d = new Date(t * 1000);
+    return Number.isFinite(d.getTime()) ? d.toISOString() : "";
+  };
+  const parentWallStart = clipState.startTime;
+  const parentWallEnd = parentWallEndUnix(clipState, allClips, nowUnix);
+  const parentClipUrl = buildClipWindowUrl(clipState, parentWallStart, parentWallEnd);
+
+  let adsOut: EditorStateJson["ads"] = [];
+  if (includeAds) {
+    const overlapping = adsMarkers
+      .filter((a) => a.endTime > target.startTime && a.startTime < target.endTime)
+      .sort((a, b) => a.startTime - b.startTime);
+    adsOut = overlapping.map((a, i) => ({
+      index: i + 1,
+      startTime: a.startTime,
+      endTime: a.endTime,
+      startProgramDateTime: absEpochToIso(parentWallStart + a.startTime),
+      endProgramDateTime: absEpochToIso(parentWallStart + a.endTime),
+    }));
+  }
+
+  return {
+    clipUrl: parentClipUrl,
+    sourceM3u8: clipState.sourceM3u8,
+    startTime: parentWallStart,
+    endTime: parentWallEnd,
+    posters: [],
+    clips: [{ ...editorSubClipToStateJsonClip(target), order: 1 }],
+    ads: adsOut,
+  };
+}
+
+function pickLatestJobForEditorClip(jobs: VodJobRecord[], clipId: string): VodJobRecord | undefined {
+  let best: VodJobRecord | undefined;
+  for (const j of jobs) {
+    if (j.editorClipId !== clipId) continue;
+    if (!best || j.createdAt > best.createdAt) best = j;
+  }
+  return best;
+}
+
+function vodJobIsActive(status: VodJobRecord["status"]): boolean {
+  return (
+    status === "queued" ||
+    status === "processing" ||
+    status === "uploading" ||
+    status === "cancelling"
+  );
+}
+
+function vodJobCanCancel(status: VodJobRecord["status"]): boolean {
+  return vodJobIsActive(status);
+}
+
 /** Single editor encode spec: parent stream + all sub-clips + all ads (one POST /vod/jobs). */
 function buildEditorStateJson(
   clipState: EditorClipState,
@@ -112,31 +206,7 @@ function buildEditorStateJson(
     startTime: parentWallStart,
     endTime: parentWallEnd,
     posters: [],
-    clips: sortedClips.map((c) => {
-      const st = c.subtitleSettings ?? DEFAULT_EDITOR_SUBTITLE_SETTINGS;
-      return {
-        order: c.order,
-        startTime: c.startTime,
-        endTime: c.endTime,
-        metadata: {
-          title: c.title?.trim() ?? "",
-          description: c.description?.trim() ?? "",
-          tags: "",
-        },
-        ...(c.posters?.length ? { posters: c.posters } : {}),
-        ...(c.verticalCropMode && c.cropWindow ? { cropWindow: { ...c.cropWindow } } : {}),
-        ...(c.subtitleMode
-          ? {
-              subtitles: {
-                enabled: true as const,
-                whisperSourceLanguage: st.whisperSourceLanguage,
-                whisperOutputLanguage: st.whisperOutputLanguage,
-                style: { ...st.style },
-              },
-            }
-          : {}),
-      };
-    }),
+    clips: sortedClips.map((c) => editorSubClipToStateJsonClip(c)),
     ads: adsOut,
   };
 }
@@ -209,9 +279,11 @@ export function EditorPage() {
   );
   /** Subclip currently playing (from list row Play). Cleared on pause or when play reaches end. */
   const [playingClipId, setPlayingClipId] = useState<string | null>(null);
-  const [finishLoading, setFinishLoading] = useState(false);
-  const [finishError, setFinishError] = useState<string | null>(null);
+  const [clipVodEncodeErrors, setClipVodEncodeErrors] = useState<Record<string, string>>({});
   const [jsonPanelOpen, setJsonPanelOpen] = useState(false);
+  const { jobs: vodJobs, refreshJobs: refreshVodJobs } = useVodProcessing();
+  const vodJobsRef = useRef(vodJobs);
+  vodJobsRef.current = vodJobs;
 
   const [ads, setAds] = useState<EditorAdMarker[]>(() =>
     mountSnapshot?.fromCache === true ? mountSnapshot.ads : [],
@@ -810,56 +882,90 @@ export function EditorPage() {
     setSelectedAdId(id);
   };
 
-  const handleFinishCreate = async (includeAds: boolean) => {
-    if (clips.length === 0) {
-      setFinishError("Add at least one clip before creating a VOD.");
-      return;
-    }
-    const clipsMissingTitle = clips.filter((c) => !c.title?.trim());
-    if (clipsMissingTitle.length > 0) {
-      setFinishError(
-        "Set a title for every clip (open the metadata control on each row in the Clips list).",
-      );
-      return;
-    }
-    const clipBadSubtitles = clips.find(
-      (c) =>
-        c.subtitleMode &&
-        !isValidWhisperSubtitlePair(
-          (c.subtitleSettings ?? DEFAULT_EDITOR_SUBTITLE_SETTINGS).whisperSourceLanguage,
-          (c.subtitleSettings ?? DEFAULT_EDITOR_SUBTITLE_SETTINGS).whisperOutputLanguage,
-        ),
-    );
-    if (clipBadSubtitles) {
-      const label = clipBadSubtitles.title?.trim() || `order ${clipBadSubtitles.order}`;
-      setFinishError(
-        `Fix subtitle languages for clip "${label}" (subtitle style dialog: invalid video vs subtitle combination).`,
-      );
-      return;
-    }
-    if (!httpClient.getTenantId()) {
-      setFinishError("Missing tenantId in the URL query string.");
-      return;
-    }
-    setFinishError(null);
-    setFinishLoading(true);
-    try {
+  const handleClipStartVodEncode = useCallback(
+    async (clipId: string, includeAds: boolean) => {
       if (!clipState?.clipUrl) return;
-      const spec = buildEditorStateJson(
-        clipState,
-        clips,
-        ads,
-        includeAds,
-        Math.floor(Date.now() / 1000),
-      );
-      await startVodJob(spec);
-      navigate({ pathname: "/processing-clips", search: window.location.search });
-    } catch (err) {
-      setFinishError(httpClient.getErrorMessage(err));
-    } finally {
-      setFinishLoading(false);
-    }
-  };
+      const clip = clips.find((c) => c.id === clipId);
+      if (!clip) return;
+
+      const existing = pickLatestJobForEditorClip(vodJobsRef.current, clipId);
+      if (existing && vodJobIsActive(existing.status)) {
+        setClipVodEncodeErrors((p) => ({
+          ...p,
+          [clipId]: "This clip is already encoding. Stop the current job or wait until it finishes.",
+        }));
+        return;
+      }
+
+      if (!clip.title?.trim()) {
+        setClipVodEncodeErrors((p) => ({
+          ...p,
+          [clipId]: "Set a title for this clip (metadata control on the row).",
+        }));
+        return;
+      }
+
+      if (
+        clip.subtitleMode &&
+        !isValidWhisperSubtitlePair(
+          (clip.subtitleSettings ?? DEFAULT_EDITOR_SUBTITLE_SETTINGS).whisperSourceLanguage,
+          (clip.subtitleSettings ?? DEFAULT_EDITOR_SUBTITLE_SETTINGS).whisperOutputLanguage,
+        )
+      ) {
+        setClipVodEncodeErrors((p) => ({
+          ...p,
+          [clipId]: "Fix subtitle languages for this clip before encoding.",
+        }));
+        return;
+      }
+
+      if (!httpClient.getTenantId()) {
+        setClipVodEncodeErrors((p) => ({
+          ...p,
+          [clipId]: "Missing tenantId in the URL query string.",
+        }));
+        return;
+      }
+
+      setClipVodEncodeErrors((p) => {
+        const next = { ...p };
+        delete next[clipId];
+        return next;
+      });
+
+      try {
+        const nowSec = Math.floor(Date.now() / 1000);
+        const spec = buildSingleClipEditorStateJson(clipState, clips, clip, ads, includeAds, nowSec);
+        await startVodJob(spec, { editorClipId: clipId });
+        await refreshVodJobs();
+      } catch (err) {
+        setClipVodEncodeErrors((p) => ({
+          ...p,
+          [clipId]: httpClient.getErrorMessage(err),
+        }));
+      }
+    },
+    [clipState, clips, ads, refreshVodJobs],
+  );
+
+  const handleClipCancelVodEncode = useCallback(
+    async (clipId: string) => {
+      const j = pickLatestJobForEditorClip(vodJobsRef.current, clipId);
+      if (!j || !vodJobCanCancel(j.status)) return;
+      try {
+        await cancelVodJob(j.id);
+        await refreshVodJobs();
+      } catch {
+        void refreshVodJobs();
+      }
+      setClipVodEncodeErrors((p) => {
+        const next = { ...p };
+        delete next[clipId];
+        return next;
+      });
+    },
+    [refreshVodJobs],
+  );
 
   return (
     <div className="flex h-full flex-col bg-primary">
@@ -927,7 +1033,10 @@ export function EditorPage() {
               onAddHorizontalClip={() => handleAddClipAtPlayhead("horizontal")}
               onAddAdSlot={handleAddAdSlot}
               addAdSlotDisabled={isRealtime}
-              finishError={finishError}
+              vodJobs={vodJobs}
+              clipVodEncodeErrors={clipVodEncodeErrors}
+              onClipStartVodEncode={handleClipStartVodEncode}
+              onClipCancelVodEncode={handleClipCancelVodEncode}
               ads={ads}
               selectedAdId={selectedAdId}
               onSelectAd={handleSelectAd}
@@ -997,22 +1106,6 @@ export function EditorPage() {
         </div>
         <div className="flex flex-wrap items-center justify-end gap-2">
           <ProcessingClipsNavButton />
-          <button
-            type="button"
-            disabled={finishLoading}
-            onClick={() => void handleFinishCreate(false)}
-            className="rounded-lg border border-secondary bg-primary px-3 py-2 text-xs font-medium text-primary transition-colors hover:bg-secondary disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            Create without Ads
-          </button>
-          <button
-            type="button"
-            disabled={finishLoading}
-            onClick={() => void handleFinishCreate(true)}
-            className="rounded-lg border border-secondary bg-primary px-3 py-2 text-xs font-medium text-primary transition-colors hover:bg-secondary disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            Create with Ads
-          </button>
           <EditorJsonButton
             stateJson={stateJson}
             open={jsonPanelOpen}

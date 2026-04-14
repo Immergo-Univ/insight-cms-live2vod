@@ -20,6 +20,7 @@
  * @property {string[]} [s3Keys]
  * @property {string|null} [outputUrl]
  * @property {(string|null)[]} [outputUrls]
+ * @property {string} [editorClipId] client sub-clip id when job was started from the editor row
  */
 
 /** @type {Map<string, VodJob>} */

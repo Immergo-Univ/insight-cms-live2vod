@@ -8,6 +8,7 @@ import {
 } from "@/services/editor-posters.service";
 import { httpClient } from "@/services/http-client";
 import type { EditorClipPoster, EditorSubClip } from "@/types/editor";
+import { cx } from "@/utils/cx";
 import { buildThumbnailUrl } from "./editor-constants";
 import { formatTime } from "./editor-timeline";
 
@@ -27,6 +28,8 @@ interface EditorClipMetadataModalProps {
   channelId: string;
   onSave: (clipId: string, patch: Pick<EditorSubClip, "title" | "description" | "posters">) => void;
   onSeek?: (timeSeconds: number) => void;
+  /** When true, all fields are read-only (e.g. clip is encoding). Only Close is available. */
+  readOnly?: boolean;
 }
 
 export function EditorClipMetadataModal({
@@ -37,6 +40,7 @@ export function EditorClipMetadataModal({
   channelId,
   onSave,
   onSeek,
+  readOnly = false,
 }: EditorClipMetadataModalProps) {
   const fileRef = useRef<HTMLInputElement>(null);
   const [title, setTitle] = useState("");
@@ -58,17 +62,18 @@ export function EditorClipMetadataModal({
   }, [onOpenChange]);
 
   const handleApply = useCallback(() => {
-    if (!clip) return;
+    if (!clip || readOnly) return;
     onSave(clip.id, {
       title: title.slice(0, TITLE_MAX),
       description: description.slice(0, DESCRIPTION_MAX),
       posters: draftPosters,
     });
     onOpenChange(false);
-  }, [clip, title, description, draftPosters, onSave, onOpenChange]);
+  }, [clip, readOnly, title, description, draftPosters, onSave, onOpenChange]);
 
   const removePoster = useCallback(
     async (p: EditorClipPoster) => {
+      if (readOnly) return;
       if (p.kind === "upload" && channelId) {
         try {
           await deleteEditorPoster(channelId, p.id);
@@ -78,11 +83,12 @@ export function EditorClipMetadataModal({
       }
       setDraftPosters((prev) => prev.filter((x) => x.id !== p.id));
     },
-    [channelId],
+    [channelId, readOnly],
   );
 
   const onFileChange = useCallback(
     async (e: React.ChangeEvent<HTMLInputElement>) => {
+      if (readOnly) return;
       const files = Array.from(e.target.files || []);
       e.target.value = "";
       if (files.length === 0) return;
@@ -111,7 +117,7 @@ export function EditorClipMetadataModal({
         setUploading(false);
       }
     },
-    [channelId],
+    [channelId, readOnly],
   );
 
   if (!clip) return null;
@@ -136,6 +142,13 @@ export function EditorClipMetadataModal({
               Title, description, and posters for this sub-clip (order #{clip.order}).
             </p>
 
+            {readOnly ? (
+              <p className="mt-3 rounded-lg border border-secondary bg-secondary px-3 py-2 text-xs text-secondary">
+                This clip is encoding. Metadata cannot be changed. Use <strong>Stop</strong> on the clip row
+                to cancel the job, then try again.
+              </p>
+            ) : null}
+
             <div className="mt-4 flex flex-col gap-3">
               <label className="flex flex-col gap-1.5">
                 <span className="text-xs font-medium text-secondary">Title</span>
@@ -144,8 +157,12 @@ export function EditorClipMetadataModal({
                   value={title}
                   onChange={(e) => setTitle(e.target.value)}
                   maxLength={TITLE_MAX}
+                  readOnly={readOnly}
                   placeholder="Clip title"
-                  className="rounded-lg border border-secondary bg-primary px-3 py-2 text-sm text-primary placeholder:text-placeholder"
+                  className={cx(
+                    "rounded-lg border border-secondary px-3 py-2 text-sm text-primary placeholder:text-placeholder",
+                    readOnly ? "cursor-not-allowed bg-secondary text-secondary" : "bg-primary",
+                  )}
                 />
               </label>
               <label className="flex flex-col gap-1.5">
@@ -154,9 +171,13 @@ export function EditorClipMetadataModal({
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
                   maxLength={DESCRIPTION_MAX}
+                  readOnly={readOnly}
                   placeholder="Clip description"
                   rows={3}
-                  className="rounded-lg border border-secondary bg-primary px-3 py-2 text-sm text-primary placeholder:text-placeholder"
+                  className={cx(
+                    "rounded-lg border border-secondary px-3 py-2 text-sm text-primary placeholder:text-placeholder",
+                    readOnly ? "cursor-not-allowed bg-secondary text-secondary" : "bg-primary",
+                  )}
                 />
                 <span className="text-[10px] text-tertiary">Max {DESCRIPTION_MAX} characters</span>
               </label>
@@ -174,10 +195,11 @@ export function EditorClipMetadataModal({
                   multiple
                   className="hidden"
                   onChange={onFileChange}
+                  disabled={readOnly}
                 />
                 <button
                   type="button"
-                  disabled={uploading || !channelId.trim()}
+                  disabled={readOnly || uploading || !channelId.trim()}
                   onClick={() => fileRef.current?.click()}
                   className="flex cursor-pointer items-center justify-center gap-2 rounded-lg border border-secondary bg-secondary px-3 py-2 text-sm font-medium text-primary transition-colors hover:bg-tertiary/50 disabled:cursor-not-allowed disabled:opacity-50"
                 >
@@ -221,6 +243,10 @@ export function EditorClipMetadataModal({
                           <div className="min-w-0 flex-1">
                             {p.kind === "upload" ? (
                               <span className="line-clamp-2 text-secondary">{p.originalName}</span>
+                            ) : readOnly ? (
+                              <span className="font-medium text-secondary">
+                                {formatTime(p.timeSeconds)} (capture)
+                              </span>
                             ) : (
                               <button
                                 type="button"
@@ -233,8 +259,9 @@ export function EditorClipMetadataModal({
                           </div>
                           <button
                             type="button"
+                            disabled={readOnly}
                             onClick={() => void removePoster(p)}
-                            className="shrink-0 rounded p-1 text-fg-quaternary hover:bg-tertiary hover:text-fg-secondary"
+                            className="shrink-0 rounded p-1 text-fg-quaternary hover:bg-tertiary hover:text-fg-secondary disabled:cursor-not-allowed disabled:opacity-40"
                             aria-label="Remove poster"
                           >
                             ×
@@ -253,15 +280,17 @@ export function EditorClipMetadataModal({
                 onClick={handleClose}
                 className="rounded-lg border border-secondary bg-primary px-4 py-2 text-sm font-medium text-primary transition-colors hover:bg-secondary"
               >
-                Cancel
+                {readOnly ? "Close" : "Cancel"}
               </button>
-              <button
-                type="button"
-                onClick={handleApply}
-                className="rounded-lg bg-brand-solid px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-brand-solid-hover"
-              >
-                Save
-              </button>
+              {readOnly ? null : (
+                <button
+                  type="button"
+                  onClick={handleApply}
+                  className="rounded-lg bg-brand-solid px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-brand-solid-hover"
+                >
+                  Save
+                </button>
+              )}
             </div>
           </div>
         </Dialog>
