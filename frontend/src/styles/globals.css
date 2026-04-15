@@ -86,3 +86,45 @@ input[type="number"] {
 input[type="search"]::-webkit-search-cancel-button {
     -webkit-appearance: none;
 }
+
+/* Editor clips list: light motion while a row is encoding VOD */
+@keyframes editor-encode-border-shift {
+    0%,
+    100% {
+        border-color: #8b5cf6;
+        box-shadow: 0 0 0 0 rgb(139 92 246 / 0.2);
+    }
+    50% {
+        border-color: #a78bfa;
+        box-shadow: 0 0 14px 0 rgb(167 139 250 / 0.35);
+    }
+}
+
+@keyframes editor-encode-progress-shimmer {
+    0%,
+    100% {
+        filter: brightness(1) saturate(1);
+        background-position: 0% 50%;
+    }
+    50% {
+        filter: brightness(1.12) saturate(1.1);
+        background-position: 100% 50%;
+    }
+}
+
+.animate-editor-encode-border {
+    animation: editor-encode-border-shift 2.8s ease-in-out infinite;
+}
+
+.animate-editor-encode-progress-fill {
+    background-size: 200% 100%;
+    animation: editor-encode-progress-shimmer 2.4s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .animate-editor-encode-border,
+    .animate-editor-encode-progress-fill {
+        animation: none;
+        box-shadow: none;
+    }
+}

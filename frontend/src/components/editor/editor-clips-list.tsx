@@ -464,7 +464,7 @@ export function EditorClipsList({
               className={cx(
                 "box-border flex flex-col gap-1.5 rounded-lg px-1.5 py-1.5 transition-colors outline-none sm:px-2",
                 encodeActive
-                  ? "cursor-default border-2 border-solid border-violet-500 bg-secondary focus-visible:ring-2 focus-visible:ring-violet-500/40"
+                  ? "animate-editor-encode-border motion-reduce:animate-none motion-reduce:shadow-none cursor-default border-2 border-solid border-violet-500 bg-secondary focus-visible:ring-2 focus-visible:ring-violet-500/40"
                   : encodeFailed
                     ? "cursor-pointer border-2 border-solid border-error-primary bg-secondary focus-visible:ring-2 focus-visible:ring-error-primary/30"
                     : isSelected
@@ -782,31 +782,24 @@ export function EditorClipsList({
                   onClick={(e) => e.stopPropagation()}
                 >
                   {encodeActive ? (
-                    <div className="flex flex-col gap-1">
-                      <div className="flex items-center gap-2">
-                        <div className="h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-quaternary">
-                          <div
-                            className="h-full rounded-full bg-gradient-to-r from-violet-500 via-fuchsia-500 to-cyan-500 transition-[width] duration-300 ease-out"
-                            style={{ width: `${Math.max(0, Math.min(100, vodJob?.progress ?? 0))}%` }}
-                          />
-                        </div>
-                        <span className="shrink-0 text-[10px] font-medium tabular-nums text-secondary">
-                          {vodJob?.progress ?? 0}%
-                        </span>
-                        {vodJob && vodJobCanCancel(vodJob.status) ? (
-                          <button
-                            type="button"
-                            onClick={() => void onClipCancelVodEncode(c.id)}
-                            className="shrink-0 rounded-md border border-error_subtle bg-error-secondary px-2 py-0.5 text-[10px] font-semibold text-error-primary transition-colors hover:bg-error-primary hover:text-white"
-                          >
-                            Stop
-                          </button>
-                        ) : null}
+                    <div className="flex items-center gap-2">
+                      <div className="h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-quaternary">
+                        <div
+                          className="animate-editor-encode-progress-fill motion-reduce:animate-none h-full rounded-full bg-gradient-to-r from-violet-500 via-fuchsia-400 to-cyan-400 transition-[width] duration-300 ease-out"
+                          style={{ width: `${Math.max(0, Math.min(100, vodJob?.progress ?? 0))}%` }}
+                        />
                       </div>
-                      {vodJob?.message ? (
-                        <p className="truncate text-[10px] text-tertiary">
-                          {vodJob.phase}: {vodJob.message}
-                        </p>
+                      <span className="shrink-0 text-[10px] font-medium tabular-nums text-secondary">
+                        {vodJob?.progress ?? 0}%
+                      </span>
+                      {vodJob && vodJobCanCancel(vodJob.status) ? (
+                        <button
+                          type="button"
+                          onClick={() => void onClipCancelVodEncode(c.id)}
+                          className="shrink-0 rounded-md border border-error_subtle bg-error-secondary px-2 py-0.5 text-[10px] font-semibold text-error-primary transition-colors hover:bg-error-primary hover:text-white"
+                        >
+                          Stop
+                        </button>
                       ) : null}
                     </div>
                   ) : null}
