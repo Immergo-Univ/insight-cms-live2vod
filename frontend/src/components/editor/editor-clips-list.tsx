@@ -645,7 +645,7 @@ export function EditorClipsList({
                     ) : null}
                     {onCaptureClipPoster ? (
                       <span className="relative inline-flex shrink-0" data-no-row-select onClick={(e) => e.stopPropagation()}>
-                        <MenuTrigger isDisabled={encodeActive}>
+                        <MenuTrigger>
                           <AriaButton
                             aria-label="Poster capture at playhead"
                             isDisabled={encodeActive}
@@ -699,7 +699,7 @@ export function EditorClipsList({
                     ) : null}
                   </div>
                   <div className="ml-auto flex shrink-0 flex-row items-center gap-1.5" data-no-row-select onClick={(e) => e.stopPropagation()}>
-                    <MenuTrigger isDisabled={encodeActive}>
+                    <MenuTrigger>
                       <AriaButton
                         aria-label="Encode clip: create with or without ads"
                         isDisabled={encodeActive}
