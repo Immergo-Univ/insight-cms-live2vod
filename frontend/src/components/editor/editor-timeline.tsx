@@ -337,6 +337,14 @@ export const EditorTimeline = forwardRef<EditorTimelineHandle, EditorTimelinePro
 
   const zoomMs = ZOOM_LEVELS_MS[zoomIndex] ?? ZOOM_LEVELS_MS[0];
   const zoomSeconds = zoomMs / 1000;
+
+  /** List selection focuses one clip: hide other sub-clip overlays on the filmstrip (ads unchanged). */
+  const filmstripClipOverlays = useMemo(() => {
+    if (selectedClipId == null) return clips;
+    const one = clips.find((c) => c.id === selectedClipId);
+    return one != null ? [one] : clips;
+  }, [clips, selectedClipId]);
+
   /**
    * Fixed px per second so playhead, scrub, ads, and thumbnails share one linear time axis.
    * Previously each column was COLUMN_WIDTH_PX wide while the last column covered less than
@@ -994,7 +1002,7 @@ export const EditorTimeline = forwardRef<EditorTimelineHandle, EditorTimelinePro
           })}
 
           {/* Clip overlays (blue) */}
-          {clips.map((c) => {
+          {filmstripClipOverlays.map((c) => {
             const left = c.startTime * pixelsPerSecond;
             const width = (c.endTime - c.startTime) * pixelsPerSecond;
             const isHover = hoverClipId === c.id;

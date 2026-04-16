@@ -167,24 +167,21 @@ function ClipThumbsWithRangeFields({
   };
 
   return (
-    <div
-      className={cx("flex shrink-0 gap-1", disabled && "opacity-60")}
-      data-no-row-select
-      onClick={(e) => e.stopPropagation()}
-    >
+    <div className={cx("flex shrink-0 gap-1", disabled && "opacity-60")}>
       <div className="flex flex-col items-stretch gap-0.5" style={{ width: thumbW }}>
         <div
-          className="shrink-0 overflow-hidden rounded border border-secondary bg-quaternary"
+          className="shrink-0 cursor-pointer overflow-hidden rounded border border-secondary bg-quaternary"
           style={{ width: thumbW, height: thumbH }}
         >
           {thumbnailsEnabled ? (
             <img
               src={thumbInUrl}
               alt="In"
-              className="size-full object-cover"
+              className="pointer-events-none size-full object-cover"
               width={thumbW}
               height={thumbH}
               loading="lazy"
+              draggable={false}
             />
           ) : (
             thumbPlaceholder("In")
@@ -196,6 +193,7 @@ function ClipThumbsWithRangeFields({
           autoComplete="off"
           spellCheck={false}
           readOnly={disabled}
+          data-no-row-select
           className={inputClass}
           aria-label="Clip mark-in time"
           placeholder={timePlaceholder}
@@ -210,17 +208,18 @@ function ClipThumbsWithRangeFields({
       </div>
       <div className="flex flex-col items-stretch gap-0.5" style={{ width: thumbW }}>
         <div
-          className="shrink-0 overflow-hidden rounded border border-secondary bg-quaternary"
+          className="shrink-0 cursor-pointer overflow-hidden rounded border border-secondary bg-quaternary"
           style={{ width: thumbW, height: thumbH }}
         >
           {thumbnailsEnabled ? (
             <img
               src={thumbOutUrl}
               alt="Out"
-              className="size-full object-cover"
+              className="pointer-events-none size-full object-cover"
               width={thumbW}
               height={thumbH}
               loading="lazy"
+              draggable={false}
             />
           ) : (
             thumbPlaceholder("Out")
@@ -232,6 +231,7 @@ function ClipThumbsWithRangeFields({
           autoComplete="off"
           spellCheck={false}
           readOnly={disabled}
+          data-no-row-select
           className={inputClass}
           aria-label="Clip mark-out time"
           placeholder={timePlaceholder}

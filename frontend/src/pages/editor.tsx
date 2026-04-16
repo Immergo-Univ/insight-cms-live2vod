@@ -15,7 +15,6 @@ import {
   EditorJsonButton,
   EditorRightPanel,
 } from "@/components/editor";
-import { ProcessingClipsNavButton } from "@/components/live2vod/processing-clips-nav-button";
 import { httpClient } from "@/services/http-client";
 import { cancelVodJob, startVodJob } from "@/services/vod.service";
 import { useVodProcessing } from "@/providers/vod-processing-provider";
@@ -40,6 +39,29 @@ import { isValidWhisperSubtitlePair } from "@/types/editor-whisper-languages";
 
 /** Default length for a manually inserted ad slot (seconds). */
 const DEFAULT_NEW_AD_DURATION_SEC = 30;
+
+/** One sub-clip spanning the full parent window (relative t=0 .. duration). */
+function createDefaultFullWindowSubClip(
+  clipState: EditorClipState,
+  nowUnixSec: number,
+  id: string,
+): EditorSubClip {
+  const isRealtime = clipState.selectionMode === "realtime";
+  const wallSpan = Math.max(
+    FRAME_DURATION_SEC * 2,
+    clipState.endTime - clipState.startTime,
+  );
+  const endTime = isRealtime
+    ? Math.max(60, Math.floor(nowUnixSec) - clipState.startTime)
+    : wallSpan;
+  return {
+    id,
+    order: 1,
+    startTime: 0,
+    endTime,
+    ...defaultEditorSubClipEncodeFields(),
+  };
+}
 
 /** Keep user-placed slots when precalc/detect finishes (avoids wiping manual ads). */
 function mergeFetchedAdsWithManual(prev: EditorAdMarker[], fetched: EditorAdMarker[]): EditorAdMarker[] {
@@ -235,6 +257,10 @@ function getEditorEffectiveDuration(
 export function EditorPage() {
   const navigate = useNavigate();
   const location = useLocation();
+  const editorJsonDebug = useMemo(
+    () => new URLSearchParams(location.search).get("debug") === "true",
+    [location.search],
+  );
   const clipState = location.state as EditorClipState | null;
   const clientTimeZone = useTimezone();
 
@@ -255,6 +281,9 @@ export function EditorPage() {
     [sessionKey],
   );
 
+  /** Shared id for initial default clip + selection (lazy state initializers run in order). */
+  const defaultFullWindowClipIdRef = useRef<string | null>(null);
+
   const shouldSkipAdsFetchRef = useRef(!!mountSnapshot?.adsLoadComplete);
 
   const playerRef = useRef<EditorPlayerRef>(null);
@@ -264,15 +293,35 @@ export function EditorPage() {
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [zoomIndex, setZoomIndex] = useState(() => mountSnapshot?.fromCache === true ? mountSnapshot.zoomIndex : 1);
-  const [clips, setClips] = useState<EditorSubClip[]>(() =>
-    mountSnapshot?.fromCache === true ? mountSnapshot.clips : [],
-  );
+  const [clips, setClips] = useState<EditorSubClip[]>(() => {
+    if (mountSnapshot?.fromCache === true) {
+      return mountSnapshot.clips;
+    }
+    if (!clipState?.clipUrl) {
+      return [];
+    }
+    if (!defaultFullWindowClipIdRef.current) {
+      defaultFullWindowClipIdRef.current = crypto.randomUUID();
+    }
+    return [
+      createDefaultFullWindowSubClip(clipState, Date.now() / 1000, defaultFullWindowClipIdRef.current),
+    ];
+  });
   /** When set, Play plays only up to this time then pauses (for "play subclip"). */
   const [playUntilTime, setPlayUntilTime] = useState<number | null>(null);
   /** Subclip in "edit" mode: Mark In/Out update this clip; Play plays only this subclip. */
-  const [selectedClipId, setSelectedClipId] = useState<string | null>(() =>
-    mountSnapshot?.fromCache === true ? mountSnapshot.selectedClipId : null,
-  );
+  const [selectedClipId, setSelectedClipId] = useState<string | null>(() => {
+    if (mountSnapshot?.fromCache === true) {
+      return mountSnapshot.selectedClipId;
+    }
+    if (!clipState?.clipUrl) {
+      return null;
+    }
+    if (!defaultFullWindowClipIdRef.current) {
+      defaultFullWindowClipIdRef.current = crypto.randomUUID();
+    }
+    return defaultFullWindowClipIdRef.current;
+  });
   /** Ad slot selected on the timeline (trim handles + ring). Mutually exclusive with selectedClipId where enforced in UI. */
   const [selectedAdId, setSelectedAdId] = useState<string | null>(() =>
     mountSnapshot?.fromCache === true ? mountSnapshot.selectedAdId : null,
@@ -280,7 +329,6 @@ export function EditorPage() {
   /** Subclip currently playing (from list row Play). Cleared on pause or when play reaches end. */
   const [playingClipId, setPlayingClipId] = useState<string | null>(null);
   const [clipVodEncodeErrors, setClipVodEncodeErrors] = useState<Record<string, string>>({});
-  const [jsonPanelOpen, setJsonPanelOpen] = useState(false);
   const { jobs: vodJobs, refreshJobs: refreshVodJobs } = useVodProcessing();
   const vodJobsRef = useRef(vodJobs);
   vodJobsRef.current = vodJobs;
@@ -459,25 +507,6 @@ export function EditorPage() {
       setSelectedAdId(null);
     }
   }, [selectedAdId, ads]);
-
-  // Arrow keys: move playhead by 1 frame (skip when focus is in input/textarea/select)
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      const target = e.target as HTMLElement;
-      if (target.closest("input") || target.closest("textarea") || target.closest("select")) return;
-      if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
-      e.preventDefault();
-      const t = playerRef.current?.getCurrentTime() ?? currentTime;
-      const dur = playerRef.current?.getDuration() ?? duration;
-      const next =
-        e.key === "ArrowLeft"
-          ? Math.max(0, t - FRAME_DURATION_SEC)
-          : Math.min(dur, t + FRAME_DURATION_SEC);
-      playerRef.current?.seek(next);
-    };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, [currentTime, duration]);
 
   const handleBack = () => navigate(-1);
 
@@ -747,6 +776,36 @@ export function EditorPage() {
     [handleSeek],
   );
 
+  // Arrow keys: nudge playhead by one frame. Space: go to selected sub-clip start (skip in fields / links / buttons).
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement;
+      if (target.closest("input, textarea, select, [contenteditable='true']")) return;
+      if (target.closest("button, a[href]")) return;
+
+      if (e.key === " " || e.code === "Space") {
+        if (!selectedClipId) return;
+        const clip = clips.find((c) => c.id === selectedClipId);
+        if (!clip) return;
+        e.preventDefault();
+        handleSeekWithTimelineScroll(clip.startTime);
+        return;
+      }
+
+      if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+      e.preventDefault();
+      const t = playerRef.current?.getCurrentTime() ?? currentTime;
+      const dur = playerRef.current?.getDuration() ?? duration;
+      const next =
+        e.key === "ArrowLeft"
+          ? Math.max(0, t - FRAME_DURATION_SEC)
+          : Math.min(dur, t + FRAME_DURATION_SEC);
+      playerRef.current?.seek(next);
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [currentTime, duration, selectedClipId, clips, handleSeekWithTimelineScroll]);
+
   const handleToggleClipVerticalCrop = useCallback((clipId: string) => {
     let turningOff = false;
     setClips((prev) => {
@@ -762,7 +821,6 @@ export function EditorPage() {
         };
       });
     });
-    if (turningOff) setJsonPanelOpen(false);
   }, []);
 
   const handleToggleClipSubtitle = useCallback((clipId: string) => {
@@ -783,7 +841,6 @@ export function EditorPage() {
         };
       });
     });
-    if (turningOff) setJsonPanelOpen(false);
   }, []);
 
   const handleVerticalCropCenterX = useCallback(
@@ -1093,26 +1150,13 @@ export function EditorPage() {
         </section>
       </main>
 
-      {/* Footer: Back (left), tools (right) */}
-      <footer className="flex shrink-0 items-center justify-between border-t border-secondary px-4 py-2">
-        <div className="flex gap-2">
-          <button
-            type="button"
-            onClick={handleBack}
-            className="rounded-lg border border-secondary bg-primary px-4 py-2 text-sm font-medium text-primary transition-colors hover:bg-secondary"
-          >
-            Back
-          </button>
+      {editorJsonDebug ? (
+        <div className="pointer-events-none fixed bottom-4 right-4 z-50">
+          <div className="pointer-events-auto">
+            <EditorJsonButton stateJson={stateJson} />
+          </div>
         </div>
-        <div className="flex flex-wrap items-center justify-end gap-2">
-          <ProcessingClipsNavButton />
-          <EditorJsonButton
-            stateJson={stateJson}
-            open={jsonPanelOpen}
-            onOpenChange={setJsonPanelOpen}
-          />
-        </div>
-      </footer>
+      ) : null}
     </div>
   );
 }
