@@ -63,7 +63,9 @@ COPY frontend/ ./frontend/
 RUN cd frontend && npm run build
 
 # Install backend deps + Chromium for widget HTML→PNG (Playwright)
+# postinstall runs during npm ci and needs ./scripts/install-playwright-chromium.mjs
 COPY backend/package.json backend/package-lock.json* ./backend/
+COPY backend/scripts ./backend/scripts/
 RUN cd backend && npm ci --omit=dev \
   && npx playwright install chromium --with-deps
 
