@@ -353,7 +353,7 @@ export async function buildWidgetOverlayFilterComplex(opts) {
         const fontSizePx = clamp(Number(raw.fontSizePx) || 28, 8, 120);
         const color = typeof raw.color === "string" ? raw.color : "#ffffff";
         const pngPath = path.join(workDir, `widget_text_${tag}_${wgt}.png`);
-        vodEncodeStdout(encodeLogPrefix, `widget text render tag=${tag} w=${wgt} box=${Pw}x${Ph}`);
+        vodEncodeStdout(encodeLogPrefix, `widget text render tag=${tag} wgt=${wgt} box=${Pw}x${Ph}`);
         await renderTextWidgetToPng({
           browser,
           html,
@@ -364,6 +364,7 @@ export async function buildWidgetOverlayFilterComplex(opts) {
           boxH: Ph,
           destPath: pngPath,
         });
+        vodEncodeStdout(encodeLogPrefix, `widget text PNG ok tag=${tag} wgt=${wgt} path=${pngPath}`);
         await uploadAssembledWidgetPngToS3({
           tenantId,
           jobId,

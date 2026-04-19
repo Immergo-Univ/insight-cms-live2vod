@@ -19,8 +19,21 @@ function chromiumLaunchOptions() {
     headless: true,
     executablePath: exe || undefined,
     timeout: launchTimeout,
-    args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
+    args: [
+      "--no-sandbox",
+      "--disable-setuid-sandbox",
+      "--disable-dev-shm-usage",
+      "--disable-background-networking",
+      "--mute-audio",
+    ],
   };
+}
+
+/**
+ * Default timeout for widget HTML → PNG steps (setContent / screenshot). Env: PLAYWRIGHT_WIDGET_STEP_TIMEOUT_MS
+ */
+function widgetStepTimeoutMs() {
+  return Math.max(5000, parseInt(process.env.PLAYWRIGHT_WIDGET_STEP_TIMEOUT_MS || "25000", 10) || 25000);
 }
 
 /**
@@ -122,6 +135,8 @@ export async function renderTextWidgetToPng(opts) {
   const placeholder = isTextWidgetPlaceholderHtml(html);
   const payloadHtml = placeholder ? "<span>New text</span>" : String(html || "");
 
+  const stepMs = widgetStepTimeoutMs();
+
   const shell = `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -176,17 +191,33 @@ export async function renderTextWidgetToPng(opts) {
     deviceScaleFactor: 1,
     reducedMotion: "reduce",
   });
+  context.setDefaultTimeout(stepMs);
+  context.setDefaultNavigationTimeout(stepMs);
+
   const page = await context.newPage();
   try {
-    await page.setContent(shell, { waitUntil: "domcontentloaded" });
+    // User-supplied HTML may reference remote images/fonts/CDN — those fetches often stall headless Chrome in Docker.
+    await page.route("**/*", (route) => {
+      try {
+        const u = route.request().url();
+        if (/^(data:|blob:|about:)/i.test(u)) return route.continue();
+      } catch {
+        /* ignore */
+      }
+      return route.abort();
+    });
+
+    await page.setContent(shell, { waitUntil: "commit", timeout: stepMs });
     await page.evaluate((h) => {
       const el = document.getElementById("content");
       if (el) el.innerHTML = h;
     }, payloadHtml);
+    await new Promise((r) => setTimeout(r, 80));
     await page.screenshot({
       path: destPath,
       type: "png",
       omitBackground: true,
+      timeout: stepMs,
     });
   } finally {
     await context.close();
