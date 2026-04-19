@@ -8,8 +8,11 @@
 
 import fs from "fs/promises";
 import path from "path";
-import { config } from "../config.js";
-import { isValidEditorPosterId, loadEditorPosterBuffer } from "./editor-posters.service.js";
+import {
+  isValidEditorPosterId,
+  loadEditorPosterBuffer,
+  fetchPosterFromBackendPath,
+} from "./poster-load.service.js";
 import { renderTextWidgetToPng } from "./vod-widget-html2png.service.js";
 
 const MAX_IMAGE_BYTES = 25 * 1024 * 1024;
@@ -47,19 +50,11 @@ export async function materializeWidgetImageForFfmpeg(imageWidget, destPngPath) 
   if (storedRelative) {
     const rel = storedRelative.replace(/^\/+/, "");
     if (rel.startsWith("posters/")) {
-      const abs = path.join(config.editorPosters.dataDir, rel);
-      try {
-        buf = await fs.readFile(abs);
-      } catch {
-        /* missing on disk — try poster id + S3 */
-      }
-      if (!buf) {
-        const idMatch = rel.match(/^posters\/([0-9a-f-]{36})\.[^/.]+$/i);
-        if (idMatch && isValidEditorPosterId(idMatch[1])) {
-          const loaded = await loadEditorPosterBuffer(idMatch[1]);
-          if (loaded) {
-            buf = loaded.buffer;
-          }
+      const idMatch = rel.match(/^posters\/([0-9a-f-]{36})\.[^/.]+$/i);
+      if (idMatch && isValidEditorPosterId(idMatch[1])) {
+        const loaded = await loadEditorPosterBuffer(idMatch[1]);
+        if (loaded) {
+          buf = loaded.buffer;
         }
       }
     }
@@ -71,6 +66,8 @@ export async function materializeWidgetImageForFfmpeg(imageWidget, destPngPath) 
       const loaded = await loadEditorPosterBuffer(posterId);
       if (loaded) {
         buf = loaded.buffer;
+      } else {
+        buf = await fetchPosterFromBackendPath(src.split("?")[0] || "");
       }
     }
   }

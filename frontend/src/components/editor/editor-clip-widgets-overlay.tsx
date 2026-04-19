@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Edit03, Trash01 } from "@untitledui/icons";
+import { Edit03, FaceSmile, Trash01 } from "@untitledui/icons";
+import EmojiPicker, { type EmojiClickData, EmojiStyle, Theme } from "emoji-picker-react";
 import { ModalOverlay, Modal, Dialog } from "@/components/application/modals/modal";
 import { CloseButton } from "@/components/base/buttons/close-button";
 import type {
@@ -23,12 +24,52 @@ function clamp(n: number, lo: number, hi: number) {
   return Math.min(hi, Math.max(lo, n));
 }
 
+const TEXT_WIDGET_FONT_SIZE_MIN_PX = 4;
+const TEXT_WIDGET_FONT_SIZE_MAX_PX = 300;
+
 function clampLayout(l: EditorClipWidgetLayout): EditorClipWidgetLayout {
   const w = clamp(l.w, 0.06, 1);
   const h = clamp(l.h, 0.06, 1);
   const x = clamp(l.x, 0, 1 - w);
   const y = clamp(l.y, 0, 1 - h);
   return { x, y, w, h };
+}
+
+function insertEmojiIntoContentEditable(root: HTMLElement, savedRange: Range | null, emoji: string): void {
+  root.focus();
+  const sel = window.getSelection();
+  if (!sel) return;
+
+  let range: Range | null = null;
+  if (savedRange) {
+    try {
+      const anchor = savedRange.commonAncestorContainer;
+      if (root.contains(anchor) || anchor === root) {
+        range = savedRange.cloneRange();
+      }
+    } catch {
+      /* detached */
+    }
+  }
+  if (!range && sel.rangeCount > 0) {
+    const r = sel.getRangeAt(0);
+    if (root.contains(r.commonAncestorContainer)) {
+      range = r.cloneRange();
+    }
+  }
+  if (!range) {
+    range = document.createRange();
+    range.selectNodeContents(root);
+    range.collapse(false);
+  }
+
+  range.deleteContents();
+  const textNode = document.createTextNode(emoji);
+  range.insertNode(textNode);
+  range.setStartAfter(textNode);
+  range.collapse(true);
+  sel.removeAllRanges();
+  sel.addRange(range);
 }
 
 /** Eight-point resize (design-tool style). */
@@ -170,10 +211,14 @@ export function EditorClipWidgetsOverlay({
   const [selectedWidgetId, setSelectedWidgetId] = useState<string | null>(null);
   const [widgetEditModalId, setWidgetEditModalId] = useState<string | null>(null);
   const [modalColor, setModalColor] = useState("#ffffff");
-  const [modalFontSizePx, setModalFontSizePx] = useState(28);
+  const [modalFontSizeStr, setModalFontSizeStr] = useState("28");
   const [modalOffsetInStr, setModalOffsetInStr] = useState("0:00");
   const [modalOffsetOutStr, setModalOffsetOutStr] = useState("0:00");
   const modalEditorRef = useRef<HTMLDivElement>(null);
+  const widgetTextEmojiRangeRef = useRef<Range | null>(null);
+  const emojiPickerButtonRef = useRef<HTMLButtonElement>(null);
+  const emojiPickerPopoverRef = useRef<HTMLDivElement>(null);
+  const [emojiPickerOpen, setEmojiPickerOpen] = useState(false);
 
   const widgetsRef = useRef(widgets);
   widgetsRef.current = widgets;
@@ -186,6 +231,25 @@ export function EditorClipWidgetsOverlay({
       return widgets.some((w) => w.id === cur) ? cur : null;
     });
   }, [widgets]);
+
+  useEffect(() => {
+    if (!widgetEditModalId) {
+      setEmojiPickerOpen(false);
+      widgetTextEmojiRangeRef.current = null;
+    }
+  }, [widgetEditModalId]);
+
+  useEffect(() => {
+    if (!emojiPickerOpen) return;
+    const onPointerDown = (e: PointerEvent) => {
+      const t = e.target as Node;
+      if (emojiPickerPopoverRef.current?.contains(t)) return;
+      if (emojiPickerButtonRef.current?.contains(t)) return;
+      setEmojiPickerOpen(false);
+    };
+    document.addEventListener("pointerdown", onPointerDown, true);
+    return () => document.removeEventListener("pointerdown", onPointerDown, true);
+  }, [emojiPickerOpen]);
 
   useEffect(() => {
     if (!focusWidgetIdRequest) return;
@@ -240,7 +304,9 @@ export function EditorClipWidgetsOverlay({
     if (w.kind !== "text") return;
     const tw = w as EditorClipTextWidget;
     setModalColor(tw.color);
-    setModalFontSizePx(Math.round(clamp(tw.fontSizePx, 8, 120)));
+    setModalFontSizeStr(
+      String(Math.round(clamp(tw.fontSizePx, TEXT_WIDGET_FONT_SIZE_MIN_PX, TEXT_WIDGET_FONT_SIZE_MAX_PX))),
+    );
     const id = requestAnimationFrame(() => {
       const el = modalEditorRef.current;
       if (el) el.innerHTML = modalInitialHtmlForTextWidget(tw.html);
@@ -275,10 +341,12 @@ export function EditorClipWidgetsOverlay({
     }
     if (w.kind === "text") {
       const html = modalEditorRef.current?.innerHTML ?? "";
+      let n = parseInt(modalFontSizeStr.trim(), 10);
+      if (!Number.isFinite(n)) n = TEXT_WIDGET_FONT_SIZE_MIN_PX;
       patchWidget(widgetEditModalId, {
         html,
         color: modalColor,
-        fontSizePx: Math.round(clamp(modalFontSizePx, 8, 120)),
+        fontSizePx: Math.round(clamp(n, TEXT_WIDGET_FONT_SIZE_MIN_PX, TEXT_WIDGET_FONT_SIZE_MAX_PX)),
         offsetIn: r.startTime,
         offsetOut: r.endTime,
       });
@@ -292,12 +360,40 @@ export function EditorClipWidgetsOverlay({
   }, [
     widgetEditModalId,
     modalColor,
-    modalFontSizePx,
+    modalFontSizeStr,
     modalOffsetInStr,
     modalOffsetOutStr,
     patchWidget,
     timelineContext,
   ]);
+
+  const toggleWidgetTextEmojiPicker = useCallback(() => {
+    setEmojiPickerOpen((prev) => {
+      if (prev) {
+        widgetTextEmojiRangeRef.current = null;
+        return false;
+      }
+      const el = modalEditorRef.current;
+      const sel = window.getSelection();
+      widgetTextEmojiRangeRef.current = null;
+      if (el && sel && sel.rangeCount > 0) {
+        const r = sel.getRangeAt(0);
+        if (el.contains(r.commonAncestorContainer)) {
+          widgetTextEmojiRangeRef.current = r.cloneRange();
+        }
+      }
+      return true;
+    });
+  }, []);
+
+  const onWidgetTextEmojiPick = useCallback((data: EmojiClickData) => {
+    const el = modalEditorRef.current;
+    if (!el) return;
+    insertEmojiIntoContentEditable(el, widgetTextEmojiRangeRef.current, data.emoji);
+    widgetTextEmojiRangeRef.current = null;
+    setEmojiPickerOpen(false);
+    requestAnimationFrame(() => el.focus());
+  }, []);
 
   const beginMove = useCallback(
     (e: React.PointerEvent, id: string) => {
@@ -599,22 +695,68 @@ export function EditorClipWidgetsOverlay({
                       <label className="flex flex-col gap-1.5">
                         <span className="text-xs font-medium text-secondary">Size (px)</span>
                         <input
-                          type="number"
-                          min={8}
-                          max={120}
-                          step={1}
+                          type="text"
                           inputMode="numeric"
-                          value={Math.round(modalFontSizePx)}
-                          onChange={(e) => {
-                            const n = parseInt(e.target.value, 10);
-                            if (!Number.isFinite(n)) return;
-                            setModalFontSizePx(Math.round(clamp(n, 8, 120)));
+                          autoComplete="off"
+                          spellCheck={false}
+                          aria-label="Widget text size in pixels"
+                          title={`Integer ${TEXT_WIDGET_FONT_SIZE_MIN_PX}–${TEXT_WIDGET_FONT_SIZE_MAX_PX}`}
+                          value={modalFontSizeStr}
+                          onChange={(e) => setModalFontSizeStr(e.target.value.replace(/\D/g, ""))}
+                          onBlur={() => {
+                            const parsed = parseInt(modalFontSizeStr.trim(), 10);
+                            setModalFontSizeStr(
+                              String(
+                                Number.isFinite(parsed)
+                                  ? Math.round(clamp(parsed, TEXT_WIDGET_FONT_SIZE_MIN_PX, TEXT_WIDGET_FONT_SIZE_MAX_PX))
+                                  : TEXT_WIDGET_FONT_SIZE_MIN_PX,
+                              ),
+                            );
                           }}
                           className="rounded-lg border border-secondary bg-primary px-3 py-2 text-sm text-primary tabular-nums"
                         />
                       </label>
                       <div className="flex flex-col gap-1.5">
-                        <span className="text-xs font-medium text-secondary">Text</span>
+                        <div className="relative flex items-center justify-between gap-2">
+                          <span className="text-xs font-medium text-secondary">Text</span>
+                          <button
+                            ref={emojiPickerButtonRef}
+                            type="button"
+                            onMouseDown={(e) => e.preventDefault()}
+                            onClick={toggleWidgetTextEmojiPicker}
+                            aria-expanded={emojiPickerOpen}
+                            aria-haspopup="dialog"
+                            aria-controls="widget-text-emoji-picker"
+                            className={cx(
+                              "inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-secondary bg-primary px-2.5 py-1.5 text-xs font-medium text-secondary transition-colors",
+                              "hover:bg-secondary hover:text-primary",
+                              "focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-secondary/40 focus-visible:ring-offset-2 focus-visible:ring-offset-primary",
+                            )}
+                          >
+                            <FaceSmile data-icon className="size-4 shrink-0 text-fg-quaternary" aria-hidden />
+                            Emojis
+                          </button>
+                          {emojiPickerOpen ? (
+                            <div
+                              id="widget-text-emoji-picker"
+                              ref={emojiPickerPopoverRef}
+                              className="absolute top-full right-0 z-50 mt-1 overflow-hidden rounded-xl border border-secondary bg-primary shadow-lg"
+                              role="dialog"
+                              aria-label="Emoji picker"
+                            >
+                              <EmojiPicker
+                                onEmojiClick={onWidgetTextEmojiPick}
+                                theme={Theme.AUTO}
+                                emojiStyle={EmojiStyle.NATIVE}
+                                width={320}
+                                height={360}
+                                searchPlaceHolder="Search (English keywords)"
+                                autoFocusSearch
+                                lazyLoadEmojis
+                              />
+                            </div>
+                          ) : null}
+                        </div>
                         <div
                           ref={modalEditorRef}
                           contentEditable

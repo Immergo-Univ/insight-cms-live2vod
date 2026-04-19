@@ -1,12 +1,8 @@
 /**
- * Tenant-scoped VOD MP4 objects (separate folder per tenant under the shared S3 prefix).
+ * VOD MP4 upload + poster reads (same key layout as backend).
  */
 
-import {
-  S3Client,
-  PutObjectCommand,
-  ListObjectsV2Command,
-} from "@aws-sdk/client-s3";
+import { S3Client, PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
 import { config } from "../config.js";
 
 /** @type {S3Client | null} */
@@ -39,9 +35,14 @@ function objectKeySuffix(suffix) {
   return p ? `${p}/${s}` : s;
 }
 
+export function logoObjectKey(storedRelative) {
+  const rel = String(storedRelative).replace(/^\/+/, "");
+  return objectKeySuffix(rel);
+}
+
 /**
  * @param {string} tenantId
- * @param {string} fileName e.g. jobId.mp4
+ * @param {string} fileName
  */
 export function vodObjectKey(tenantId, fileName) {
   const seg = sanitizeTenantSegment(tenantId);
@@ -50,7 +51,6 @@ export function vodObjectKey(tenantId, fileName) {
 }
 
 /**
- * Public URL for a key (same convention as other S3 helpers in this project).
  * @param {string} key
  */
 export function publicUrlForVodKey(key) {
@@ -79,7 +79,6 @@ export async function putVodMp4(tenantId, fileName, body) {
       Key: key,
       Body: body,
       ContentType: "video/mp4",
-      /** Spaces/S3-compatible: object readable anonymously when bucket allows ACLs */
       ACL: "public-read",
     }),
   );
@@ -87,35 +86,36 @@ export async function putVodMp4(tenantId, fileName, body) {
 }
 
 /**
- * @param {string} tenantId
- * @returns {Promise<Array<{ key: string, size?: number, lastModified?: Date, publicUrl: string | null }>>}
+ * @param {import("@aws-sdk/client-s3").GetObjectCommandOutput["Body"]} body
+ * @returns {Promise<Buffer>}
  */
-export async function listTenantVodMp4s(tenantId) {
+async function streamToBuffer(body) {
+  if (!body) return Buffer.alloc(0);
+  const chunks = [];
+  for await (const chunk of body) {
+    chunks.push(typeof chunk === "string" ? Buffer.from(chunk) : chunk);
+  }
+  return Buffer.concat(chunks);
+}
+
+/**
+ * @param {string} storedRelative e.g. posters/<uuid>.png
+ * @returns {Promise<Buffer | null>}
+ */
+export async function getLogoBuffer(storedRelative) {
   const c = getClient();
-  if (!c) return [];
-  const seg = sanitizeTenantSegment(tenantId);
-  const prefix = objectKeySuffix(`generated-vods/${seg}/`);
-  const out = [];
-  let ContinuationToken;
-  do {
-    const res = await c.send(
-      new ListObjectsV2Command({
+  if (!c) return null;
+  const key = logoObjectKey(storedRelative);
+  try {
+    const out = await c.send(
+      new GetObjectCommand({
         Bucket: config.s3Logos.bucket,
-        Prefix: prefix,
-        ContinuationToken,
+        Key: key,
       }),
     );
-    for (const item of res.Contents || []) {
-      if (!item.Key || !item.Key.toLowerCase().endsWith(".mp4")) continue;
-      out.push({
-        key: item.Key,
-        size: item.Size,
-        lastModified: item.LastModified,
-        publicUrl: publicUrlForVodKey(item.Key),
-      });
-    }
-    ContinuationToken = res.IsTruncated ? res.NextContinuationToken : undefined;
-  } while (ContinuationToken);
-  out.sort((a, b) => (b.lastModified?.getTime() ?? 0) - (a.lastModified?.getTime() ?? 0));
-  return out;
+    return streamToBuffer(out.Body);
+  } catch (e) {
+    if (e && (e.name === "NoSuchKey" || e.$metadata?.httpStatusCode === 404)) return null;
+    throw e;
+  }
 }

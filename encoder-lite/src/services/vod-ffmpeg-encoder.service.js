@@ -16,6 +16,46 @@ const MIN_SEGMENT_SEC = 0.08;
 /** libx264 CRF (higher = lower quality / smaller output). */
 const VOD_LIBX264_CRF = 28;
 
+/** Min interval between ffmpeg-driven progress callbacks (aligned with backend tick). */
+const FFMPEG_PROGRESS_EMIT_MS = 1000;
+
+/**
+ * Best-effort: max encoded timestamp (seconds) from ffmpeg stderr (key `time=`).
+ * @param {string} chunk
+ * @returns {number | null}
+ */
+function parseMaxTimeSecondsFromFfmpegStderr(chunk) {
+  let best = null;
+  const re = /time=(\d+):(\d+):(\d+\.?\d*)/g;
+  let m;
+  while ((m = re.exec(chunk)) !== null) {
+    const h = parseInt(m[1], 10);
+    const min = parseInt(m[2], 10);
+    const sec = parseFloat(m[3]);
+    const t = h * 3600 + min * 60 + sec;
+    if (Number.isFinite(t) && (best === null || t > best)) best = t;
+  }
+  return best;
+}
+
+/**
+ * When parsing stderr for `time=`, ffmpeg must not use `-loglevel error` only.
+ * @param {string[]} args
+ * @returns {string[]}
+ */
+function ffmpegArgsWithProgressableStderr(args) {
+  const out = [...args];
+  const i = out.indexOf("-loglevel");
+  if (i >= 0 && out[i + 1] === "error") {
+    out[i + 1] = "info";
+  } else if (i < 0) {
+    const hi = out.indexOf("-hide_banner");
+    if (hi >= 0) out.splice(hi + 1, 0, "-loglevel", "info");
+    else out.unshift("-loglevel", "info");
+  }
+  return out;
+}
+
 /**
  * @param {string} inputUrl
  * @returns {string[]}
@@ -272,6 +312,7 @@ async function runFfmpegSegmentWithOptionalWidgets(opts) {
     workDir,
     segmentTag,
     encodeLogPrefix,
+    onSegmentFraction,
   } = opts;
 
   const widgets = clip?.widgets;
@@ -293,6 +334,7 @@ async function runFfmpegSegmentWithOptionalWidgets(opts) {
       outputPath,
       shouldCancel,
       videoFilter: videoFilter || undefined,
+      onSegmentFraction,
     });
     vodEncodeStdout(encodeLogPrefix || "encode", `segment ok tag=${segmentTag} path=${outputPath}`);
     return;
@@ -343,6 +385,7 @@ async function runFfmpegSegmentWithOptionalWidgets(opts) {
         outputPath,
         shouldCancel,
         videoFilter: videoFilter || undefined,
+        onSegmentFraction,
       });
       vodEncodeStdout(
         encodeLogPrefix || "encode",
@@ -389,7 +432,12 @@ async function runFfmpegSegmentWithOptionalWidgets(opts) {
       outputPath,
     ];
 
-    await runFfmpeg(args, shouldCancel);
+    const dur = Number(end) - Number(start);
+    const pOpts =
+      onSegmentFraction && dur > 0
+        ? { segmentDurationSec: dur, onSegmentFraction }
+        : undefined;
+    await runFfmpeg(args, shouldCancel, pOpts);
     vodEncodeStdout(
       encodeLogPrefix || "encode",
       `segment ok tag=${segmentTag} path=${outputPath} extraInputs=${extraInputs.length}`,
@@ -403,7 +451,7 @@ async function runFfmpegSegmentWithOptionalWidgets(opts) {
 }
 
 function runFfmpegSegment(opts) {
-  const { inputUrl, start, end, outputPath, shouldCancel, videoFilter } = opts;
+  const { inputUrl, start, end, outputPath, shouldCancel, videoFilter, onSegmentFraction } = opts;
   const vfArgs = videoFilter ? ["-vf", videoFilter] : [];
   const args = [
     "-hide_banner",
@@ -436,7 +484,10 @@ function runFfmpegSegment(opts) {
     "+faststart",
     outputPath,
   ];
-  return runFfmpeg(args, shouldCancel);
+  const dur = Number(end) - Number(start);
+  const pOpts =
+    onSegmentFraction && dur > 0 ? { segmentDurationSec: dur, onSegmentFraction } : undefined;
+  return runFfmpeg(args, shouldCancel, pOpts);
 }
 
 /**
@@ -466,19 +517,41 @@ function runFfmpegConcat(opts) {
 }
 
 /**
+ * @typedef {object} FfmpegProgressOpts
+ * @property {number} segmentDurationSec
+ * @property {(fraction0to1: number) => void} onSegmentFraction
+ */
+
+/**
  * @param {string[]} args
  * @param {() => boolean} shouldCancel
+ * @param {FfmpegProgressOpts | undefined} [progressOpts]
  */
-function runFfmpeg(args, shouldCancel) {
+function runFfmpeg(args, shouldCancel, progressOpts) {
   return new Promise((resolve, reject) => {
     if (shouldCancel()) {
       reject(new Error("CANCELLED"));
       return;
     }
-    const proc = spawn("ffmpeg", args, { stdio: ["ignore", "ignore", "pipe"] });
+    const useProgress =
+      Boolean(progressOpts?.onSegmentFraction) &&
+      Number(progressOpts?.segmentDurationSec) > 0;
+    const ffArgs = useProgress ? ffmpegArgsWithProgressableStderr(args) : args;
+    const proc = spawn("ffmpeg", ffArgs, { stdio: ["ignore", "ignore", "pipe"] });
     let stderr = "";
     proc.stderr?.on("data", (chunk) => {
-      stderr += chunk.toString();
+      const piece = chunk.toString();
+      stderr += piece;
+      if (stderr.length > 256000) stderr = stderr.slice(-200000);
+      if (useProgress && progressOpts) {
+        const dur = Number(progressOpts.segmentDurationSec);
+        const tail = stderr.slice(-65536);
+        const t = parseMaxTimeSecondsFromFfmpegStderr(tail);
+        if (t != null && dur > 0) {
+          const frac = Math.min(1, Math.max(0, t / dur));
+          progressOpts.onSegmentFraction(frac);
+        }
+      }
     });
     const check = setInterval(() => {
       if (shouldCancel()) {
@@ -581,6 +654,23 @@ export async function encodeEditorJsonToMp4(ctx) {
   /** @type {string[]} */
   const clipOutputPaths = [];
 
+  /**
+   * Maps ffmpeg segment completion 0–1 into overall encode progress 0–90.
+   * Throttled to ~1/s so stderr parsing does not flood the job snapshot.
+   * @param {number} doneBeforeThisSegment
+   */
+  function makeSegmentFractionEmitter(doneBeforeThisSegment) {
+    let lastAt = 0;
+    return (frac) => {
+      const now = Date.now();
+      const clamped = Math.min(1, Math.max(0, frac));
+      if (now - lastAt < FFMPEG_PROGRESS_EMIT_MS && clamped < 0.999) return;
+      lastAt = now;
+      const p = Math.min(90, ((doneBeforeThisSegment + clamped) / totalParts) * 90);
+      onProgress?.(p);
+    };
+  }
+
   for (let ci = 0; ci < clipsSorted.length; ci++) {
     const clip = clipsSorted[ci];
     const videoFilter = videoFilterForClip(clip);
@@ -612,6 +702,7 @@ export async function encodeEditorJsonToMp4(ctx) {
         workDir,
         segmentTag: `c${ci}_p0`,
         encodeLogPrefix: logP,
+        onSegmentFraction: makeSegmentFractionEmitter(doneParts),
       });
       doneParts += 1;
       onProgress?.(Math.min(90, Math.round((doneParts / totalParts) * 90)));
@@ -635,6 +726,7 @@ export async function encodeEditorJsonToMp4(ctx) {
           workDir,
           segmentTag: `c${ci}_s${i}`,
           encodeLogPrefix: logP,
+          onSegmentFraction: makeSegmentFractionEmitter(doneParts),
         });
         segmentFiles.push(segPath);
         doneParts += 1;

@@ -7,6 +7,10 @@ import { accessSync } from "fs";
 import fs from "fs/promises";
 import path from "path";
 
+/** Docker image defaults (no env required). */
+const BUNDLED_WHISPER_CLI = "/opt/whisper/whisper-cli";
+const BUNDLED_WHISPER_MODEL = "/opt/whisper/models/ggml-base.bin";
+
 function pathExistsSync(p) {
   try {
     accessSync(p);
@@ -33,6 +37,7 @@ function whisperCliFromShellPath() {
  * @returns {string}
  */
 function resolveWhisperCliPath() {
+  if (pathExistsSync(BUNDLED_WHISPER_CLI)) return BUNDLED_WHISPER_CLI;
   const envPath = process.env.WHISPER_CLI_PATH?.trim();
   if (envPath) {
     if (!pathExistsSync(envPath)) {
@@ -44,10 +49,8 @@ function resolveWhisperCliPath() {
   }
   const fromPath = whisperCliFromShellPath();
   if (fromPath) return fromPath;
-  const dockerPath = "/opt/whisper/whisper-cli";
-  if (pathExistsSync(dockerPath)) return dockerPath;
   throw new Error(
-    "whisper-cli not found. Options: (1) Add whisper-cli to PATH (build whisper.cpp), (2) set WHISPER_CLI_PATH to the binary, or (3) run the backend in Docker where /opt/whisper is preinstalled.",
+    "whisper-cli not found. Install to /opt/whisper/whisper-cli (Dockerfile), add to PATH, or set WHISPER_CLI_PATH.",
   );
 }
 
@@ -55,6 +58,7 @@ function resolveWhisperCliPath() {
  * @returns {string}
  */
 function resolveWhisperModelPath() {
+  if (pathExistsSync(BUNDLED_WHISPER_MODEL)) return BUNDLED_WHISPER_MODEL;
   const envPath = process.env.WHISPER_MODEL_PATH?.trim();
   if (envPath) {
     if (!pathExistsSync(envPath)) {
@@ -64,8 +68,6 @@ function resolveWhisperModelPath() {
     }
     return envPath;
   }
-  const dockerPath = "/opt/whisper/models/ggml-base.bin";
-  if (pathExistsSync(dockerPath)) return dockerPath;
   const home = process.env.HOME?.trim() || "";
   const candidates = [
     path.join(home, "whisper.cpp/models/ggml-base.bin"),
@@ -76,7 +78,7 @@ function resolveWhisperModelPath() {
     if (c && pathExistsSync(c)) return c;
   }
   throw new Error(
-    "Whisper GGML model not found (ggml-base.bin). Set WHISPER_MODEL_PATH to the .bin file, or run whisper.cpp models/download-ggml-model.sh base (see Dockerfile).",
+    "Whisper GGML model not found (ggml-base.bin). Image expects /opt/whisper/models/ggml-base.bin or set WHISPER_MODEL_PATH.",
   );
 }
 

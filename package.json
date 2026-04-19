@@ -1,0 +1,7 @@
+{
+  "name": "insight-cms-live2vod",
+  "private": true,
+  "scripts": {
+    "dev:encoder": "npm run dev --prefix encoder-lite"
+  }
+}

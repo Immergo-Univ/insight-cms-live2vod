@@ -148,6 +148,15 @@ export const config = {
   s3Logos: s3LogosResolved,
 
   /**
+   * Remote VOD encoder (encoder-lite). Backend dispatches jobs via HTTP; encoder PATCHes job state here.
+   * Env: ENCODER_SERVICE_URL (e.g. http://encoder:3010), SECRET (shared Bearer). ENCODER_SECRET is still accepted as an alias.
+   */
+  encoder: {
+    serviceUrl: (process.env.ENCODER_SERVICE_URL || "").trim().replace(/\/+$/, ""),
+    secret: (process.env.SECRET || process.env.ENCODER_SECRET || "").trim(),
+  },
+
+  /**
    * Optional archive window probe: logo-detector on DVR m3u8 per channel (same env as legacy LOGO_SCAN_*).
    * Skips channels with no uploaded logos. Re-evaluates every cycle when logos appear later.
    */
