@@ -52,6 +52,8 @@ const s3LogosResolved = (() => {
     region,
     forcePathStyle,
     prefix: (process.env.S3_LOGOS_PREFIX || "channel-logos").replace(/^\/+|\/+$/g, ""),
+    /** Public editor widget uploads (bucket root segment, not under `prefix`). */
+    widgetImagesPrefix: (process.env.S3_WIDGET_IMAGES_PREFIX || "widget-images").replace(/^\/+|\/+$/g, ""),
     syncIntervalMs: parseInt(process.env.CHANNEL_LOGOS_S3_SYNC_INTERVAL_MS || "60000", 10),
   };
 })();

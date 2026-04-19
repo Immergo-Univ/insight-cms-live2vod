@@ -312,6 +312,8 @@ async function runFfmpegSegmentWithOptionalWidgets(opts) {
     workDir,
     segmentTag,
     encodeLogPrefix,
+    tenantId = "",
+    jobId = "",
     onSegmentFraction,
   } = opts;
 
@@ -343,7 +345,12 @@ async function runFfmpegSegmentWithOptionalWidgets(opts) {
   /** @type {import("playwright").Browser | undefined} */
   let renderBrowser;
   if (needsTextBrowser) {
+    vodEncodeStdout(
+      encodeLogPrefix || "encode",
+      "widgets: acquiring Chromium (Playwright) for text overlays…",
+    );
     renderBrowser = await widgetRenderBrowserRef();
+    vodEncodeStdout(encodeLogPrefix || "encode", "widgets: Chromium ready");
   }
 
   let cropFilter = videoFilter || null;
@@ -374,6 +381,9 @@ async function runFfmpegSegmentWithOptionalWidgets(opts) {
       clipEnd: Number(clip?.endTime),
       segmentStart: start,
       segmentEnd: end,
+      encodeLogPrefix: encodeLogPrefix || "encode",
+      tenantId,
+      jobId,
     });
     tempFiles = tf;
 
@@ -607,7 +617,7 @@ function runFfmpeg(args, shouldCancel, progressOpts) {
  * @returns {Promise<{ localPaths: string[], localPath: string }>}
  */
 export async function encodeEditorJsonToMp4(ctx) {
-  const { spec, workDir, onProgress, shouldCancel, encodeLogPrefix } = ctx;
+  const { spec, workDir, onProgress, shouldCancel, encodeLogPrefix, tenantId = "", jobId = "" } = ctx;
   const logP = encodeLogPrefix || "encode";
   const clipUrl = spec.clipUrl;
   if (!clipUrl) throw new Error("Missing clipUrl in spec");
@@ -702,6 +712,8 @@ export async function encodeEditorJsonToMp4(ctx) {
         workDir,
         segmentTag: `c${ci}_p0`,
         encodeLogPrefix: logP,
+        tenantId,
+        jobId,
         onSegmentFraction: makeSegmentFractionEmitter(doneParts),
       });
       doneParts += 1;
@@ -726,6 +738,8 @@ export async function encodeEditorJsonToMp4(ctx) {
           workDir,
           segmentTag: `c${ci}_s${i}`,
           encodeLogPrefix: logP,
+          tenantId,
+          jobId,
           onSegmentFraction: makeSegmentFractionEmitter(doneParts),
         });
         segmentFiles.push(segPath);

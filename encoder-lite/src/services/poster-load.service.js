@@ -5,6 +5,7 @@
 import fs from "fs/promises";
 import path from "path";
 import { config } from "../config.js";
+import { fetchWithTimeout } from "../utils/fetch-with-timeout.js";
 import { getLogoBuffer } from "./vod-s3.service.js";
 
 const UUID_RE =
@@ -80,14 +81,18 @@ export async function fetchPosterFromBackendPath(pathname) {
   const base = config.backendBaseUrl;
   if (!base) return null;
   const url = `${base}${pathname.startsWith("/") ? pathname : `/${pathname}`}`;
-  const res = await fetch(url, {
-    redirect: "follow",
-    headers: {
-      ...(process.env.VOD_WIDGET_IMAGE_FETCH_UA
-        ? { "User-Agent": process.env.VOD_WIDGET_IMAGE_FETCH_UA }
-        : {}),
+  const res = await fetchWithTimeout(
+    url,
+    {
+      redirect: "follow",
+      headers: {
+        ...(process.env.VOD_WIDGET_IMAGE_FETCH_UA
+          ? { "User-Agent": process.env.VOD_WIDGET_IMAGE_FETCH_UA }
+          : {}),
+      },
     },
-  });
+    config.vodWidgetFetchTimeoutMs,
+  );
   if (!res.ok) return null;
   return Buffer.from(await res.arrayBuffer());
 }

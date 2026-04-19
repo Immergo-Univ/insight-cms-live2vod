@@ -8,14 +8,41 @@
 
 import fs from "fs/promises";
 import path from "path";
+import { config } from "../config.js";
+import { fetchWithTimeout } from "../utils/fetch-with-timeout.js";
+import { vodEncodeStdout } from "../utils/vod-encode-log.js";
 import {
   isValidEditorPosterId,
   loadEditorPosterBuffer,
   fetchPosterFromBackendPath,
 } from "./poster-load.service.js";
+import { getS3ObjectBufferByRawKey, putWidgetImagePublic } from "./vod-s3.service.js";
 import { renderTextWidgetToPng } from "./vod-widget-html2png.service.js";
 
 const MAX_IMAGE_BYTES = 25 * 1024 * 1024;
+
+/**
+ * Persist assembled widget PNGs for CDN playback/debugging (encode still uses local paths for ffmpeg).
+ *
+ * @param {object} opts
+ * @param {string} [opts.tenantId]
+ * @param {string} [opts.jobId]
+ * @param {string} opts.fileName
+ * @param {string} opts.absPath
+ * @param {string} opts.logPrefix
+ */
+async function uploadAssembledWidgetPngToS3(opts) {
+  const { tenantId, jobId, fileName, absPath, logPrefix } = opts;
+  if (!tenantId || !jobId || !config.s3Logos.enabled) return;
+  try {
+    const body = await fs.readFile(absPath);
+    const up = await putWidgetImagePublic({ tenantId, jobId, fileName, body });
+    if (up?.publicUrl) vodEncodeStdout(logPrefix, `widget-images (public-read) ${up.publicUrl}`);
+  } catch (e) {
+    const m = e instanceof Error ? e.message : String(e);
+    vodEncodeStdout(logPrefix, `widget-images upload failed ${fileName}: ${m.slice(0, 220)}`);
+  }
+}
 
 /**
  * Extract editor poster UUID from `/api/channels/.../editor/posters/{id}/file` path.
@@ -49,7 +76,10 @@ export async function materializeWidgetImageForFfmpeg(imageWidget, destPngPath) 
 
   if (storedRelative) {
     const rel = storedRelative.replace(/^\/+/, "");
-    if (rel.startsWith("posters/")) {
+    if (rel.startsWith("widget-images/")) {
+      buf = await getS3ObjectBufferByRawKey(rel);
+    }
+    if (!buf && rel.startsWith("posters/")) {
       const idMatch = rel.match(/^posters\/([0-9a-f-]{36})\.[^/.]+$/i);
       if (idMatch && isValidEditorPosterId(idMatch[1])) {
         const loaded = await loadEditorPosterBuffer(idMatch[1]);
@@ -88,14 +118,18 @@ export async function materializeWidgetImageForFfmpeg(imageWidget, destPngPath) 
   }
 
   if (!buf && /^https?:\/\//i.test(src)) {
-    const res = await fetch(src, {
-      redirect: "follow",
-      headers: {
-        ...(process.env.VOD_WIDGET_IMAGE_FETCH_UA
-          ? { "User-Agent": process.env.VOD_WIDGET_IMAGE_FETCH_UA }
-          : {}),
+    const res = await fetchWithTimeout(
+      src,
+      {
+        redirect: "follow",
+        headers: {
+          ...(process.env.VOD_WIDGET_IMAGE_FETCH_UA
+            ? { "User-Agent": process.env.VOD_WIDGET_IMAGE_FETCH_UA }
+            : {}),
+        },
       },
-    });
+      config.vodWidgetFetchTimeoutMs,
+    );
     if (!res.ok) {
       throw new Error(`Widget image download failed ${res.status}: ${src.slice(0, 120)}`);
     }
@@ -217,6 +251,9 @@ function widgetEnableWindowInSegment(p) {
  * @param {number} [opts.clipEnd] parent-timeline Mark Out
  * @param {number} [opts.segmentStart] parent-timeline start of this encode slice
  * @param {number} [opts.segmentEnd] parent-timeline end of this encode slice
+ * @param {string} [opts.encodeLogPrefix]
+ * @param {string} [opts.tenantId] for S3 widget-images uploads
+ * @param {string} [opts.jobId] for S3 widget-images uploads
  * @returns {Promise<{ filterComplex: string, extraInputs: string[], tempFiles: string[] }>}
  */
 export async function buildWidgetOverlayFilterComplex(opts) {
@@ -232,6 +269,9 @@ export async function buildWidgetOverlayFilterComplex(opts) {
     clipEnd,
     segmentStart,
     segmentEnd,
+    encodeLogPrefix = "encode",
+    tenantId = "",
+    jobId = "",
   } = opts;
   const W = outW;
   const H = outH;
@@ -248,6 +288,11 @@ export async function buildWidgetOverlayFilterComplex(opts) {
   if (!Array.isArray(widgets) || widgets.length === 0) {
     return { filterComplex: "", extraInputs: [], tempFiles: [] };
   }
+
+  vodEncodeStdout(
+    encodeLogPrefix,
+    `widget overlay filter tag=${tag} count=${widgets.length} timing=${timingEnabled ? "on" : "off"}`,
+  );
 
   const hasText = widgets.some((w) => w && typeof w === "object" && w.kind === "text");
   if (hasText && !renderBrowser) {
@@ -308,6 +353,7 @@ export async function buildWidgetOverlayFilterComplex(opts) {
         const fontSizePx = clamp(Number(raw.fontSizePx) || 28, 8, 120);
         const color = typeof raw.color === "string" ? raw.color : "#ffffff";
         const pngPath = path.join(workDir, `widget_text_${tag}_${wgt}.png`);
+        vodEncodeStdout(encodeLogPrefix, `widget text render tag=${tag} w=${wgt} box=${Pw}x${Ph}`);
         await renderTextWidgetToPng({
           browser,
           html,
@@ -317,6 +363,13 @@ export async function buildWidgetOverlayFilterComplex(opts) {
           boxW: Pw,
           boxH: Ph,
           destPath: pngPath,
+        });
+        await uploadAssembledWidgetPngToS3({
+          tenantId,
+          jobId,
+          fileName: `text_${tag}_${wgt}.png`,
+          absPath: pngPath,
+          logPrefix: encodeLogPrefix,
         });
         tempFiles.push(pngPath);
         extraInputs.push(pngPath);
@@ -332,7 +385,15 @@ export async function buildWidgetOverlayFilterComplex(opts) {
         const sr = typeof raw.storedRelative === "string" ? raw.storedRelative.trim() : "";
         if (!src && !sr) continue;
         const imgPath = path.join(workDir, `widget_img_${tag}_${inputIdx}.png`);
+        vodEncodeStdout(encodeLogPrefix, `widget image materialize tag=${tag} idx=${inputIdx}`);
         const written = await materializeWidgetImageForFfmpeg(raw, imgPath);
+        await uploadAssembledWidgetPngToS3({
+          tenantId,
+          jobId,
+          fileName: `image_${tag}_${inputIdx}.png`,
+          absPath: written,
+          logPrefix: encodeLogPrefix,
+        });
         tempFiles.push(written);
         extraInputs.push(written);
         const imgLabel = `im${inputIdx}`;

@@ -37,6 +37,8 @@ const s3LogosResolved = (() => {
   };
 })();
 
+const widgetImagesPrefix = (process.env.S3_WIDGET_IMAGES_PREFIX || "widget-images").replace(/^\/+|\/+$/g, "");
+
 export const config = {
   encoderRoot,
   port: parseInt(process.env.PORT || "3010", 10),
@@ -45,6 +47,10 @@ export const config = {
   /** Base URL of backend for PATCH /api/encoder/jobs/:id and optional poster HTTP fetch. */
   backendBaseUrl: (process.env.BACKEND_BASE_URL || "").trim().replace(/\/+$/, ""),
   s3Logos: s3LogosResolved,
+  /** Bucket-relative prefix for public widget PNGs produced during encode (not under S3_LOGOS_PREFIX). Env: S3_WIDGET_IMAGES_PREFIX */
+  widgetImagesPrefix,
+  /** Max wait for widget image HTTP(S) and editor-poster fetch from backend. Env: VOD_WIDGET_FETCH_TIMEOUT_MS */
+  vodWidgetFetchTimeoutMs: Math.max(3000, parseInt(process.env.VOD_WIDGET_FETCH_TIMEOUT_MS || "60000", 10) || 60000),
   /** Optional local mirror of editor posters (same layout as backend data/editor-posters). */
   editorPostersDataDir: (process.env.EDITOR_POSTERS_DATA_DIR || "").trim(),
 };

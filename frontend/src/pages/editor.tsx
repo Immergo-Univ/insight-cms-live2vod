@@ -16,6 +16,7 @@ import {
   EditorRightPanel,
 } from "@/components/editor";
 import { httpClient } from "@/services/http-client";
+import { uploadEditorWidgetImages } from "@/services/editor-widget-images.service";
 import { cancelVodJob, startVodJob } from "@/services/vod.service";
 import { useVodProcessing } from "@/providers/vod-processing-provider";
 import type { VodJobRecord } from "@/types/vod-job";
@@ -43,7 +44,7 @@ import {
   defaultEditorSubClipEncodeFields,
   normalizeEditorClipTagsList,
 } from "@/types/editor";
-import { uploadEditorPosters } from "@/services/editor-posters.service";
+import { installEditorConsoleTools } from "@/utils/editor-console-debug";
 import { isValidWhisperSubtitlePair } from "@/types/editor-whisper-languages";
 
 /** Default length for a manually inserted ad slot (seconds). */
@@ -939,6 +940,13 @@ export function EditorPage() {
     return buildEditorStateJson(clipState, clips, ads, true, nowSec);
   }, [clipState, clips, ads, realtimeTick]);
 
+  const stateJsonRef = useRef<EditorStateJson | null>(null);
+  stateJsonRef.current = stateJson;
+
+  useEffect(() => {
+    return installEditorConsoleTools(() => stateJsonRef.current);
+  }, []);
+
   useEffect(() => {
     if (!clipState?.clipUrl || clipState.selectionMode !== "realtime") return;
     const id = window.setTimeout(() => {
@@ -1113,13 +1121,13 @@ export function EditorPage() {
       if (!ch) {
         throw new Error("Channel ID is required to upload images.");
       }
-      const rows = await uploadEditorPosters(ch, [file]);
+      const rows = await uploadEditorWidgetImages(ch, [file]);
       const row = rows[0];
       if (!row) return;
       const nw: EditorClipImageWidget = {
         kind: "image",
-        id: crypto.randomUUID(),
-        src: row.previewUrl,
+        id: row.id,
+        src: row.src,
         originalName: row.originalName,
         storedRelative: row.storedRelative,
         mime: row.mime,

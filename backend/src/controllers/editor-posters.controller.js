@@ -6,6 +6,8 @@ import {
   loadEditorPosterBuffer,
   saveEditorPosterFromBuffer,
 } from "../services/editor-posters.service.js";
+import { saveEditorWidgetImageForEncode } from "../services/editor-widget-images.service.js";
+
 export const editorPostersRouter = Router();
 
 const uploadMemory = multer({
@@ -26,6 +28,40 @@ function postersUploadMiddleware(req, res, next) {
     next();
   });
 }
+
+function widgetImagesUploadMiddleware(req, res, next) {
+  const mw = uploadMemory;
+  mw.array("widgetImages", 8)(req, res, (err) => {
+    if (err) return res.status(400).json({ error: err.message || String(err) });
+    next();
+  });
+}
+
+/**
+ * Multipart ingest for editor clip-widget images (storage + public URL for encoder spec). VOD widget rasterization is not done here.
+ */
+editorPostersRouter.post("/:channelId/editor/widget-images", widgetImagesUploadMiddleware, async (req, res) => {
+  try {
+    const files = req.files;
+    if (!Array.isArray(files) || files.length === 0) {
+      return res.status(400).json({ error: 'Missing files field "widgetImages" (multipart)' });
+    }
+    const channelId = req.params.channelId;
+    /** @type {Array<{ id: string, originalName: string, storedRelative: string, mime: string, src: string, previewUrl: string }>} */
+    const images = [];
+    for (const f of files) {
+      const buffer = f.buffer;
+      if (!buffer) {
+        return res.status(400).json({ error: "Invalid upload (expected memory buffer)" });
+      }
+      const row = await saveEditorWidgetImageForEncode(channelId, buffer, f.originalname, f.mimetype);
+      images.push(row);
+    }
+    res.json({ images });
+  } catch (e) {
+    res.status(500).json({ error: e.message || String(e) });
+  }
+});
 
 editorPostersRouter.post("/:channelId/editor/posters", postersUploadMiddleware, async (req, res) => {
   try {

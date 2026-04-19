@@ -11,9 +11,14 @@ let browserGate = Promise.resolve();
 
 function chromiumLaunchOptions() {
   const exe = process.env.PLAYWRIGHT_CHROMIUM_PATH?.trim();
+  const launchTimeout = Math.max(
+    5000,
+    parseInt(process.env.PLAYWRIGHT_BROWSER_LAUNCH_TIMEOUT_MS || "120000", 10) || 120000,
+  );
   return {
     headless: true,
     executablePath: exe || undefined,
+    timeout: launchTimeout,
     args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
   };
 }

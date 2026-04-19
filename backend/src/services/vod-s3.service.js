@@ -2,11 +2,7 @@
  * Tenant-scoped VOD MP4 objects (separate folder per tenant under the shared S3 prefix).
  */
 
-import {
-  S3Client,
-  PutObjectCommand,
-  ListObjectsV2Command,
-} from "@aws-sdk/client-s3";
+import { S3Client, PutObjectCommand, ListObjectsV2Command } from "@aws-sdk/client-s3";
 import { config } from "../config.js";
 
 /** @type {S3Client | null} */
@@ -62,6 +58,47 @@ export function publicUrlForVodKey(key) {
   if (!endpoint || !bucket) return null;
   const base = endpoint.replace(/\/+$/, "");
   return `${base}/${bucket}/${key}`;
+}
+
+/**
+ * Editor-uploaded clip widget image (public CDN key; not under channel-logos prefix).
+ *
+ * @param {string} channelSegment
+ * @param {string} imageId uuid
+ * @param {string} extWithDot e.g. .png
+ */
+export function editorWidgetImageObjectKey(channelSegment, imageId, extWithDot) {
+  const prefix = config.s3Logos.widgetImagesPrefix || "widget-images";
+  const seg = sanitizeTenantSegment(channelSegment);
+  const safeId = String(imageId).replace(/[^a-zA-Z0-9_-]/g, "_");
+  const ext = extWithDot.startsWith(".") ? extWithDot : `.${extWithDot}`;
+  return `${prefix}/${seg}/${safeId}${ext}`;
+}
+
+/**
+ * @param {object} opts
+ * @param {string} opts.channelSegment
+ * @param {string} opts.imageId
+ * @param {Buffer} opts.buffer
+ * @param {string} opts.contentType
+ * @param {string} opts.extWithDot
+ */
+export async function putEditorWidgetImagePublic(opts) {
+  const { channelSegment, imageId, buffer, contentType, extWithDot } = opts;
+  const c = getClient();
+  if (!c) throw new Error("S3 not configured (need S3_* credentials, bucket, endpoint)");
+  const key = editorWidgetImageObjectKey(channelSegment, imageId, extWithDot);
+  await c.send(
+    new PutObjectCommand({
+      Bucket: config.s3Logos.bucket,
+      Key: key,
+      Body: buffer,
+      ContentType: contentType || "image/png",
+      ACL: "public-read",
+      CacheControl: "public, max-age=31536000, immutable",
+    }),
+  );
+  return { key, publicUrl: publicUrlForVodKey(key) };
 }
 
 /**

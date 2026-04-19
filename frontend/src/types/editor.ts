@@ -186,7 +186,10 @@ export interface EditorClipTextWidget extends EditorClipWidgetTiming {
 export interface EditorClipImageWidget extends EditorClipWidgetTiming {
   kind: "image";
   id: string;
-  /** Preview URL (absolute or same-origin). */
+  /**
+   * Image URL for in-browser preview and for the encoder job spec. Prefer HTTPS CDN when uploads use `widget-images/`;
+   * otherwise same-origin `/api/.../editor/posters/:id/file`. Burning widgets into video is done only in encoder-lite.
+   */
   src: string;
   originalName?: string;
   storedRelative?: string;

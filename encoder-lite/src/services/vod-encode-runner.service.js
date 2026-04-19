@@ -185,6 +185,8 @@ export async function runVodEncodeJob(opts) {
       spec,
       workDir,
       encodeLogPrefix: `job=${jobId}`,
+      tenantId,
+      jobId,
       shouldCancel: () => shouldCancel(jobId),
       onProgress: (p) => {
         const scaled = 2 + ((p / 90) * (encodeProgressCap - 2));

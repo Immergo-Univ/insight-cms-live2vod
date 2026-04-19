@@ -65,6 +65,50 @@ export function publicUrlForVodKey(key) {
 }
 
 /**
+ * Public CDN keys for widget PNGs assembled during encode (separate from channel-logos prefix).
+ *
+ * @param {string} tenantId
+ * @param {string} jobId
+ * @param {string} fileName
+ */
+export function widgetImageObjectKey(tenantId, jobId, fileName) {
+  const seg = sanitizeTenantSegment(tenantId);
+  const j = String(jobId).replace(/[^a-zA-Z0-9_-]/g, "_");
+  const safeName = String(fileName).replace(/[^a-zA-Z0-9_.-]/g, "_");
+  const prefix = config.widgetImagesPrefix;
+  return prefix ? `${prefix}/${seg}/${j}/${safeName}` : `${seg}/${j}/${safeName}`;
+}
+
+/**
+ * Upload a rendered widget PNG with public-read so CDN URLs work without signing.
+ *
+ * @param {object} opts
+ * @param {string} opts.tenantId
+ * @param {string} opts.jobId
+ * @param {string} opts.fileName
+ * @param {Buffer} opts.body
+ * @param {string} [opts.contentType]
+ * @returns {Promise<{ key: string, publicUrl: string | null } | null>} null if S3 is disabled
+ */
+export async function putWidgetImagePublic(opts) {
+  const { tenantId, jobId, fileName, body, contentType } = opts;
+  const c = getClient();
+  if (!c) return null;
+  const key = widgetImageObjectKey(tenantId, jobId, fileName);
+  await c.send(
+    new PutObjectCommand({
+      Bucket: config.s3Logos.bucket,
+      Key: key,
+      Body: body,
+      ContentType: contentType || "image/png",
+      ACL: "public-read",
+      CacheControl: "public, max-age=31536000, immutable",
+    }),
+  );
+  return { key, publicUrl: publicUrlForVodKey(key) };
+}
+
+/**
  * @param {string} tenantId
  * @param {string} fileName
  * @param {import("fs").ReadStream | Buffer} body
@@ -111,6 +155,31 @@ export async function getLogoBuffer(storedRelative) {
       new GetObjectCommand({
         Bucket: config.s3Logos.bucket,
         Key: key,
+      }),
+    );
+    return streamToBuffer(out.Body);
+  } catch (e) {
+    if (e && (e.name === "NoSuchKey" || e.$metadata?.httpStatusCode === 404)) return null;
+    throw e;
+  }
+}
+
+/**
+ * Fetch object by full bucket key (e.g. editor widget uploads under `widget-images/...`, not under logos prefix).
+ *
+ * @param {string} key
+ * @returns {Promise<Buffer | null>}
+ */
+export async function getS3ObjectBufferByRawKey(key) {
+  const c = getClient();
+  if (!c) return null;
+  const k = String(key || "").replace(/^\/+/, "");
+  if (!k) return null;
+  try {
+    const out = await c.send(
+      new GetObjectCommand({
+        Bucket: config.s3Logos.bucket,
+        Key: k,
       }),
     );
     return streamToBuffer(out.Body);
