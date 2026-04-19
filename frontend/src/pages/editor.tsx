@@ -814,19 +814,19 @@ export function EditorPage() {
     [handleSeek],
   );
 
-  // Arrow keys: nudge playhead by one frame. Space: go to selected sub-clip start (skip in fields / links / buttons).
+  // Arrow keys: nudge playhead by one frame. Space: play/pause preview (capture so it works while a button is focused).
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement;
       if (target.closest("input, textarea, select, [contenteditable='true']")) return;
 
       if (e.key === " " || e.code === "Space") {
-        if (target.closest("button, a[href]")) return;
-        if (!selectedClipId) return;
-        const clip = clips.find((c) => c.id === selectedClipId);
-        if (!clip) return;
         e.preventDefault();
-        handleSeekWithTimelineScroll(clip.startTime);
+        if (isPlaying) {
+          handlePause();
+        } else {
+          handlePlay();
+        }
         return;
       }
 
@@ -847,9 +847,9 @@ export function EditorPage() {
           : Math.min(dur, t + FRAME_DURATION_SEC);
       playerRef.current?.seek(next);
     };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, [currentTime, duration, selectedClipId, clips, handleSeekWithTimelineScroll]);
+    window.addEventListener("keydown", handler, true);
+    return () => window.removeEventListener("keydown", handler, true);
+  }, [currentTime, duration, selectedClipId, clips, isPlaying, handlePlay, handlePause]);
 
   const handleToggleClipVerticalCrop = useCallback((clipId: string) => {
     let turningOff = false;
