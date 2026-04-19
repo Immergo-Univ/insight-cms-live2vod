@@ -13,7 +13,9 @@ export { EditorVerticalCropButton } from "./editor-vertical-crop-button";
 export { EditorSubtitleButton } from "./editor-subtitle-button";
 export { EditorRightPanel } from "./editor-right-panel";
 export {
+  buildMarkOutThumbnailUrl,
   buildThumbnailUrl,
+  markOutThumbnailTimeSec,
   ZOOM_LEVELS_MS,
   ZOOM_LABELS,
   COLUMN_WIDTH_PX,

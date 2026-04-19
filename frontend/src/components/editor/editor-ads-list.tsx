@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Play, Trash01 } from "@untitledui/icons";
 import type { EditorAdMarker } from "@/types/editor";
 import { cx } from "@/utils/cx";
-import { buildThumbnailUrl, FRAME_DURATION_SEC } from "./editor-constants";
+import { buildMarkOutThumbnailUrl, buildThumbnailUrl, FRAME_DURATION_SEC } from "./editor-constants";
 import {
   clampClipTimeRange,
   filterRelativeTimeTyping,
@@ -256,7 +256,7 @@ export function EditorAdsList({
           const isEditing = editingId === a.id;
           const isSelected = selectedAdId === a.id;
           const thumbInUrl = buildThumbnailUrl(clipUrl, a.startTime, channelId);
-          const thumbOutUrl = buildThumbnailUrl(clipUrl, a.endTime, channelId);
+          const thumbOutUrl = buildMarkOutThumbnailUrl(clipUrl, a.startTime, a.endTime, channelId);
           const handleRowClick = () => {
             if (isSelected) {
               onSelectAd(null);

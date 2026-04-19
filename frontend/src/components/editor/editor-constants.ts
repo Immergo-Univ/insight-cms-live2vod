@@ -48,3 +48,24 @@ export function buildThumbnailUrl(
   params.set("channelId", channelId);
   return `${THUMBNAIL_API_BASE}?${params.toString()}`;
 }
+
+/** Seconds before clip end to sample mark-out stills (avoids windowed HLS tail past last decodable frame). */
+const MARK_OUT_THUMB_SAFETY_MARGIN_SEC = 10;
+
+/**
+ * Sample time for mark-out thumbnails (seconds from parent window start).
+ * Clamped so it never falls before mark-in (short clips reuse the in frame).
+ */
+export function markOutThumbnailTimeSec(startTime: number, endTime: number): number {
+  return Math.max(startTime, endTime - MARK_OUT_THUMB_SAFETY_MARGIN_SEC);
+}
+
+/** genThumbTime URL for the mark-out still (safety margin before end when possible). */
+export function buildMarkOutThumbnailUrl(
+  clipUrl: string,
+  startTime: number,
+  endTime: number,
+  channelId: string
+): string {
+  return buildThumbnailUrl(clipUrl, markOutThumbnailTimeSec(startTime, endTime), channelId);
+}

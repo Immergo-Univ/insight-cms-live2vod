@@ -12,7 +12,7 @@ import {
 import type { EditorSubClip } from "@/types/editor";
 import type { VodJobRecord } from "@/types/vod-job";
 import { cx } from "@/utils/cx";
-import { buildThumbnailUrl, FRAME_DURATION_SEC } from "./editor-constants";
+import { buildMarkOutThumbnailUrl, buildThumbnailUrl, FRAME_DURATION_SEC } from "./editor-constants";
 import { EditorSubtitleButton } from "./editor-subtitle-button";
 import { EditorVerticalCropButton } from "./editor-vertical-crop-button";
 import {
@@ -513,7 +513,7 @@ export function EditorClipsList({
             }
           };
           const thumbInUrl = buildThumbnailUrl(clipUrl, c.startTime, channelId);
-          const thumbOutUrl = buildThumbnailUrl(clipUrl, c.endTime, channelId);
+          const thumbOutUrl = buildMarkOutThumbnailUrl(clipUrl, c.startTime, c.endTime, channelId);
           const tw = thumbWidth;
           const th = thumbHeight;
           const posterCount = c.posters?.length ?? 0;
@@ -598,65 +598,63 @@ export function EditorClipsList({
                   <Play className="size-4" />
                 )}
               </button>
-              <div
-                className="flex min-w-0 flex-1 flex-col gap-1.5"
-                data-no-row-select
-                onClick={(e) => e.stopPropagation()}
-              >
-                {titleEditId === c.id && !encodeActive ? (
-                  <input
-                    ref={titleInputRef}
-                    type="text"
-                    maxLength={CLIP_TITLE_MAX_LEN}
-                    autoComplete="off"
-                    className={cx(
-                      "w-full min-w-0 rounded border border-secondary bg-primary px-2 py-2 font-medium text-primary outline-none focus:border-brand focus:ring-1 focus:ring-brand-secondary/40",
-                      compact ? "text-[10px]" : "text-xs",
-                    )}
-                    aria-label="Clip title"
-                    value={titleDraft}
-                    onChange={(e) => setTitleDraft(e.target.value)}
-                    onBlur={() => commitTitleEdit(c.id)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") {
-                        e.preventDefault();
-                        (e.target as HTMLInputElement).blur();
-                      }
-                      if (e.key === "Escape") {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        cancelTitleEdit();
-                      }
-                    }}
-                  />
-                ) : encodeActive ? (
-                  <div
-                    className={cx(
-                      "w-full min-w-0 cursor-default truncate rounded border border-secondary bg-secondary px-2 py-2 text-left font-semibold text-secondary",
-                      c.title?.trim() ? "text-primary" : "text-tertiary italic",
-                      compact ? "text-[10px]" : "text-xs",
-                    )}
-                    title="Title cannot be edited while this clip is encoding. Use Stop to cancel."
-                  >
-                    {c.title?.trim() || "Add title"}
-                  </div>
-                ) : (
-                  <button
-                    type="button"
-                    className={cx(
-                      "w-full min-w-0 cursor-text truncate rounded border border-secondary bg-primary px-2 py-2 text-left font-semibold transition-colors hover:bg-tertiary/50",
-                      c.title?.trim() ? "text-primary" : "text-tertiary italic",
-                      compact ? "text-[10px]" : "text-xs",
-                    )}
-                    title="Click to edit title"
-                    onClick={() => {
-                      setTitleEditId(c.id);
-                      setTitleDraft(c.title ?? "");
-                    }}
-                  >
-                    {c.title?.trim() || "Add title"}
-                  </button>
-                )}
+              <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+                <div data-no-row-select>
+                  {titleEditId === c.id && !encodeActive ? (
+                    <input
+                      ref={titleInputRef}
+                      type="text"
+                      maxLength={CLIP_TITLE_MAX_LEN}
+                      autoComplete="off"
+                      className={cx(
+                        "w-full min-w-0 rounded border border-secondary bg-primary px-2 py-2 font-medium text-primary outline-none focus:border-brand focus:ring-1 focus:ring-brand-secondary/40",
+                        compact ? "text-[10px]" : "text-xs",
+                      )}
+                      aria-label="Clip title"
+                      value={titleDraft}
+                      onChange={(e) => setTitleDraft(e.target.value)}
+                      onBlur={() => commitTitleEdit(c.id)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          (e.target as HTMLInputElement).blur();
+                        }
+                        if (e.key === "Escape") {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          cancelTitleEdit();
+                        }
+                      }}
+                    />
+                  ) : encodeActive ? (
+                    <div
+                      className={cx(
+                        "w-full min-w-0 cursor-default truncate rounded border border-secondary bg-secondary px-2 py-2 text-left font-semibold text-secondary",
+                        c.title?.trim() ? "text-primary" : "text-tertiary italic",
+                        compact ? "text-[10px]" : "text-xs",
+                      )}
+                      title="Title cannot be edited while this clip is encoding. Use Stop to cancel."
+                    >
+                      {c.title?.trim() || "Add title"}
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      className={cx(
+                        "w-full min-w-0 cursor-text truncate rounded border border-secondary bg-primary px-2 py-2 text-left font-semibold transition-colors hover:bg-tertiary/50",
+                        c.title?.trim() ? "text-primary" : "text-tertiary italic",
+                        compact ? "text-[10px]" : "text-xs",
+                      )}
+                      title="Click to edit title"
+                      onClick={() => {
+                        setTitleEditId(c.id);
+                        setTitleDraft(c.title ?? "");
+                      }}
+                    >
+                      {c.title?.trim() || "Add title"}
+                    </button>
+                  )}
+                </div>
                 <div className="flex w-full min-w-0 shrink-0 flex-row flex-wrap items-center gap-1.5">
                   {encodedOutputUrl ? (
                     <span

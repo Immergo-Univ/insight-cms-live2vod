@@ -2,8 +2,21 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Edit03, Trash01 } from "@untitledui/icons";
 import { ModalOverlay, Modal, Dialog } from "@/components/application/modals/modal";
 import { CloseButton } from "@/components/base/buttons/close-button";
-import type { EditorClipTextWidget, EditorClipWidget, EditorClipWidgetLayout } from "@/types/editor";
+import type {
+  EditorClipImageWidget,
+  EditorClipTextWidget,
+  EditorClipWidget,
+  EditorClipWidgetLayout,
+} from "@/types/editor";
 import { cx } from "@/utils/cx";
+import { FRAME_DURATION_SEC } from "./editor-constants";
+import {
+  clampClipTimeRange,
+  filterRelativeTimeTyping,
+  formatDigitsAsMaskedRelativeTime,
+  formatTime,
+  parseRelativeTimeInput,
+} from "./editor-timeline";
 import type { EditorWidgetViewportPx } from "./editor-widget-viewport";
 
 function clamp(n: number, lo: number, hi: number) {
@@ -86,6 +99,12 @@ function WidgetResizeKnob({
   );
 }
 
+export interface EditorClipWidgetsTimelineContext {
+  clipStartSec: number;
+  clipEndSec: number;
+  playheadSec: number;
+}
+
 interface EditorClipWidgetsOverlayProps {
   viewport: EditorWidgetViewportPx;
   widgets: EditorClipWidget[];
@@ -93,6 +112,8 @@ interface EditorClipWidgetsOverlayProps {
   /** When set to a widget id that exists in `widgets`, that widget becomes selected once; then call `onFocusWidgetRequestHandled`. */
   focusWidgetIdRequest?: string | null;
   onFocusWidgetRequestHandled?: () => void;
+  /** Mark In/Out of the selected sub-clip in parent-window seconds + current playhead (for offset preview). */
+  timelineContext?: EditorClipWidgetsTimelineContext | null;
 }
 
 function widgetPlainText(html: string): string {
@@ -120,21 +141,44 @@ function modalInitialHtmlForTextWidget(html: string): string {
   return isTextWidgetPlaceholderHtml(html) ? TEXT_WIDGET_PLACEHOLDER_INNER_HTML : html;
 }
 
+function clipDurationForOffsets(ctx: EditorClipWidgetsTimelineContext | null | undefined): number {
+  if (!ctx) return 86_400;
+  return Math.max(FRAME_DURATION_SEC, ctx.clipEndSec - ctx.clipStartSec);
+}
+
+function isWidgetVisibleOnPlayhead(
+  w: EditorClipWidget,
+  ctx: EditorClipWidgetsTimelineContext | null | undefined,
+): boolean {
+  if (!ctx) return true;
+  const dur = ctx.clipEndSec - ctx.clipStartSec;
+  if (!(dur > 0)) return true;
+  const oi = w.offsetIn ?? 0;
+  const oo = w.offsetOut ?? dur;
+  const t = ctx.playheadSec;
+  return t >= ctx.clipStartSec + oi && t < ctx.clipStartSec + oo;
+}
+
 export function EditorClipWidgetsOverlay({
   viewport,
   widgets,
   onWidgetsChange,
   focusWidgetIdRequest = null,
   onFocusWidgetRequestHandled,
+  timelineContext = null,
 }: EditorClipWidgetsOverlayProps) {
   const [selectedWidgetId, setSelectedWidgetId] = useState<string | null>(null);
-  const [textEditModalId, setTextEditModalId] = useState<string | null>(null);
+  const [widgetEditModalId, setWidgetEditModalId] = useState<string | null>(null);
   const [modalColor, setModalColor] = useState("#ffffff");
   const [modalFontSizePx, setModalFontSizePx] = useState(28);
+  const [modalOffsetInStr, setModalOffsetInStr] = useState("0:00");
+  const [modalOffsetOutStr, setModalOffsetOutStr] = useState("0:00");
   const modalEditorRef = useRef<HTMLDivElement>(null);
 
   const widgetsRef = useRef(widgets);
   widgetsRef.current = widgets;
+  const timelineContextRef = useRef(timelineContext);
+  timelineContextRef.current = timelineContext;
 
   useEffect(() => {
     setSelectedWidgetId((cur) => {
@@ -159,13 +203,14 @@ export function EditorClipWidgetsOverlay({
     [onWidgetsChange],
   );
 
-  const patchTextWidget = useCallback(
-    (id: string, patch: Partial<EditorClipTextWidget>) => {
+  const patchWidget = useCallback(
+    (
+      id: string,
+      patch: Partial<Pick<EditorClipTextWidget, "html" | "color" | "fontSizePx" | "offsetIn" | "offsetOut">> &
+        Partial<Pick<EditorClipImageWidget, "offsetIn" | "offsetOut">>,
+    ) => {
       const list = widgetsRef.current;
-      const next = list.map((w) => {
-        if (w.id !== id || w.kind !== "text") return w;
-        return { ...w, ...patch } as EditorClipTextWidget;
-      });
+      const next = list.map((w) => (w.id !== id ? w : ({ ...w, ...patch } as EditorClipWidget)));
       onWidgetsChange(next);
     },
     [onWidgetsChange],
@@ -174,38 +219,85 @@ export function EditorClipWidgetsOverlay({
   const removeWidget = useCallback(
     (id: string) => {
       onWidgetsChange(widgetsRef.current.filter((w) => w.id !== id));
-      setTextEditModalId((cur) => (cur === id ? null : cur));
+      setWidgetEditModalId((cur) => (cur === id ? null : cur));
       setSelectedWidgetId((cur) => (cur === id ? null : cur));
     },
     [onWidgetsChange],
   );
 
   useEffect(() => {
-    if (!textEditModalId) return;
-    const w = widgetsRef.current.find((x): x is EditorClipTextWidget => x.id === textEditModalId && x.kind === "text");
+    if (!widgetEditModalId) return;
+    const w = widgetsRef.current.find((x) => x.id === widgetEditModalId);
     if (!w) {
-      setTextEditModalId(null);
+      setWidgetEditModalId(null);
       return;
     }
-    setModalColor(w.color);
-    setModalFontSizePx(Math.round(clamp(w.fontSizePx, 8, 120)));
+    const maxDur = clipDurationForOffsets(timelineContextRef.current);
+    const oi = w.offsetIn ?? 0;
+    const oo = w.offsetOut ?? maxDur;
+    setModalOffsetInStr(formatTime(oi));
+    setModalOffsetOutStr(formatTime(oo));
+    if (w.kind !== "text") return;
+    const tw = w as EditorClipTextWidget;
+    setModalColor(tw.color);
+    setModalFontSizePx(Math.round(clamp(tw.fontSizePx, 8, 120)));
     const id = requestAnimationFrame(() => {
       const el = modalEditorRef.current;
-      if (el) el.innerHTML = modalInitialHtmlForTextWidget(w.html);
+      if (el) el.innerHTML = modalInitialHtmlForTextWidget(tw.html);
     });
     return () => cancelAnimationFrame(id);
-  }, [textEditModalId]);
+  }, [widgetEditModalId]);
 
   const handleModalSave = useCallback(() => {
-    if (!textEditModalId) return;
-    const html = modalEditorRef.current?.innerHTML ?? "";
-    patchTextWidget(textEditModalId, {
-      html,
-      color: modalColor,
-      fontSizePx: Math.round(clamp(modalFontSizePx, 8, 120)),
-    });
-    setTextEditModalId(null);
-  }, [textEditModalId, modalColor, modalFontSizePx, patchTextWidget]);
+    if (!widgetEditModalId) return;
+    const w = widgetsRef.current.find((x) => x.id === widgetEditModalId);
+    if (!w) {
+      setWidgetEditModalId(null);
+      return;
+    }
+    const maxDur = clipDurationForOffsets(timelineContext);
+    const a = parseRelativeTimeInput(modalOffsetInStr);
+    const b = parseRelativeTimeInput(modalOffsetOutStr);
+    if (a === null || b === null) {
+      const oi = w.offsetIn ?? 0;
+      const oo = w.offsetOut ?? maxDur;
+      setModalOffsetInStr(formatTime(oi));
+      setModalOffsetOutStr(formatTime(oo));
+      return;
+    }
+    const r = clampClipTimeRange(a, b, maxDur, FRAME_DURATION_SEC);
+    if (!r) {
+      const oi = w.offsetIn ?? 0;
+      const oo = w.offsetOut ?? maxDur;
+      setModalOffsetInStr(formatTime(oi));
+      setModalOffsetOutStr(formatTime(oo));
+      return;
+    }
+    if (w.kind === "text") {
+      const html = modalEditorRef.current?.innerHTML ?? "";
+      patchWidget(widgetEditModalId, {
+        html,
+        color: modalColor,
+        fontSizePx: Math.round(clamp(modalFontSizePx, 8, 120)),
+        offsetIn: r.startTime,
+        offsetOut: r.endTime,
+      });
+    } else {
+      patchWidget(widgetEditModalId, {
+        offsetIn: r.startTime,
+        offsetOut: r.endTime,
+      });
+    }
+    setWidgetEditModalId(null);
+  }, [
+    widgetEditModalId,
+    modalColor,
+    modalFontSizePx,
+    modalOffsetInStr,
+    modalOffsetOutStr,
+    patchWidget,
+    timelineContext,
+  ]);
 
   const beginMove = useCallback(
     (e: React.PointerEvent, id: string) => {
@@ -273,6 +365,28 @@ export function EditorClipWidgetsOverlay({
   if (viewport.w <= 0 || viewport.h <= 0) return null;
 
   const edges: WidgetResizeEdge[] = ["nw", "n", "ne", "e", "se", "s", "sw", "w"];
+  const offsetMaxSec = clipDurationForOffsets(timelineContext);
+  const offsetTimePlaceholder = offsetMaxSec >= 3600 ? "h:mm:ss" : "m:ss";
+  const offsetTimeTitle =
+    offsetMaxSec >= 3600
+      ? "Time as h:mm:ss, or type digits only (e.g. 10105 → 1:01:05). Two digits alone = total seconds."
+      : "Time as m:ss, or type digits only (e.g. 130 → 1:30). One or two digits = total seconds.";
+  const modalOffsetInputClass = cx(
+    "w-full min-w-0 rounded-lg border border-secondary bg-primary px-3 py-2 text-center text-sm text-brand-secondary tabular-nums outline-none placeholder:text-placeholder",
+    "focus:border-brand focus:ring-1 focus:ring-brand-secondary/30",
+  );
+
+  const handleModalOffsetMaskedChange = (raw: string, which: "in" | "out") => {
+    const setStr = which === "in" ? setModalOffsetInStr : setModalOffsetOutStr;
+    const filtered = filterRelativeTimeTyping(raw);
+    if (filtered.includes(":")) {
+      setStr(filtered);
+      return;
+    }
+    setStr(formatDigitsAsMaskedRelativeTime(filtered, offsetMaxSec));
+  };
+
+  const editingWidget = widgetEditModalId ? widgets.find((x) => x.id === widgetEditModalId) ?? null : null;
 
   return (
     <>
@@ -306,6 +420,7 @@ export function EditorClipWidgetsOverlay({
             };
 
             const isSelected = selectedWidgetId === w.id;
+            const onPlayhead = isWidgetVisibleOnPlayhead(w, timelineContext);
 
             return (
               <div
@@ -327,13 +442,11 @@ export function EditorClipWidgetsOverlay({
                       <button
                         type="button"
                         className={floatingToolbarBtn}
-                        title={w.kind === "text" ? "Edit text" : "Edit (text widgets only)"}
+                        title="Edit widget"
                         aria-label="Edit widget"
-                        disabled={w.kind !== "text"}
                         onClick={(e) => {
                           e.stopPropagation();
-                          if (w.kind !== "text") return;
-                          setTextEditModalId(w.id);
+                          setWidgetEditModalId(w.id);
                         }}
                       >
                         <Edit03 className={floatingToolbarIcon} aria-hidden />
@@ -362,8 +475,9 @@ export function EditorClipWidgetsOverlay({
                     >
                     <div
                       className={cx(
-                        "relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden",
+                        "relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden transition-opacity duration-150",
                         isSelected ? "cursor-move" : "cursor-pointer",
+                        onPlayhead ? "opacity-100" : "opacity-35",
                       )}
                       onPointerDown={(e) => {
                         const t = e.target as HTMLElement;
@@ -399,11 +513,11 @@ export function EditorClipWidgetsOverlay({
         </div>
       </div>
 
-      {textEditModalId ? (
+      {widgetEditModalId && editingWidget ? (
         <ModalOverlay
           isOpen
           onOpenChange={(open) => {
-            if (!open) setTextEditModalId(null);
+            if (!open) setWidgetEditModalId(null);
           }}
           isDismissable
           isKeyboardDismissDisabled={false}
@@ -411,60 +525,115 @@ export function EditorClipWidgetsOverlay({
         >
           <Modal className="z-[86]">
             <Dialog
-              aria-label="Edit text widget"
+              aria-label="Edit widget"
               className="mx-4 flex w-full max-w-lg justify-center outline-hidden sm:mx-auto"
             >
               <div className="relative max-h-[90vh] w-full overflow-y-auto rounded-xl border border-secondary bg-primary p-5 shadow-xl">
                 <CloseButton slot="close" size="xs" label="Close" className="absolute top-3 right-3 z-10" />
-                <h2 className="pr-10 text-lg font-semibold text-primary">Edit text widget</h2>
-                <p className="mt-1 text-xs text-tertiary">Content, color, and size apply to the overlay on the player.</p>
+                <h2 className="pr-10 text-lg font-semibold text-primary">Edit widget</h2>
+                <p className="mt-1 text-xs text-tertiary">
+                  {editingWidget.kind === "text"
+                    ? "Content, color, and size apply to the overlay on the player."
+                    : "Image position and size are adjusted on the preview; offsets control when it appears in the output."}
+                </p>
 
                 <div className="mt-4 flex flex-col gap-3">
-                  <label className="flex flex-col gap-1.5">
-                    <span className="text-xs font-medium text-secondary">Color</span>
-                    <input
-                      type="color"
-                      value={modalColor.length === 7 ? modalColor : "#ffffff"}
-                      onChange={(e) => setModalColor(e.target.value)}
-                      className="h-10 w-full max-w-[120px] cursor-pointer rounded-lg border border-secondary"
-                    />
-                  </label>
-                  <label className="flex flex-col gap-1.5">
-                    <span className="text-xs font-medium text-secondary">Size (px)</span>
-                    <input
-                      type="number"
-                      min={8}
-                      max={120}
-                      step={1}
-                      inputMode="numeric"
-                      value={Math.round(modalFontSizePx)}
-                      onChange={(e) => {
-                        const n = parseInt(e.target.value, 10);
-                        if (!Number.isFinite(n)) return;
-                        setModalFontSizePx(Math.round(clamp(n, 8, 120)));
-                      }}
-                      className="rounded-lg border border-secondary bg-primary px-3 py-2 text-sm text-primary tabular-nums"
-                    />
-                  </label>
-                  <div className="flex flex-col gap-1.5">
-                    <span className="text-xs font-medium text-secondary">Text</span>
-                    <div
-                      ref={modalEditorRef}
-                      contentEditable
-                      suppressContentEditableWarning
-                      className={cx(
-                        "min-h-[160px] rounded-lg border border-secondary bg-primary px-3 py-2 text-sm font-normal leading-relaxed text-primary outline-none",
-                        "focus:border-brand focus:ring-1 focus:ring-brand-secondary/40",
-                        "[&_*]:[color:inherit] [&_*]:[font-size:inherit] [&_*]:[font-family:inherit] [&_*]:[line-height:inherit]",
-                      )}
-                    />
+                  <div className="rounded-lg border border-secondary bg-secondary/40 px-3 py-2.5">
+                    <p className="text-xs font-medium text-secondary">Offset In / Offset Out</p>
+                    <p className="mt-1 text-xs leading-relaxed text-tertiary">
+                      Times are measured from this clip&apos;s Mark In (the same origin as Mark In / Mark Out on the
+                      timeline). The overlay is shown only while playback is within that range; encoded VOD uses the
+                      same timing on each output segment (including after ad cuts).
+                    </p>
+                    <div className="mt-3 grid grid-cols-2 gap-2">
+                      <label className="flex flex-col gap-1">
+                        <span className="text-xs font-medium text-secondary">Offset In</span>
+                        <input
+                          type="text"
+                          inputMode="numeric"
+                          autoComplete="off"
+                          spellCheck={false}
+                          className={modalOffsetInputClass}
+                          aria-label="Widget offset in"
+                          placeholder={offsetTimePlaceholder}
+                          title={offsetTimeTitle}
+                          value={modalOffsetInStr}
+                          onChange={(e) => handleModalOffsetMaskedChange(e.target.value, "in")}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                          }}
+                        />
+                      </label>
+                      <label className="flex flex-col gap-1">
+                        <span className="text-xs font-medium text-secondary">Offset Out</span>
+                        <input
+                          type="text"
+                          inputMode="numeric"
+                          autoComplete="off"
+                          spellCheck={false}
+                          className={modalOffsetInputClass}
+                          aria-label="Widget offset out"
+                          placeholder={offsetTimePlaceholder}
+                          title={offsetTimeTitle}
+                          value={modalOffsetOutStr}
+                          onChange={(e) => handleModalOffsetMaskedChange(e.target.value, "out")}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                          }}
+                        />
+                      </label>
+                    </div>
                   </div>
+
+                  {editingWidget.kind === "text" ? (
+                    <>
+                      <label className="flex flex-col gap-1.5">
+                        <span className="text-xs font-medium text-secondary">Color</span>
+                        <input
+                          type="color"
+                          value={modalColor.length === 7 ? modalColor : "#ffffff"}
+                          onChange={(e) => setModalColor(e.target.value)}
+                          className="h-10 w-full max-w-[120px] cursor-pointer rounded-lg border border-secondary"
+                        />
+                      </label>
+                      <label className="flex flex-col gap-1.5">
+                        <span className="text-xs font-medium text-secondary">Size (px)</span>
+                        <input
+                          type="number"
+                          min={8}
+                          max={120}
+                          step={1}
+                          inputMode="numeric"
+                          value={Math.round(modalFontSizePx)}
+                          onChange={(e) => {
+                            const n = parseInt(e.target.value, 10);
+                            if (!Number.isFinite(n)) return;
+                            setModalFontSizePx(Math.round(clamp(n, 8, 120)));
+                          }}
+                          className="rounded-lg border border-secondary bg-primary px-3 py-2 text-sm text-primary tabular-nums"
+                        />
+                      </label>
+                      <div className="flex flex-col gap-1.5">
+                        <span className="text-xs font-medium text-secondary">Text</span>
+                        <div
+                          ref={modalEditorRef}
+                          contentEditable
+                          suppressContentEditableWarning
+                          className={cx(
+                            "min-h-[160px] rounded-lg border border-secondary bg-primary px-3 py-2 text-sm font-normal leading-relaxed text-primary outline-none",
+                            "focus:border-brand focus:ring-1 focus:ring-brand-secondary/40",
+                            "[&_*]:[color:inherit] [&_*]:[font-size:inherit] [&_*]:[font-family:inherit] [&_*]:[line-height:inherit]",
+                          )}
+                        />
+                      </div>
+                    </>
+                  ) : null}
                 </div>
 
                 <div className="mt-5 flex justify-end gap-2">
                   <button
                     type="button"
-                    onClick={() => setTextEditModalId(null)}
+                    onClick={() => setWidgetEditModalId(null)}
                     className="rounded-lg border border-secondary bg-primary px-4 py-2 text-sm font-medium text-primary transition-colors hover:bg-secondary"
                   >
                     Cancel

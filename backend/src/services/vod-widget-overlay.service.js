@@ -152,6 +152,60 @@ function widgetPngScalePadFilter(inputIdx, Pw, Ph, imgLabel) {
 }
 
 /**
+ * @param {number} n
+ * @param {number} lo
+ * @param {number} hi
+ */
+function clampNum(n, lo, hi) {
+  const x = Number(n);
+  if (!Number.isFinite(x)) return lo;
+  return Math.min(hi, Math.max(lo, x));
+}
+
+/**
+ * Local [0, segmentLen) timeline inside ffmpeg after `-ss start -to end` (t restarts at 0 per segment).
+ *
+ * @param {object} p
+ * @param {number} p.clipStart parent-timeline Mark In of this output clip
+ * @param {number} p.clipEnd parent-timeline Mark Out
+ * @param {number} p.segmentStart parent-timeline start of this encode slice
+ * @param {number} p.segmentEnd parent-timeline end of this encode slice
+ * @param {number} [p.offsetIn] seconds from clip start (default 0)
+ * @param {number} [p.offsetOut] seconds from clip start, exclusive end (default = clip length)
+ * @returns {{ t0: number, t1: number } | null} null = widget not visible in this segment
+ */
+function widgetEnableWindowInSegment(p) {
+  const cs = Number(p.clipStart);
+  const ce = Number(p.clipEnd);
+  const s = Number(p.segmentStart);
+  const e = Number(p.segmentEnd);
+  if (![cs, ce, s, e].every((x) => Number.isFinite(x)) || ce <= cs || e <= s) return null;
+  const clipLen = ce - cs;
+  const segLen = e - s;
+  if (clipLen <= 0 || segLen <= 0) return null;
+
+  let oi = p.offsetIn;
+  let oo = p.offsetOut;
+  if (!Number.isFinite(Number(oi))) oi = 0;
+  if (!Number.isFinite(Number(oo))) oo = clipLen;
+  oi = clampNum(oi, 0, clipLen);
+  oo = clampNum(oo, oi, clipLen);
+
+  const parentOn = cs + oi;
+  const parentOff = cs + oo;
+  const overlap0 = Math.max(s, parentOn);
+  const overlap1 = Math.min(e, parentOff);
+  if (overlap1 <= overlap0) return null;
+
+  const t0 = overlap0 - s;
+  const t1 = overlap1 - s;
+  const t0c = clampNum(t0, 0, segLen);
+  const t1c = clampNum(t1, 0, segLen);
+  if (t1c <= t0c) return null;
+  return { t0: t0c, t1: t1c };
+}
+
+/**
  * Build filter_complex fragment: video on [0:v] → optional crop → chain widget PNG overlays → [outv].
  *
  * @param {object} opts
@@ -162,12 +216,35 @@ function widgetPngScalePadFilter(inputIdx, Pw, Ph, imgLabel) {
  * @param {string} opts.workDir
  * @param {string} opts.tag unique prefix for temp files
  * @param {import("playwright").Browser | undefined} opts.renderBrowser required when any widget is text
+ * @param {number} [opts.clipStart] parent-timeline Mark In for this clip (widget offsets are relative to this)
+ * @param {number} [opts.clipEnd] parent-timeline Mark Out
+ * @param {number} [opts.segmentStart] parent-timeline start of this encode slice
+ * @param {number} [opts.segmentEnd] parent-timeline end of this encode slice
  * @returns {Promise<{ filterComplex: string, extraInputs: string[], tempFiles: string[] }>}
  */
 export async function buildWidgetOverlayFilterComplex(opts) {
-  const { cropFilter, outW, outH, widgets, workDir, tag, renderBrowser } = opts;
+  const {
+    cropFilter,
+    outW,
+    outH,
+    widgets,
+    workDir,
+    tag,
+    renderBrowser,
+    clipStart,
+    clipEnd,
+    segmentStart,
+    segmentEnd,
+  } = opts;
   const W = outW;
   const H = outH;
+  const segS = Number(segmentStart);
+  const segE = Number(segmentEnd);
+  const cs = Number(clipStart);
+  const ce = Number(clipEnd);
+  const timingEnabled =
+    [segS, segE, cs, ce].every((x) => Number.isFinite(x)) && ce > cs && segE > segS;
+  const segLen = timingEnabled ? segE - segS : 0;
   /** @type {string[]} */
   const tempFiles = [];
 
@@ -206,6 +283,27 @@ export async function buildWidgetOverlayFilterComplex(opts) {
       const Pw = evenPositive(lw * W);
       const Ph = evenPositive(lh * H);
 
+      /** @type {string} */
+      let enableOpt = "";
+      if (timingEnabled) {
+        const win = widgetEnableWindowInSegment({
+          clipStart: cs,
+          clipEnd: ce,
+          segmentStart: segS,
+          segmentEnd: segE,
+          offsetIn: raw.offsetIn,
+          offsetOut: raw.offsetOut,
+        });
+        if (!win) continue;
+        const fmt = (x) => String(Number(x.toFixed(6)));
+        const eps = 1e-3;
+        const fullWindow = win.t0 <= eps && win.t1 >= segLen - eps;
+        if (!fullWindow) {
+          const t1c = Math.min(win.t1, segLen);
+          enableOpt = `:enable='gte(t,${fmt(win.t0)})*lt(t,${fmt(t1c)})'`;
+        }
+      }
+
       if (kind === "text") {
         /** @type {import("playwright").Browser} */
         const browser = /** @type {import("playwright").Browser} */ (renderBrowser);
@@ -228,7 +326,7 @@ export async function buildWidgetOverlayFilterComplex(opts) {
         const imgLabel = `im${inputIdx}`;
         const outLabel = `wtx${wgt}`;
         parts.push(widgetPngScalePadFilter(inputIdx, Pw, Ph, imgLabel));
-        parts.push(`[${last}][${imgLabel}]overlay=${px}:${py}:format=auto[${outLabel}]`);
+        parts.push(`[${last}][${imgLabel}]overlay=${px}:${py}:format=auto${enableOpt}[${outLabel}]`);
         last = outLabel;
         inputIdx += 1;
         wgt += 1;
@@ -243,7 +341,7 @@ export async function buildWidgetOverlayFilterComplex(opts) {
         const imgLabel = `im${inputIdx}`;
         const outLabel = `wim${inputIdx}`;
         parts.push(widgetPngScalePadFilter(inputIdx, Pw, Ph, imgLabel));
-        parts.push(`[${last}][${imgLabel}]overlay=${px}:${py}:format=auto[${outLabel}]`);
+        parts.push(`[${last}][${imgLabel}]overlay=${px}:${py}:format=auto${enableOpt}[${outLabel}]`);
         last = outLabel;
         inputIdx += 1;
       }

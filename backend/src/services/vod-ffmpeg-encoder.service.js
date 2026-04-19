@@ -328,6 +328,10 @@ async function runFfmpegSegmentWithOptionalWidgets(opts) {
       workDir,
       tag: segmentTag,
       renderBrowser,
+      clipStart: Number(clip?.startTime),
+      clipEnd: Number(clip?.endTime),
+      segmentStart: start,
+      segmentEnd: end,
     });
     tempFiles = tf;
 

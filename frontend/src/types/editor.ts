@@ -135,7 +135,15 @@ export interface EditorClipWidgetLayout {
   h: number;
 }
 
-export interface EditorClipTextWidget {
+/** Timing on the sub-clip timeline (t = 0 at Mark In). Exported in JSON for the VOD encoder. */
+export interface EditorClipWidgetTiming {
+  /** Seconds from this sub-clip start when the overlay appears; default 0. */
+  offsetIn?: number;
+  /** Seconds from this sub-clip start when the overlay ends (exclusive, same sense as Mark Out); default = clip length. */
+  offsetOut?: number;
+}
+
+export interface EditorClipTextWidget extends EditorClipWidgetTiming {
   kind: "text";
   id: string;
   /** Sanitized-ish HTML from the in-player WYSIWYG (innerHTML). */
@@ -145,7 +153,7 @@ export interface EditorClipTextWidget {
   layout: EditorClipWidgetLayout;
 }
 
-export interface EditorClipImageWidget {
+export interface EditorClipImageWidget extends EditorClipWidgetTiming {
   kind: "image";
   id: string;
   /** Preview URL (absolute or same-origin). */

@@ -60,10 +60,22 @@ interface EditorPlayerProps {
   /** Select this widget id in the overlay once it appears in `clipWidgets` (e.g. after adding a text widget). */
   clipWidgetFocusRequestId?: string | null;
   onClipWidgetFocusRequestHandled?: () => void;
+  /** Parent-window times for the selected sub-clip + playhead (widget offset preview / edit limits). */
+  clipWidgetTimelineContext?: {
+    clipStartSec: number;
+    clipEndSec: number;
+    playheadSec: number;
+  } | null;
 }
 
 const overlayButtonClass =
   "flex size-9 cursor-pointer items-center justify-center rounded-md bg-black/60 text-white transition-colors hover:bg-black/80 focus:outline-none focus:ring-2 focus:ring-white/50";
+
+const EDITOR_PREVIEW_PLAYBACK_RATES = [0.5, 1, 1.5, 2, 3] as const;
+
+function formatPlaybackRateShort(rate: number): string {
+  return `${rate}x`;
+}
 
 export const EditorPlayer = forwardRef<EditorPlayerRef, EditorPlayerProps>(
   function EditorPlayer(
@@ -90,12 +102,18 @@ export const EditorPlayer = forwardRef<EditorPlayerRef, EditorPlayerProps>(
       onClipWidgetsChange,
       clipWidgetFocusRequestId = null,
       onClipWidgetFocusRequestHandled,
+      clipWidgetTimelineContext = null,
     },
     ref
   ) {
     const outerRef = useRef<HTMLDivElement>(null);
     const containerRef = useRef<HTMLDivElement>(null);
     const playerRef = useRef<Player | null>(null);
+    const speedMenuRef = useRef<HTMLDivElement>(null);
+    const [playbackRate, setPlaybackRate] = useState(1);
+    const [speedMenuOpen, setSpeedMenuOpen] = useState(false);
+    const playbackRateRef = useRef(playbackRate);
+    playbackRateRef.current = playbackRate;
     const [contentRect, setContentRect] = useState<VideoContentRect>({
       x: 0,
       y: 0,
@@ -112,6 +130,22 @@ export const EditorPlayer = forwardRef<EditorPlayerRef, EditorPlayerProps>(
 
     const updateContentRectRef = useRef(updateContentRect);
     updateContentRectRef.current = updateContentRect;
+
+    useEffect(() => {
+      if (!speedMenuOpen) return;
+      const onDocPointerDown = (e: PointerEvent) => {
+        const el = speedMenuRef.current;
+        if (el && !el.contains(e.target as Node)) setSpeedMenuOpen(false);
+      };
+      document.addEventListener("pointerdown", onDocPointerDown);
+      return () => document.removeEventListener("pointerdown", onDocPointerDown);
+    }, [speedMenuOpen]);
+
+    useEffect(() => {
+      const player = playerRef.current;
+      if (!player) return;
+      player.playbackRate(playbackRate);
+    }, [playbackRate]);
 
     const hasWidgets = (clipWidgets?.length ?? 0) > 0;
     const measureOverlays = verticalCropActive || subtitleOverlayActive || hasWidgets;
@@ -177,6 +211,7 @@ export const EditorPlayer = forwardRef<EditorPlayerRef, EditorPlayerProps>(
 
       player.ready(() => {
         updateContentRectRef.current();
+        player.playbackRate(playbackRateRef.current);
       });
 
       const onTimeUpdateHandler = () => {
@@ -271,6 +306,7 @@ export const EditorPlayer = forwardRef<EditorPlayerRef, EditorPlayerProps>(
             onWidgetsChange={onClipWidgetsChange}
             focusWidgetIdRequest={clipWidgetFocusRequestId}
             onFocusWidgetRequestHandled={onClipWidgetFocusRequestHandled}
+            timelineContext={clipWidgetTimelineContext}
           />
         ) : null}
         {markRangeAwaitingOut && (
@@ -314,6 +350,48 @@ export const EditorPlayer = forwardRef<EditorPlayerRef, EditorPlayerProps>(
             >
               <StopCircle className="size-5" />
             </button>
+            <div ref={speedMenuRef} className="relative">
+              <button
+                type="button"
+                data-editor-keyboard-seek
+                aria-haspopup="listbox"
+                aria-expanded={speedMenuOpen}
+                aria-label={`Playback speed, currently ${formatPlaybackRateShort(playbackRate)}`}
+                title="Playback speed"
+                onClick={() => setSpeedMenuOpen((open) => !open)}
+                className={`${overlayButtonClass} min-w-11 px-1.5 text-xs font-semibold tabular-nums`}
+              >
+                {formatPlaybackRateShort(playbackRate)}
+              </button>
+              {speedMenuOpen ? (
+                <div
+                  role="listbox"
+                  aria-label="Playback speed"
+                  className="absolute bottom-full left-0 z-30 mb-1 flex min-w-[5.5rem] flex-col gap-0.5 rounded-md border border-white/15 bg-black/90 p-1 shadow-lg"
+                >
+                  {EDITOR_PREVIEW_PLAYBACK_RATES.map((rate) => (
+                    <button
+                      key={rate}
+                      type="button"
+                      role="option"
+                      aria-selected={rate === playbackRate}
+                      data-editor-keyboard-seek
+                      className={`rounded px-2 py-1.5 text-left text-xs font-semibold tabular-nums transition-colors focus:outline-none focus:ring-2 focus:ring-white/40 ${
+                        rate === playbackRate
+                          ? "bg-white/20 text-white"
+                          : "text-white/90 hover:bg-white/10"
+                      }`}
+                      onClick={() => {
+                        setPlaybackRate(rate);
+                        setSpeedMenuOpen(false);
+                      }}
+                    >
+                      {formatPlaybackRateShort(rate)}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+            </div>
           </div>
         )}
         <button

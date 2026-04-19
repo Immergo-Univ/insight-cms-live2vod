@@ -377,6 +377,18 @@ export function EditorPage() {
     [clips, selectedClipId],
   );
 
+  const clipWidgetTimelineContext = useMemo(
+    () =>
+      selectedEncodeClip
+        ? {
+            clipStartSec: selectedEncodeClip.startTime,
+            clipEndSec: selectedEncodeClip.endTime,
+            playheadSec: currentTime,
+          }
+        : null,
+    [selectedEncodeClip, selectedEncodeClip?.startTime, selectedEncodeClip?.endTime, currentTime],
+  );
+
   useEffect(() => {
     setClipWidgetFocusRequestId(null);
   }, [selectedClipId]);
@@ -822,6 +834,8 @@ export function EditorPage() {
 
       if (e.key === " " || e.code === "Space") {
         e.preventDefault();
+        // Stop propagation so focused clip rows (tabIndex + Space = toggle select) do not run after this.
+        e.stopPropagation();
         if (isPlaying) {
           handlePause();
         } else {
@@ -1159,6 +1173,7 @@ export function EditorPage() {
               onClipWidgetsChange={handleClipWidgetsChange}
               clipWidgetFocusRequestId={clipWidgetFocusRequestId}
               onClipWidgetFocusRequestHandled={handleClipWidgetFocusRequestHandled}
+              clipWidgetTimelineContext={clipWidgetTimelineContext}
             />
           </div>
           <aside className="flex min-h-0 min-w-0 flex-1 basis-0 flex-col border-l border-secondary py-0 pl-2">
