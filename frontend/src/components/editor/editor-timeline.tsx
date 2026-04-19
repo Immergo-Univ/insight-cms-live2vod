@@ -302,7 +302,11 @@ export const EditorTimeline = forwardRef<EditorTimelineHandle, EditorTimelinePro
   /** Full-width track (scrub strip + filmstrip) for time ↔ x mapping */
   const trackRef = useRef<HTMLDivElement>(null);
   const innerRef = useRef<HTMLDivElement>(null);
-  /** Dedupes selection-driven scroll when parent re-renders with new `clips` array identity. */
+  /**
+   * Dedupes selection-driven scroll when parent re-renders with new `clips` array identity.
+   * Key intentionally excludes clip start time: moving the selected clip updates start every frame
+   * and must not re-run scroll-to-leading-edge (it pins the marker to the viewport edge).
+   */
   const lastSelectionScrollKeyRef = useRef<string>("");
   /** At most one playhead follow per animation frame while time advances. */
   const playheadFollowRafRef = useRef<number | null>(null);
@@ -474,7 +478,7 @@ export const EditorTimeline = forwardRef<EditorTimelineHandle, EditorTimelinePro
       lastSelectionScrollKeyRef.current = "";
       return;
     }
-    const key = `${selectedClipId}:${selectedClipStartTime}:${pixelsPerSecond}:${durationSeconds}`;
+    const key = `${selectedClipId}:${pixelsPerSecond}:${durationSeconds}`;
     if (key === lastSelectionScrollKeyRef.current) return;
     lastSelectionScrollKeyRef.current = key;
 
@@ -499,6 +503,8 @@ export const EditorTimeline = forwardRef<EditorTimelineHandle, EditorTimelinePro
     const content = scrollRef.current;
     const rail = railRef.current;
     if (!content || durationSeconds <= 0) return;
+    // Trim/body drags call onSeek every move; auto-scroll fights the user (marker sticks to the viewport edge).
+    if (dragging || adDragging || clipBodyDrag || adBodyDrag) return;
 
     const applyFollow = () => {
       playheadFollowRafRef.current = null;
@@ -526,7 +532,15 @@ export const EditorTimeline = forwardRef<EditorTimelineHandle, EditorTimelinePro
         playheadFollowRafRef.current = null;
       }
     };
-  }, [currentTimeSeconds, durationSeconds, pixelsPerSecond]);
+  }, [
+    currentTimeSeconds,
+    durationSeconds,
+    pixelsPerSecond,
+    dragging,
+    adDragging,
+    clipBodyDrag,
+    adBodyDrag,
+  ]);
 
   useImperativeHandle(ref, () => ({ scrollTimeToCenter }), [scrollTimeToCenter]);
 
