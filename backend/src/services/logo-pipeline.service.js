@@ -12,7 +12,7 @@ import { listUploadedLogoAbsolutePaths } from "./channel-settings.service.js";
  * Target milliseconds between live logo probes per channel (orchestrator cadence).
  * 200 ms ≈ 5 probes per second. Passed to logo-detector as --live-probe-interval-ms (echoed in JSON).
  */
-export const LIVE_LOGO_PROBE_INTERVAL_MS = 10000;
+export const LIVE_LOGO_PROBE_INTERVAL_MS = 2000;
 
 /**
  * @param {string} hlsStream base channel URL; startTime/endTime are set for archive window
