@@ -280,7 +280,10 @@ export const EditorPlayer = forwardRef<EditorPlayerRef, EditorPlayerProps>(
         )}
         {/* Play / Pause / Stop — bottom-left, same style as Mute */}
         {(onTransportPlay || onTransportPause || onTransportStop) && (
-          <div className="absolute bottom-2 left-2 z-20 flex items-center gap-1">
+          <div
+            className="absolute bottom-2 left-2 z-20 flex items-center gap-1"
+            data-editor-keyboard-seek
+          >
             {isPlaying ? (
               <button
                 type="button"
@@ -315,6 +318,7 @@ export const EditorPlayer = forwardRef<EditorPlayerRef, EditorPlayerProps>(
         )}
         <button
           type="button"
+          data-editor-keyboard-seek
           onClick={handleMuteToggle}
           className={`absolute bottom-2 right-2 z-20 ${overlayButtonClass}`}
           title={muted ? "Unmute" : "Mute"}

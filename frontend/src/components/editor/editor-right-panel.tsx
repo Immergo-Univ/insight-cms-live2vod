@@ -40,6 +40,11 @@ interface EditorRightPanelProps {
     startTime: number,
     endTime: number,
   ) => { startTime: number; endTime: number } | null;
+  onAdTimesCommit?: (
+    adId: string,
+    startTime: number,
+    endTime: number,
+  ) => { startTime: number; endTime: number } | null;
   onAddVerticalClip: () => void;
   onAddHorizontalClip: () => void;
   onAddAdSlot?: () => void;
@@ -83,6 +88,7 @@ export function EditorRightPanel({
   clipsEmptyHint,
   parentWindowDurationSec,
   onClipTimesCommit,
+  onAdTimesCommit,
   onAddVerticalClip,
   onAddHorizontalClip,
   onAddAdSlot,
@@ -168,16 +174,19 @@ export function EditorRightPanel({
             {selectionMode !== "realtime" &&
             onSelectAd &&
             onRemoveAd &&
-            onAdOrderChange ? (
+            onAdOrderChange &&
+            onAdTimesCommit ? (
               <div className="border-t border-secondary pt-3">
                 <EditorAdsList
                   ads={ads}
                   clipUrl={clipUrl}
                   channelId={channelId}
+                  parentWindowDurationSec={parentWindowDurationSec}
                   selectedAdId={selectedAdId}
                   onSelectAd={onSelectAd}
                   onRemoveAd={onRemoveAd}
                   onAdOrderChange={onAdOrderChange}
+                  onAdTimesCommit={onAdTimesCommit}
                   onSeek={onSeek}
                   thumbnailsEnabled={thumbnailsEnabled}
                 />

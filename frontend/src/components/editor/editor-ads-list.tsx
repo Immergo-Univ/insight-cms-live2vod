@@ -1,20 +1,202 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Play, Trash01 } from "@untitledui/icons";
 import type { EditorAdMarker } from "@/types/editor";
-import { buildThumbnailUrl } from "./editor-constants";
-import { formatTime } from "./editor-timeline";
+import { cx } from "@/utils/cx";
+import { buildThumbnailUrl, FRAME_DURATION_SEC } from "./editor-constants";
+import {
+  clampClipTimeRange,
+  filterRelativeTimeTyping,
+  formatDigitsAsMaskedRelativeTime,
+  formatTime,
+  parseRelativeTimeInput,
+} from "./editor-timeline";
 
 const ROW_HEIGHT_COMPACT = 44;
 const THUMB_HEIGHT_COMPACT = 28;
+
+/** In / out thumbnails with mark-in / mark-out inputs (same behavior as clip rows). */
+function AdThumbsWithRangeFields({
+  adId,
+  startTime,
+  endTime,
+  maxDuration,
+  onCommit,
+  thumbInUrl,
+  thumbOutUrl,
+  thumbW,
+  thumbH,
+  thumbnailsEnabled,
+}: {
+  adId: string;
+  startTime: number;
+  endTime: number;
+  maxDuration: number;
+  onCommit: (
+    adId: string,
+    start: number,
+    end: number,
+  ) => { startTime: number; endTime: number } | null;
+  thumbInUrl: string;
+  thumbOutUrl: string;
+  thumbW: number;
+  thumbH: number;
+  thumbnailsEnabled: boolean;
+}) {
+  const compact = true;
+  const [startStr, setStartStr] = useState(() => formatTime(startTime));
+  const [endStr, setEndStr] = useState(() => formatTime(endTime));
+
+  useEffect(() => {
+    setStartStr(formatTime(startTime));
+    setEndStr(formatTime(endTime));
+  }, [adId, startTime, endTime]);
+
+  const timePlaceholder = maxDuration >= 3600 ? "h:mm:ss" : "m:ss";
+  const timeTitle =
+    maxDuration >= 3600
+      ? "Time as h:mm:ss, or type digits only (e.g. 10105 → 1:01:05). Two digits alone = total seconds."
+      : "Time as m:ss, or type digits only (e.g. 130 → 1:30). One or two digits = total seconds.";
+
+  const inputClass = cx(
+    "w-full min-w-0 rounded border border-secondary px-0.5 py-0.5 text-center text-brand-secondary tabular-nums outline-none placeholder:text-placeholder",
+    "bg-primary focus:border-brand focus:ring-1 focus:ring-brand-secondary/30",
+    compact ? "text-[9px]" : "text-[10px]",
+  );
+
+  const thumbPlaceholder = (label: string) => (
+    <div className="flex size-full items-center justify-center bg-quaternary text-[9px] font-medium text-tertiary">
+      {label}
+    </div>
+  );
+
+  const handleMaskedChange = (raw: string, setStr: (s: string) => void) => {
+    const filtered = filterRelativeTimeTyping(raw);
+    if (filtered.includes(":")) {
+      setStr(filtered);
+      return;
+    }
+    setStr(formatDigitsAsMaskedRelativeTime(filtered, maxDuration));
+  };
+
+  const commit = () => {
+    const a = parseRelativeTimeInput(startStr);
+    const b = parseRelativeTimeInput(endStr);
+    if (a === null || b === null) {
+      setStartStr(formatTime(startTime));
+      setEndStr(formatTime(endTime));
+      return;
+    }
+    const r = clampClipTimeRange(a, b, maxDuration, FRAME_DURATION_SEC);
+    if (!r) {
+      setStartStr(formatTime(startTime));
+      setEndStr(formatTime(endTime));
+      return;
+    }
+    const applied = onCommit(adId, r.startTime, r.endTime);
+    if (applied) {
+      setStartStr(formatTime(applied.startTime));
+      setEndStr(formatTime(applied.endTime));
+    } else {
+      setStartStr(formatTime(startTime));
+      setEndStr(formatTime(endTime));
+    }
+  };
+
+  return (
+    <div className="flex shrink-0 gap-1">
+      <div className="flex flex-col items-stretch gap-0.5" style={{ width: thumbW }}>
+        <div
+          className="shrink-0 cursor-pointer overflow-hidden rounded border border-secondary bg-quaternary"
+          style={{ width: thumbW, height: thumbH }}
+        >
+          {thumbnailsEnabled ? (
+            <img
+              src={thumbInUrl}
+              alt="In"
+              className="pointer-events-none size-full object-cover"
+              width={thumbW}
+              height={thumbH}
+              loading="lazy"
+              draggable={false}
+            />
+          ) : (
+            thumbPlaceholder("In")
+          )}
+        </div>
+        <input
+          type="text"
+          inputMode="numeric"
+          autoComplete="off"
+          spellCheck={false}
+          data-no-row-select
+          className={inputClass}
+          aria-label="Ad slot mark-in time"
+          placeholder={timePlaceholder}
+          title={timeTitle}
+          value={startStr}
+          onChange={(e) => handleMaskedChange(e.target.value, setStartStr)}
+          onBlur={commit}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+          }}
+        />
+      </div>
+      <div className="flex flex-col items-stretch gap-0.5" style={{ width: thumbW }}>
+        <div
+          className="shrink-0 cursor-pointer overflow-hidden rounded border border-secondary bg-quaternary"
+          style={{ width: thumbW, height: thumbH }}
+        >
+          {thumbnailsEnabled ? (
+            <img
+              src={thumbOutUrl}
+              alt="Out"
+              className="pointer-events-none size-full object-cover"
+              width={thumbW}
+              height={thumbH}
+              loading="lazy"
+              draggable={false}
+            />
+          ) : (
+            thumbPlaceholder("Out")
+          )}
+        </div>
+        <input
+          type="text"
+          inputMode="numeric"
+          autoComplete="off"
+          spellCheck={false}
+          data-no-row-select
+          className={inputClass}
+          aria-label="Ad slot mark-out time"
+          placeholder={timePlaceholder}
+          title={timeTitle}
+          value={endStr}
+          onChange={(e) => handleMaskedChange(e.target.value, setEndStr)}
+          onBlur={commit}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+          }}
+        />
+      </div>
+    </div>
+  );
+}
 
 interface EditorAdsListProps {
   ads: EditorAdMarker[];
   clipUrl: string;
   channelId: string;
+  /** Parent window length for parsing / clamping in/out (same as clips list). */
+  parentWindowDurationSec: number;
   selectedAdId: string | null;
   onSelectAd: (id: string | null) => void;
   onRemoveAd: (id: string) => void;
   onAdOrderChange: (id: string, newIndex: number) => void;
+  onAdTimesCommit: (
+    adId: string,
+    startTime: number,
+    endTime: number,
+  ) => { startTime: number; endTime: number } | null;
   onSeek?: (timeSeconds: number) => void;
   thumbnailsEnabled?: boolean;
   emptyHint?: string;
@@ -24,10 +206,12 @@ export function EditorAdsList({
   ads,
   clipUrl,
   channelId,
+  parentWindowDurationSec,
   selectedAdId,
   onSelectAd,
   onRemoveAd,
   onAdOrderChange,
+  onAdTimesCommit,
   onSeek,
   thumbnailsEnabled = true,
   emptyHint = "Add slots from Actions or they appear when detected.",
@@ -63,11 +247,6 @@ export function EditorAdsList({
 
   const tw = thumbWidth;
   const th = thumbHeight;
-  const thumbPlaceholder = (label: string) => (
-    <div className="flex size-full items-center justify-center bg-quaternary text-[9px] font-medium text-tertiary">
-      {label}
-    </div>
-  );
 
   return (
     <div className="flex flex-col gap-1">
@@ -92,8 +271,12 @@ export function EditorAdsList({
               data-editor-ad-focus
               role="button"
               tabIndex={0}
-              onClick={handleRowClick}
+              onClick={(e) => {
+                if ((e.target as HTMLElement).closest("[data-no-row-select]")) return;
+                handleRowClick();
+              }}
               onKeyDown={(e) => {
+                if ((e.target as HTMLElement).closest("[data-no-row-select]")) return;
                 if (e.key === "Enter" || e.key === " ") {
                   e.preventDefault();
                   handleRowClick();
@@ -106,42 +289,18 @@ export function EditorAdsList({
               }`}
               style={{ minHeight: rowHeight }}
             >
-              <div
-                className="shrink-0 overflow-hidden rounded border border-secondary bg-quaternary"
-                style={{ width: tw, height: th }}
-                onClick={(e) => e.stopPropagation()}
-              >
-                {thumbnailsEnabled ? (
-                  <img
-                    src={thumbInUrl}
-                    alt=""
-                    className="size-full object-cover"
-                    width={tw}
-                    height={th}
-                    loading="lazy"
-                  />
-                ) : (
-                  thumbPlaceholder("In")
-                )}
-              </div>
-              <div
-                className="shrink-0 overflow-hidden rounded border border-secondary bg-quaternary"
-                style={{ width: tw, height: th }}
-                onClick={(e) => e.stopPropagation()}
-              >
-                {thumbnailsEnabled ? (
-                  <img
-                    src={thumbOutUrl}
-                    alt=""
-                    className="size-full object-cover"
-                    width={tw}
-                    height={th}
-                    loading="lazy"
-                  />
-                ) : (
-                  thumbPlaceholder("Out")
-                )}
-              </div>
+              <AdThumbsWithRangeFields
+                adId={a.id}
+                startTime={a.startTime}
+                endTime={a.endTime}
+                maxDuration={parentWindowDurationSec}
+                onCommit={onAdTimesCommit}
+                thumbInUrl={thumbInUrl}
+                thumbOutUrl={thumbOutUrl}
+                thumbW={tw}
+                thumbH={th}
+                thumbnailsEnabled={thumbnailsEnabled}
+              />
               <button
                 type="button"
                 onClick={(e) => {
@@ -154,10 +313,11 @@ export function EditorAdsList({
                 <Play className="size-4" />
               </button>
               <span className="min-w-0 max-w-full shrink text-[10px] leading-tight text-brand-secondary">
-                AD #{a.index} · {formatTime(a.startTime)} → {formatTime(a.endTime)}
+                AD #{a.index}
               </span>
               <label
                 className="flex shrink-0 items-center gap-0.5"
+                data-no-row-select
                 onClick={(e) => e.stopPropagation()}
               >
                 <span className="text-[10px] text-tertiary">#</span>

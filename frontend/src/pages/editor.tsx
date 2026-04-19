@@ -476,15 +476,7 @@ export function EditorPage() {
   const handleSelectClip = useCallback((id: string | null) => {
     setSelectedAdId(null);
     setSelectedClipId(id);
-    if (id === null) return;
-    const clip = clips.find((c) => c.id === id);
-    if (!clip) return;
-    const t = clip.startTime;
-    // After React commit / layout so scrollWidth and zoom track match the visible timeline.
-    requestAnimationFrame(() => {
-      timelineRef.current?.scrollTimeToCenter(t);
-    });
-  }, [clips]);
+  }, []);
 
   const handleSelectAd = useCallback((id: string | null) => {
     if (id !== null) {
@@ -544,13 +536,17 @@ export function EditorPage() {
       const clip = clips.find((c) => c.id === selectedClipId);
       if (clip) {
         setPlayUntilTime(clip.endTime);
-        playerRef.current?.seek(clip.startTime);
+        const t = playerRef.current?.getCurrentTime() ?? currentTime;
+        const resumeInsideClip = t >= clip.startTime && t < clip.endTime;
+        if (!resumeInsideClip) {
+          playerRef.current?.seek(clip.startTime);
+        }
         playerRef.current?.play();
         return;
       }
     }
     playerRef.current?.play();
-  }, [selectedClipId, clips]);
+  }, [selectedClipId, clips, currentTime]);
 
   const handlePause = useCallback(() => {
     playerRef.current?.pause();
@@ -751,6 +747,29 @@ export function EditorPage() {
     [clipState, clips, duration, isRealtime, realtimeTick],
   );
 
+  const handleAdTimesCommitFromList = useCallback(
+    (adId: string, startTime: number, endTime: number): { startTime: number; endTime: number } | null => {
+      if (!clipState?.clipUrl) return null;
+      const maxT = getEditorEffectiveDuration(
+        clipState,
+        clips,
+        duration,
+        isRealtime,
+        Date.now() / 1000,
+      );
+      const r = clampClipTimeRange(startTime, endTime, maxT, FRAME_DURATION_SEC);
+      if (!r) return null;
+      const cur = ads.find((a) => a.id === adId);
+      if (!cur) return null;
+      if (cur.startTime === r.startTime && cur.endTime === r.endTime) return null;
+      setAds((prev) => prev.map((a) => (a.id === adId ? { ...a, ...r } : a)));
+      playerRef.current?.seek(r.startTime);
+      timelineRef.current?.scrollTimeToCenter(r.startTime);
+      return r;
+    },
+    [clipState, clips, duration, isRealtime, realtimeTick, ads],
+  );
+
   const handleCaptureClipPoster = useCallback(
     (clipId: string) => {
       const t = playerRef.current?.getCurrentTime() ?? currentTime;
@@ -800,9 +819,9 @@ export function EditorPage() {
     const handler = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement;
       if (target.closest("input, textarea, select, [contenteditable='true']")) return;
-      if (target.closest("button, a[href]")) return;
 
       if (e.key === " " || e.code === "Space") {
+        if (target.closest("button, a[href]")) return;
         if (!selectedClipId) return;
         const clip = clips.find((c) => c.id === selectedClipId);
         if (!clip) return;
@@ -812,6 +831,13 @@ export function EditorPage() {
       }
 
       if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+      const inPlayerKeyboardSeek = target.closest("[data-editor-keyboard-seek]");
+      if (
+        (target.closest("button") || target.closest("a[href]")) &&
+        !inPlayerKeyboardSeek
+      ) {
+        return;
+      }
       e.preventDefault();
       const t = playerRef.current?.getCurrentTime() ?? currentTime;
       const dur = playerRef.current?.getDuration() ?? duration;
@@ -1158,6 +1184,7 @@ export function EditorPage() {
               }
               parentWindowDurationSec={effectiveDuration}
               onClipTimesCommit={handleClipTimesCommitFromList}
+              onAdTimesCommit={handleAdTimesCommitFromList}
               onAddVerticalClip={() => handleAddClipAtPlayhead("vertical")}
               onAddHorizontalClip={() => handleAddClipAtPlayhead("horizontal")}
               onAddAdSlot={handleAddAdSlot}

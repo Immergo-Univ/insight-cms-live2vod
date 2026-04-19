@@ -19,8 +19,11 @@ import {
   buildThumbnailUrl,
 } from "./editor-constants";
 import type { EditorAdMarker, EditorSubClip } from "@/types/editor";
+import { Slider } from "@/components/base/slider/slider";
 import { EditorMarkInOut } from "./editor-mark-in-out";
 import { cx } from "@/utils/cx";
+
+const TIMELINE_ZOOM_MAX_INDEX = ZOOM_LEVELS_MS.length - 1;
 
 const TIMELINE_SCRUB_HEIGHT_PX = 24;
 const TIMELINE_FILMSTRIP_HEIGHT_PX = 120;
@@ -28,6 +31,9 @@ const TIMELINE_RAIL_HEIGHT_PX = 10;
 
 /** Pixels before a clip body mousedown counts as a horizontal move (vs click). */
 const CLIP_BODY_DRAG_THRESHOLD_PX = 4;
+
+/** Keep playhead inside the filmstrip viewport when it drifts past this inset (px). */
+const PLAYHEAD_SCROLL_MARGIN_PX = 56;
 
 export function formatTime(seconds: number): string {
   const h = Math.floor(seconds / 3600);
@@ -296,6 +302,10 @@ export const EditorTimeline = forwardRef<EditorTimelineHandle, EditorTimelinePro
   /** Full-width track (scrub strip + filmstrip) for time ↔ x mapping */
   const trackRef = useRef<HTMLDivElement>(null);
   const innerRef = useRef<HTMLDivElement>(null);
+  /** Dedupes selection-driven scroll when parent re-renders with new `clips` array identity. */
+  const lastSelectionScrollKeyRef = useRef<string>("");
+  /** At most one playhead follow per animation frame while time advances. */
+  const playheadFollowRafRef = useRef<number | null>(null);
   const [scrubHoverX, setScrubHoverX] = useState<number | null>(null);
   const [hoverClipId, setHoverClipId] = useState<string | null>(null);
   const [dragging, setDragging] = useState<{
@@ -415,21 +425,108 @@ export const EditorTimeline = forwardRef<EditorTimelineHandle, EditorTimelinePro
   const playheadPx =
     durationSeconds > 0 ? currentTimeSeconds * pixelsPerSecond : 0;
 
+  /**
+   * Filmstrip (`scrollRef`) + thin rail (`railRef`) share the same horizontal offset.
+   * Uses direct `scrollLeft` so layout is applied immediately (smooth scroll often failed to move).
+   */
+  const applySyncedScrollLeft = useCallback((left: number) => {
+    const content = scrollRef.current;
+    const rail = railRef.current;
+    if (!content) return;
+    const maxScroll = Math.max(0, content.scrollWidth - content.clientWidth);
+    const next = Math.max(0, Math.min(left, maxScroll));
+    content.scrollLeft = next;
+    if (rail) rail.scrollLeft = next;
+  }, []);
+
   const scrollTimeToCenter = useCallback(
     (timeSeconds: number) => {
       const content = scrollRef.current;
-      const rail = railRef.current;
       if (!content || durationSeconds <= 0) return;
       const t = Math.max(0, Math.min(timeSeconds, durationSeconds));
       const px = t * pixelsPerSecond;
       const target = px - content.clientWidth / 2;
-      const maxScroll = Math.max(0, content.scrollWidth - content.clientWidth);
-      const next = Math.max(0, Math.min(target, maxScroll));
-      content.scrollTo({ left: next, behavior: "smooth" });
-      rail?.scrollTo({ left: next, behavior: "smooth" });
+      applySyncedScrollLeft(target);
     },
-    [durationSeconds, pixelsPerSecond],
+    [durationSeconds, pixelsPerSecond, applySyncedScrollLeft],
   );
+
+  /** Places `timeSeconds` at the leading edge of the scrollport (filmstrip + thin rail). */
+  const scrollTimeToLeadingEdge = useCallback(
+    (timeSeconds: number) => {
+      const content = scrollRef.current;
+      if (!content || durationSeconds <= 0) return;
+      const t = Math.max(0, Math.min(timeSeconds, durationSeconds));
+      const px = t * pixelsPerSecond;
+      const marginPx = 12;
+      applySyncedScrollLeft(px - marginPx);
+    },
+    [durationSeconds, pixelsPerSecond, applySyncedScrollLeft],
+  );
+
+  const selectedClipStartTime = useMemo(() => {
+    if (selectedClipId == null) return null;
+    return clips.find((x) => x.id === selectedClipId)?.startTime ?? null;
+  }, [clips, selectedClipId]);
+
+  useLayoutEffect(() => {
+    if (selectedClipId == null || selectedClipStartTime == null) {
+      lastSelectionScrollKeyRef.current = "";
+      return;
+    }
+    const key = `${selectedClipId}:${selectedClipStartTime}:${pixelsPerSecond}:${durationSeconds}`;
+    if (key === lastSelectionScrollKeyRef.current) return;
+    lastSelectionScrollKeyRef.current = key;
+
+    const t = selectedClipStartTime;
+    const run = () => scrollTimeToLeadingEdge(t);
+    run();
+    const id = requestAnimationFrame(() => {
+      run();
+      run();
+    });
+    return () => cancelAnimationFrame(id);
+  }, [
+    durationSeconds,
+    pixelsPerSecond,
+    scrollTimeToLeadingEdge,
+    selectedClipId,
+    selectedClipStartTime,
+  ]);
+
+  /** While time advances (play/seek), keep the red playhead inside the scrollport if it left the edges. */
+  useEffect(() => {
+    const content = scrollRef.current;
+    const rail = railRef.current;
+    if (!content || durationSeconds <= 0) return;
+
+    const applyFollow = () => {
+      playheadFollowRafRef.current = null;
+      const t = Math.max(0, Math.min(currentTimeSeconds, durationSeconds));
+      const px = t * pixelsPerSecond;
+      const sl = content.scrollLeft;
+      const vw = content.clientWidth;
+      const m = PLAYHEAD_SCROLL_MARGIN_PX;
+      const maxScroll = Math.max(0, content.scrollWidth - content.clientWidth);
+      let next = sl;
+      if (px < sl + m) next = px - m;
+      else if (px > sl + vw - m) next = px - vw + m;
+      else return;
+      next = Math.max(0, Math.min(next, maxScroll));
+      if (next === sl) return;
+      content.scrollLeft = next;
+      if (rail) rail.scrollLeft = next;
+    };
+
+    if (playheadFollowRafRef.current != null) return;
+    playheadFollowRafRef.current = requestAnimationFrame(applyFollow);
+    return () => {
+      if (playheadFollowRafRef.current != null) {
+        cancelAnimationFrame(playheadFollowRafRef.current);
+        playheadFollowRafRef.current = null;
+      }
+    };
+  }, [currentTimeSeconds, durationSeconds, pixelsPerSecond]);
 
   useImperativeHandle(ref, () => ({ scrollTimeToCenter }), [scrollTimeToCenter]);
 
@@ -497,7 +594,7 @@ export const EditorTimeline = forwardRef<EditorTimelineHandle, EditorTimelinePro
       e.preventDefault();
       if (e.ctrlKey || e.metaKey) {
         const delta = e.deltaY > 0 ? 1 : -1;
-        const next = Math.max(0, Math.min(ZOOM_LEVELS_MS.length - 1, zoomIndex + delta));
+        const next = Math.max(0, Math.min(TIMELINE_ZOOM_MAX_INDEX, zoomIndex + delta));
         if (next !== zoomIndex) onZoomIndexChange(next);
       } else {
         el.scrollLeft += e.deltaY * 2;
@@ -784,10 +881,9 @@ export const EditorTimeline = forwardRef<EditorTimelineHandle, EditorTimelinePro
       onSelectClip(isSelected ? null : c.id);
       if (!isSelected) {
         onSeek(c.startTime);
-        scrollTimeToCenter(c.startTime);
       }
     },
-    [onSelectClip, onSelectAd, onSeek, scrollTimeToCenter],
+    [onSelectClip, onSelectAd, onSeek],
   );
 
   const handleAdOverlayClick = useCallback(
@@ -855,18 +951,27 @@ export const EditorTimeline = forwardRef<EditorTimelineHandle, EditorTimelinePro
             />
           ) : null}
         </div>
-        <select
-          value={zoomIndex}
-          onChange={(e) => onZoomIndexChange(Number(e.target.value))}
-          className="rounded border border-secondary bg-primary px-2 py-1 text-xs text-primary"
-          aria-label="Timeline zoom"
-        >
-          {ZOOM_LABELS.map((label, i) => (
-            <option key={i} value={i}>
-              {label}
-            </option>
-          ))}
-        </select>
+        <div className="flex shrink-0 items-center gap-2">
+          <Slider
+            aria-label="Timeline zoom"
+            aria-valuetext={ZOOM_LABELS[zoomIndex]}
+            className="w-32 sm:w-44"
+            minValue={0}
+            maxValue={TIMELINE_ZOOM_MAX_INDEX}
+            step={1}
+            value={zoomIndex}
+            formatOptions={{ maximumFractionDigits: 0 }}
+            labelFormatter={(idx) => ZOOM_LABELS[idx] ?? String(idx)}
+            onChange={(next) => {
+              const raw = typeof next === "number" ? next : next[0];
+              const idx = Math.round(raw);
+              if (idx >= 0 && idx <= TIMELINE_ZOOM_MAX_INDEX) onZoomIndexChange(idx);
+            }}
+          />
+          <span className="min-w-[4.25rem] text-end text-xs font-medium tabular-nums text-secondary">
+            {ZOOM_LABELS[zoomIndex]}
+          </span>
+        </div>
       </div>
       <div className="flex items-stretch gap-0">
         <button
