@@ -32,8 +32,8 @@ async function loadScanState() {
     if (o && typeof o === "object" && o.lastSlotByChannel && typeof o.lastSlotByChannel === "object") {
       return { lastSlotByChannel: o.lastSlotByChannel };
     }
-  } catch (e) {
-    if (e.code !== "ENOENT") console.warn("[logo-archive] state read:", e.message);
+  } catch {
+    /* missing or invalid scan state */
   }
   return { lastSlotByChannel: {} };
 }
@@ -91,9 +91,6 @@ async function fileExists(p) {
 
 async function runOneCycle() {
   if (!(await fileExists(config.logoDetector.bin))) {
-    console.error(
-      `[logo-archive] Skipping cycle: missing ${config.logoDetector.bin} (make -C utils/logo-detector)`,
-    );
     return;
   }
 
@@ -110,16 +107,14 @@ async function runOneCycle() {
     try {
       const t = await resolveTenant(tenantId);
       accountId = t.accountId;
-    } catch (e) {
-      console.error(`[logo-archive] tenant ${tenantId}: ${e.message}`);
+    } catch {
       continue;
     }
 
     let rows;
     try {
       rows = await fetchChannelsWithArchive({ accountId, tenantId });
-    } catch (e) {
-      console.error(`[logo-archive] channels ${tenantId}: ${e.message}`);
+    } catch {
       continue;
     }
 
@@ -160,14 +155,10 @@ async function runOneCycle() {
           probeWindow(mid, slotEnd),
         ]);
         if (logoFirst === null || logoSecond === null) {
-          console.warn(`[logo-archive] detector failed tenant=${tenantId} channel=${channelId} slot=${slotStart}`);
           continue;
         }
         if (!logoFirst && !logoSecond) {
           await mergeArchiveAdSegment(channelId, tenantId, base, slotStart, slotEnd);
-          console.log(
-            `[logo-archive] slot [${slotStart},${slotEnd}) no logo → ad tenant=${tenantId} channel=${channelId}`,
-          );
         } else if (logoFirst && !logoSecond) {
           /**
            * Logo in first half only: break likely starts before `mid`. A single full-half true would mark
@@ -180,36 +171,22 @@ async function runOneCycle() {
             if (logoInner === false) adStart = innerStart;
             else if (logoInner === true) adStart = mid;
             else {
-              console.warn(
-                `[logo-archive] inner probe failed tenant=${tenantId} channel=${channelId} slot=${slotStart}`,
-              );
               continue;
             }
           }
           await mergeArchiveAdSegment(channelId, tenantId, base, adStart, slotEnd);
-          console.log(
-            `[logo-archive] slot [${adStart},${slotEnd}) no logo (mid break) tenant=${tenantId} channel=${channelId}`,
-          );
         } else if (!logoFirst && logoSecond) {
           await mergeArchiveAdSegment(channelId, tenantId, base, slotStart, mid);
-          console.log(
-            `[logo-archive] slot [${slotStart},${mid}) no logo (early break) tenant=${tenantId} channel=${channelId}`,
-          );
         }
       } else {
         const m3u8 = buildArchiveM3u8(hls, slotStart, slotEnd);
         const probe = await runLogoDetectorOnStream(m3u8, paths, { timeoutMs, channelId });
         if (!probe) {
-          console.warn(`[logo-archive] detector failed tenant=${tenantId} channel=${channelId} slot=${slotStart}`);
           continue;
         }
         const logoPresent = probe.logo === true || probe.logo_present === true;
         if (!logoPresent) {
           await mergeArchiveAdSegment(channelId, tenantId, base, slotStart, slotEnd);
-          console.log(
-            `[logo-archive] slot [${slotStart},${slotEnd}) no logo match → ad segment ` +
-              `tenant=${tenantId} channel=${channelId}`,
-          );
         }
       }
 
@@ -223,8 +200,8 @@ async function schedulerLoop() {
   while (schedulerRunning) {
     try {
       await runOneCycle();
-    } catch (e) {
-      console.error(`[logo-archive] cycle error: ${e.message}`);
+    } catch {
+      /* cycle error: continue loop */
     }
     if (!schedulerRunning) break;
     await sleep(Math.max(5000, config.logoArchiveScan.cyclePauseMs));
@@ -237,7 +214,7 @@ async function schedulerLoop() {
 export function startLogoScanScheduler() {
   if (schedulerRunning) return;
   schedulerRunning = true;
-  schedulerLoop().catch((e) => console.error("[logo-archive] fatal:", e));
+  schedulerLoop().catch(() => {});
 }
 
 export function stopLogoScanScheduler() {

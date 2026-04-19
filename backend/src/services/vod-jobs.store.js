@@ -2,6 +2,8 @@
  * In-memory VOD job registry + WebSocket fan-out per tenant.
  */
 
+import { vodEncodeStdout } from "../utils/vod-encode-log.js";
+
 /** @typedef {'queued' | 'processing' | 'uploading' | 'completed' | 'cancelled' | 'failed'} VodJobStatus */
 
 /**
@@ -74,8 +76,28 @@ export function createJob(partial) {
     updatedAt: now,
   };
   jobsById.set(job.id, job);
+  logVodEncodeJobLine(job, "(created)");
   broadcastTenant(job.tenantId, { type: "job_update", job: serializeJob(job) });
   return job;
+}
+
+/**
+ * @param {VodJob} job
+ * @param {string} [suffix]
+ */
+function logVodEncodeJobLine(job, suffix) {
+  const parts = [
+    `job=${job.id}`,
+    `tenant=${job.tenantId}`,
+    `status=${job.status}`,
+    `${job.progress}%`,
+    `phase=${job.phase}`,
+  ];
+  if (job.message) parts.push(`message=${JSON.stringify(job.message)}`);
+  if (job.error) parts.push(`error=${JSON.stringify(String(job.error).slice(0, 500))}`);
+  if (job.editorClipId) parts.push(`editorClipId=${job.editorClipId}`);
+  if (suffix) parts.push(suffix);
+  vodEncodeStdout(parts.join(" "));
 }
 
 /**
@@ -86,6 +108,7 @@ export function updateJob(id, patch) {
   const job = jobsById.get(id);
   if (!job) return null;
   Object.assign(job, patch, { updatedAt: new Date().toISOString() });
+  logVodEncodeJobLine(job);
   broadcastTenant(job.tenantId, { type: "job_update", job: serializeJob(job) });
   return job;
 }

@@ -6,9 +6,15 @@
 import { spawn } from "child_process";
 import fs from "fs/promises";
 import path from "path";
+import { vodEncodeStdout } from "../utils/vod-encode-log.js";
+import { widgetRenderBrowserRef, widgetRenderBrowserUnref } from "./vod-widget-html2png.service.js";
+import { buildWidgetOverlayFilterComplex } from "./vod-widget-overlay.service.js";
 
 /** Minimum kept segment duration (seconds). */
 const MIN_SEGMENT_SEC = 0.08;
+
+/** libx264 CRF (higher = lower quality / smaller output). */
+const VOD_LIBX264_CRF = 28;
 
 /**
  * @param {string} inputUrl
@@ -239,6 +245,159 @@ export function computeNineSixteenStripCrop(iw, ih, centerXNorm) {
  * @param {() => boolean} opts.shouldCancel
  * @param {string} [opts.videoFilter] e.g. crop=w:h:x:y
  */
+/**
+ * Encode one time slice; burns clip widgets (text/image) when `clip.widgets` is non-empty.
+ *
+ * @param {object} opts
+ * @param {unknown} opts.clip
+ * @param {EditorEncodeSpec} opts.spec
+ * @param {number} opts.iw
+ * @param {number} opts.ih
+ * @param {string} opts.workDir
+ * @param {string} opts.segmentTag
+ * @param {string} [opts.encodeLogPrefix]
+ */
+async function runFfmpegSegmentWithOptionalWidgets(opts) {
+  const {
+    inputUrl,
+    start,
+    end,
+    outputPath,
+    shouldCancel,
+    videoFilter,
+    clip,
+    spec,
+    iw,
+    ih,
+    workDir,
+    segmentTag,
+    encodeLogPrefix,
+  } = opts;
+
+  const widgets = clip?.widgets;
+  const hasWidgets = Array.isArray(widgets) && widgets.length > 0;
+  const needsTextBrowser =
+    hasWidgets &&
+    widgets.some((w) => w && typeof w === "object" && w.kind === "text");
+
+  vodEncodeStdout(
+    encodeLogPrefix || "encode",
+    `segment start tag=${segmentTag} t=${start}-${end}s widgets=${hasWidgets ? widgets.length : 0} crop=${videoFilter ? "yes" : "no"}`,
+  );
+
+  if (!hasWidgets) {
+    await runFfmpegSegment({
+      inputUrl,
+      start,
+      end,
+      outputPath,
+      shouldCancel,
+      videoFilter: videoFilter || undefined,
+    });
+    vodEncodeStdout(encodeLogPrefix || "encode", `segment ok tag=${segmentTag} path=${outputPath}`);
+    return;
+  }
+
+  /** @type {import("playwright").Browser | undefined} */
+  let renderBrowser;
+  if (needsTextBrowser) {
+    renderBrowser = await widgetRenderBrowserRef();
+  }
+
+  let cropFilter = videoFilter || null;
+  let outW = iw % 2 === 0 ? iw : iw - 1;
+  let outH = ih % 2 === 0 ? ih : ih - 1;
+  if (videoFilter) {
+    const cropWin = clip?.cropWindow ?? spec.cropWindow;
+    const centerXNum = cropWin ? Number(cropWin.centerX) : NaN;
+    if (cropWin && cropWin.aspectRatio === "9:16" && Number.isFinite(centerXNum)) {
+      const { cropW, cropH } = computeNineSixteenStripCrop(iw, ih, centerXNum);
+      outW = cropW;
+      outH = cropH;
+    }
+  }
+
+  /** @type {string[]} */
+  let tempFiles = [];
+  try {
+    const { filterComplex, extraInputs, tempFiles: tf } = await buildWidgetOverlayFilterComplex({
+      cropFilter,
+      outW,
+      outH,
+      widgets,
+      workDir,
+      tag: segmentTag,
+      renderBrowser,
+    });
+    tempFiles = tf;
+
+    if (!filterComplex || extraInputs.length === 0) {
+      await runFfmpegSegment({
+        inputUrl,
+        start,
+        end,
+        outputPath,
+        shouldCancel,
+        videoFilter: videoFilter || undefined,
+      });
+      vodEncodeStdout(
+        encodeLogPrefix || "encode",
+        `segment ok tag=${segmentTag} path=${outputPath} widgets=skipped(no drawable overlays)`,
+      );
+      return;
+    }
+
+    const args = [
+      "-hide_banner",
+      "-loglevel",
+      "error",
+      "-y",
+      ...ffmpegInputGlobalArgs(inputUrl),
+      "-ss",
+      String(start),
+      "-to",
+      String(end),
+      "-i",
+      inputUrl,
+      ...extraInputs.flatMap((p) => ["-i", p]),
+      "-filter_complex",
+      filterComplex,
+      "-map",
+      "[outv]",
+      "-map",
+      "0:a?",
+      "-c:v",
+      "libx264",
+      "-preset",
+      "ultrafast",
+      "-crf",
+      String(VOD_LIBX264_CRF),
+      "-profile:v",
+      "high",
+      "-pix_fmt",
+      "yuv420p",
+      "-c:a",
+      "aac",
+      "-b:a",
+      "128k",
+      "-movflags",
+      "+faststart",
+      outputPath,
+    ];
+
+    await runFfmpeg(args, shouldCancel);
+    vodEncodeStdout(
+      encodeLogPrefix || "encode",
+      `segment ok tag=${segmentTag} path=${outputPath} extraInputs=${extraInputs.length}`,
+    );
+  } finally {
+    await Promise.all(tempFiles.map((f) => fs.unlink(f).catch(() => {})));
+    if (needsTextBrowser) {
+      await widgetRenderBrowserUnref();
+    }
+  }
+}
+
 function runFfmpegSegment(opts) {
   const { inputUrl, start, end, outputPath, shouldCancel, videoFilter } = opts;
   const vfArgs = videoFilter ? ["-vf", videoFilter] : [];
@@ -248,17 +407,19 @@ function runFfmpegSegment(opts) {
     "error",
     "-y",
     ...ffmpegInputGlobalArgs(inputUrl),
-    "-i",
-    inputUrl,
     "-ss",
     String(start),
     "-to",
     String(end),
+    "-i",
+    inputUrl,
     ...vfArgs,
     "-c:v",
     "libx264",
     "-preset",
     "ultrafast",
+    "-crf",
+    String(VOD_LIBX264_CRF),
     "-profile:v",
     "high",
     "-pix_fmt",
@@ -338,7 +499,10 @@ function runFfmpeg(args, shouldCancel) {
       if (code === 0) resolve();
       else {
         const tail = stderr.trim() || "(no stderr output)";
-        console.error(`[vod][ffmpeg] exit=${code}`, tail.length > 4000 ? `${tail.slice(0, 4000)}…` : tail);
+        vodEncodeStdout(
+          `ffmpeg exit=${code}`,
+          tail.length > 4000 ? `${tail.slice(0, 4000)}…` : tail,
+        );
         reject(new Error(tail.length > 800 ? `${tail.slice(0, 800)}…` : tail || `ffmpeg exited with code ${code}`));
       }
     });
@@ -348,7 +512,7 @@ function runFfmpeg(args, shouldCancel) {
 /**
  * @typedef {object} EditorEncodeSpec
  * @property {string} clipUrl
- * @property {Array<{ order: number, startTime: number, endTime: number, metadata?: { title?: string, description?: string, tags?: string }, posters?: unknown[], cropWindow?: { aspectRatio: string, centerX: number }, subtitles?: { enabled: boolean, whisperSourceLanguage?: string, whisperOutputLanguage?: string, languageMode?: string, style?: { fontSizePx?: number, textColor?: string, outlineColor?: string, outlineWidthPx?: number } } }>} clips
+ * @property {Array<{ order: number, startTime: number, endTime: number, metadata?: { title?: string, description?: string, tags?: string }, posters?: unknown[], cropWindow?: { aspectRatio: string, centerX: number }, subtitles?: { enabled: boolean, whisperSourceLanguage?: string, whisperOutputLanguage?: string, languageMode?: string, style?: { fontSizePx?: number, textColor?: string, outlineColor?: string, outlineWidthPx?: number } }, widgets?: unknown[] }>} clips
  * @property {Array<{ startTime: number, endTime: number }>} [ads]
  * @property {{ aspectRatio: string, centerX: number }} [cropWindow] legacy: applies to all clips if clips[].cropWindow missing
  * @property {{ enabled: boolean, whisperSourceLanguage?: string, whisperOutputLanguage?: string, languageMode?: string, style?: { fontSizePx?: number, textColor?: string, outlineColor?: string, outlineWidthPx?: number } }} [subtitles] legacy: applies to all clips if clips[].subtitles missing
@@ -362,10 +526,12 @@ function runFfmpeg(args, shouldCancel) {
  * @param {string} ctx.workDir
  * @param {(pct: number) => void} [ctx.onProgress] 0–90 during encode
  * @param {() => boolean} ctx.shouldCancel
+ * @param {string} [ctx.encodeLogPrefix] prefix for stdout lines (e.g. job=uuid)
  * @returns {Promise<{ localPaths: string[], localPath: string }>}
  */
 export async function encodeEditorJsonToMp4(ctx) {
-  const { spec, workDir, onProgress, shouldCancel } = ctx;
+  const { spec, workDir, onProgress, shouldCancel, encodeLogPrefix } = ctx;
+  const logP = encodeLogPrefix || "encode";
   const clipUrl = spec.clipUrl;
   if (!clipUrl) throw new Error("Missing clipUrl in spec");
 
@@ -384,7 +550,14 @@ export async function encodeEditorJsonToMp4(ctx) {
     throw new Error("No segments to encode after applying clips and ad removal");
   }
 
+  vodEncodeStdout(
+    logP,
+    `plan clips=${clipsSorted.length} playableSegments=${totalParts} ads=${(ads || []).length}`,
+  );
+
+  vodEncodeStdout(logP, "ffprobe source dimensions…");
   const { width: iw, height: ih } = await runFfprobeVideoSize(clipUrl);
+  vodEncodeStdout(logP, `source video ${iw}x${ih}`);
 
   /**
    * @param {unknown} clip
@@ -412,17 +585,29 @@ export async function encodeEditorJsonToMp4(ctx) {
       throw new Error(`Clip order ${clip.order} has no playable segments after ad removal`);
     }
     const clipOut = path.join(workDir, `clip_order_${clip.order}.mp4`);
+    const widgetN = Array.isArray(clip?.widgets) ? clip.widgets.length : 0;
+    vodEncodeStdout(
+      logP,
+      `clip order=${clip.order} ci=${ci} segments=${parts.length} widgets=${widgetN} out=${clipOut}`,
+    );
 
     if (parts.length === 1) {
       if (shouldCancel()) throw new Error("CANCELLED");
       const [s, e] = parts[0];
-      await runFfmpegSegment({
+      await runFfmpegSegmentWithOptionalWidgets({
         inputUrl: clipUrl,
         start: s,
         end: e,
         outputPath: clipOut,
         shouldCancel,
         videoFilter: videoFilter || undefined,
+        clip,
+        spec,
+        iw,
+        ih,
+        workDir,
+        segmentTag: `c${ci}_p0`,
+        encodeLogPrefix: logP,
       });
       doneParts += 1;
       onProgress?.(Math.min(90, Math.round((doneParts / totalParts) * 90)));
@@ -432,13 +617,20 @@ export async function encodeEditorJsonToMp4(ctx) {
         if (shouldCancel()) throw new Error("CANCELLED");
         const [s, e] = parts[i];
         const segPath = path.join(workDir, `c${ci}_seg_${i}.mp4`);
-        await runFfmpegSegment({
+        await runFfmpegSegmentWithOptionalWidgets({
           inputUrl: clipUrl,
           start: s,
           end: e,
           outputPath: segPath,
           shouldCancel,
           videoFilter: videoFilter || undefined,
+          clip,
+          spec,
+          iw,
+          ih,
+          workDir,
+          segmentTag: `c${ci}_s${i}`,
+          encodeLogPrefix: logP,
         });
         segmentFiles.push(segPath);
         doneParts += 1;
@@ -451,6 +643,7 @@ export async function encodeEditorJsonToMp4(ctx) {
         return `file '${escaped}'`;
       });
       await fs.writeFile(listPath, `${lines.join("\n")}\n`, "utf8");
+      vodEncodeStdout(logP, `concat clip order=${clip.order} files=${segmentFiles.length} -> ${clipOut}`);
       try {
         await runFfmpegConcat({ listPath, outputPath: clipOut, shouldCancel });
       } catch {
@@ -470,6 +663,8 @@ export async function encodeEditorJsonToMp4(ctx) {
             "libx264",
             "-preset",
             "ultrafast",
+            "-crf",
+            String(VOD_LIBX264_CRF),
             "-profile:v",
             "high",
             "-pix_fmt",

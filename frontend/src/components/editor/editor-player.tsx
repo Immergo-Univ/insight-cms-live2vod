@@ -11,13 +11,15 @@ import { Play, PauseCircle, StopCircle, VolumeMax, VolumeX } from "@untitledui/i
 import videojs from "video.js";
 import type Player from "video.js/dist/types/player";
 import "video.js/dist/video-js.css";
-import type { EditorSubtitleSettings } from "@/types/editor";
+import type { EditorClipWidget, EditorSubtitleSettings } from "@/types/editor";
 import {
   computeVideoContentRect,
   EditorVerticalCropOverlay,
   type VideoContentRect,
 } from "./editor-vertical-crop-overlay";
 import { EditorSubtitleOverlay } from "./editor-subtitle-overlay";
+import { EditorClipWidgetsOverlay } from "./editor-clip-widgets-overlay";
+import { computeWidgetViewportRect } from "./editor-widget-viewport";
 
 export interface EditorPlayerRef {
   seek: (timeSeconds: number) => void;
@@ -52,6 +54,12 @@ interface EditorPlayerProps {
   subtitleOverlayActive?: boolean;
   subtitleSettings?: EditorSubtitleSettings;
   onSubtitleSettingsChange?: (next: EditorSubtitleSettings) => void;
+  /** Per-clip overlay widgets (text / image); positions are relative to the widget viewport (full frame or 9:16 strip). */
+  clipWidgets?: EditorClipWidget[];
+  onClipWidgetsChange?: (next: EditorClipWidget[]) => void;
+  /** Select this widget id in the overlay once it appears in `clipWidgets` (e.g. after adding a text widget). */
+  clipWidgetFocusRequestId?: string | null;
+  onClipWidgetFocusRequestHandled?: () => void;
 }
 
 const overlayButtonClass =
@@ -78,6 +86,10 @@ export const EditorPlayer = forwardRef<EditorPlayerRef, EditorPlayerProps>(
       subtitleOverlayActive = false,
       subtitleSettings,
       onSubtitleSettingsChange,
+      clipWidgets = [],
+      onClipWidgetsChange,
+      clipWidgetFocusRequestId = null,
+      onClipWidgetFocusRequestHandled,
     },
     ref
   ) {
@@ -101,7 +113,8 @@ export const EditorPlayer = forwardRef<EditorPlayerRef, EditorPlayerProps>(
     const updateContentRectRef = useRef(updateContentRect);
     updateContentRectRef.current = updateContentRect;
 
-    const measureOverlays = verticalCropActive || subtitleOverlayActive;
+    const hasWidgets = (clipWidgets?.length ?? 0) > 0;
+    const measureOverlays = verticalCropActive || subtitleOverlayActive || hasWidgets;
 
     useLayoutEffect(() => {
       if (!measureOverlays) return;
@@ -188,6 +201,12 @@ export const EditorPlayer = forwardRef<EditorPlayerRef, EditorPlayerProps>(
       };
     }, [clipUrl]);
 
+    const widgetViewport = computeWidgetViewportRect(
+      contentRect,
+      verticalCropActive,
+      verticalCropCenterX,
+    );
+
     useEffect(() => {
       const player = playerRef.current;
       if (!player) return;
@@ -243,6 +262,15 @@ export const EditorPlayer = forwardRef<EditorPlayerRef, EditorPlayerProps>(
             contentRect={contentRect}
             settings={subtitleSettings}
             onSettingsChange={onSubtitleSettingsChange}
+          />
+        ) : null}
+        {hasWidgets && onClipWidgetsChange ? (
+          <EditorClipWidgetsOverlay
+            viewport={widgetViewport}
+            widgets={clipWidgets}
+            onWidgetsChange={onClipWidgetsChange}
+            focusWidgetIdRequest={clipWidgetFocusRequestId}
+            onFocusWidgetRequestHandled={onClipWidgetFocusRequestHandled}
           />
         ) : null}
         {markRangeAwaitingOut && (

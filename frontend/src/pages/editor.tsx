@@ -28,13 +28,21 @@ import type { EditorPlayerRef, EditorTimelineHandle } from "@/components/editor"
 import { detectAds, getPrecalculatedAds } from "@/services/ads.service";
 import type {
   EditorAdMarker,
+  EditorClipImageWidget,
   EditorClipState,
+  EditorClipTextWidget,
+  EditorClipWidget,
   EditorStateJson,
   EditorStateJsonClip,
   EditorSubClip,
   EditorSubtitleSettings,
 } from "@/types/editor";
-import { DEFAULT_EDITOR_SUBTITLE_SETTINGS, defaultEditorSubClipEncodeFields } from "@/types/editor";
+import {
+  cloneEditorClipWidget,
+  DEFAULT_EDITOR_SUBTITLE_SETTINGS,
+  defaultEditorSubClipEncodeFields,
+} from "@/types/editor";
+import { uploadEditorPosters } from "@/services/editor-posters.service";
 import { isValidWhisperSubtitlePair } from "@/types/editor-whisper-languages";
 
 /** Default length for a manually inserted ad slot (seconds). */
@@ -123,6 +131,7 @@ function editorSubClipToStateJsonClip(c: EditorSubClip): EditorStateJsonClip {
           },
         }
       : {}),
+    widgets: (c.widgets ?? []).map(cloneEditorClipWidget),
   };
 }
 
@@ -329,6 +338,8 @@ export function EditorPage() {
   /** Subclip currently playing (from list row Play). Cleared on pause or when play reaches end. */
   const [playingClipId, setPlayingClipId] = useState<string | null>(null);
   const [clipVodEncodeErrors, setClipVodEncodeErrors] = useState<Record<string, string>>({});
+  /** After adding a text widget, player overlay selects it (dashed frame + handles). */
+  const [clipWidgetFocusRequestId, setClipWidgetFocusRequestId] = useState<string | null>(null);
   const { jobs: vodJobs, refreshJobs: refreshVodJobs } = useVodProcessing();
   const vodJobsRef = useRef(vodJobs);
   vodJobsRef.current = vodJobs;
@@ -365,6 +376,14 @@ export function EditorPage() {
     () => (selectedClipId ? clips.find((c) => c.id === selectedClipId) ?? null : null),
     [clips, selectedClipId],
   );
+
+  useEffect(() => {
+    setClipWidgetFocusRequestId(null);
+  }, [selectedClipId]);
+
+  const handleClipWidgetFocusRequestHandled = useCallback(() => {
+    setClipWidgetFocusRequestId(null);
+  }, []);
   const verticalCropActive = !!(selectedEncodeClip?.verticalCropMode && selectedEncodeClip?.cropWindow);
   const verticalCropCenterX = selectedEncodeClip?.cropWindow?.centerX ?? 0.5;
   const subtitleOverlayActive = !!(selectedEncodeClip?.subtitleMode);
@@ -1024,6 +1043,55 @@ export function EditorPage() {
     [refreshVodJobs],
   );
 
+  const handleClipWidgetsChange = useCallback((next: EditorClipWidget[]) => {
+    if (!selectedClipId) return;
+    setClips((prev) =>
+      prev.map((c) => (c.id === selectedClipId ? { ...c, widgets: next } : c)),
+    );
+  }, [selectedClipId]);
+
+  const handleAddTextWidget = useCallback((clipId: string) => {
+    const nw: EditorClipTextWidget = {
+      kind: "text",
+      id: crypto.randomUUID(),
+      html: "",
+      color: "#ffffff",
+      fontSizePx: 28,
+      layout: { x: 0.08, y: 0.12, w: 0.84, h: 0.26 },
+    };
+    setClips((prev) =>
+      prev.map((c) => (c.id !== clipId ? c : { ...c, widgets: [...(c.widgets ?? []), nw] })),
+    );
+    setSelectedClipId(clipId);
+    setClipWidgetFocusRequestId(nw.id);
+  }, []);
+
+  const handleAddImageWidgetFromFile = useCallback(
+    async (clipId: string, file: File) => {
+      const ch = clipState?.channelId?.trim();
+      if (!ch) {
+        throw new Error("Channel ID is required to upload images.");
+      }
+      const rows = await uploadEditorPosters(ch, [file]);
+      const row = rows[0];
+      if (!row) return;
+      const nw: EditorClipImageWidget = {
+        kind: "image",
+        id: crypto.randomUUID(),
+        src: row.previewUrl,
+        originalName: row.originalName,
+        storedRelative: row.storedRelative,
+        mime: row.mime,
+        layout: { x: 0.1, y: 0.14, w: 0.55, h: 0.42 },
+      };
+      setClips((prev) =>
+        prev.map((c) => (c.id !== clipId ? c : { ...c, widgets: [...(c.widgets ?? []), nw] })),
+      );
+      setSelectedClipId(clipId);
+    },
+    [clipState?.channelId],
+  );
+
   return (
     <div className="flex h-full flex-col bg-primary">
       <header className="flex shrink-0 items-center gap-3 border-b border-secondary px-4 py-2">
@@ -1061,6 +1129,10 @@ export function EditorPage() {
                 subtitleOverlayActive={subtitleOverlayActive}
                 subtitleSettings={subtitleSettingsForPlayer}
                 onSubtitleSettingsChange={handleSelectedClipSubtitleSettingsChange}
+              clipWidgets={selectedEncodeClip?.widgets ?? []}
+              onClipWidgetsChange={handleClipWidgetsChange}
+              clipWidgetFocusRequestId={clipWidgetFocusRequestId}
+              onClipWidgetFocusRequestHandled={handleClipWidgetFocusRequestHandled}
             />
           </div>
           <aside className="flex min-h-0 min-w-0 flex-1 basis-0 flex-col border-l border-secondary py-0 pl-2">
@@ -1102,6 +1174,8 @@ export function EditorPage() {
               onToggleClipVerticalCrop={handleToggleClipVerticalCrop}
               onToggleClipSubtitle={handleToggleClipSubtitle}
               onCaptureClipPoster={handleCaptureClipPoster}
+              onAddTextWidget={handleAddTextWidget}
+              onAddImageWidgetFromFile={handleAddImageWidgetFromFile}
           />
           </aside>
         </div>

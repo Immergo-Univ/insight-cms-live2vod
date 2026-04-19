@@ -5,7 +5,8 @@
   "private": true,
   "scripts": {
     "dev": "NODE_ENV=development node --env-file=.env --watch src/index.js",
-    "start": "node --env-file=.env src/index.js"
+    "start": "node --env-file=.env src/index.js",
+    "postinstall": "node ./scripts/install-playwright-chromium.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1023.0",
@@ -13,6 +14,8 @@
     "cors": "^2.8.5",
     "express": "^5.1.0",
     "multer": "^2.0.2",
+    "playwright": "^1.59.1",
+    "sharp": "^0.33.5",
     "ws": "^8.18.0"
   }
 }

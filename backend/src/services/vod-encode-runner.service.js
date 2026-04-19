@@ -11,6 +11,7 @@ import { encodeEditorJsonToMp4 } from "./vod-encode-adapter.service.js";
 import { putVodMp4 } from "./vod-s3.service.js";
 import { createJob, updateJob } from "./vod-jobs.store.js";
 import { transcribeAndBurnSubtitles } from "./vod-whisper-subtitles.service.js";
+import { vodEncodeStdout } from "../utils/vod-encode-log.js";
 
 /** @type {Map<string, boolean>} */
 const cancelFlags = new Map();
@@ -49,10 +50,10 @@ function subtitlesConfigForClip(spec, clip) {
  * @param {boolean} burnSubs
  * @param {string} [clipHint]
  */
-function logVodInfo(jobId, tenantId, burnSubs, clipHint) {
+function logEncodeJobStart(jobId, tenantId, burnSubs, clipHint) {
   const clip = clipHint && clipHint.length > 120 ? `${clipHint.slice(0, 120)}…` : clipHint || "";
-  console.log(
-    `[vod] start job=${jobId} tenant=${tenantId} subtitles=${burnSubs ? "yes" : "no"}${clip ? ` clip=${clip}` : ""}`,
+  vodEncodeStdout(
+    `run start job=${jobId} tenant=${tenantId} subtitles=${burnSubs ? "yes" : "no"}${clip ? ` clipUrl=${clip}` : ""}`,
   );
 }
 
@@ -62,7 +63,16 @@ export async function runVodEncodeJob(opts) {
   const burnSubs = anySubtitlesEnabled(spec);
 
   try {
-    logVodInfo(jobId, tenantId, burnSubs, typeof spec?.clipUrl === "string" ? spec.clipUrl : "");
+    logEncodeJobStart(jobId, tenantId, burnSubs, typeof spec?.clipUrl === "string" ? spec.clipUrl : "");
+
+    const clipCount = Array.isArray(spec?.clips) ? spec.clips.length : 0;
+    let widgetCount = 0;
+    for (const c of spec?.clips || []) {
+      if (Array.isArray(c?.widgets)) widgetCount += c.widgets.length;
+    }
+    vodEncodeStdout(
+      `job=${jobId} spec clips=${clipCount} widgetsTotal=${widgetCount} burnSubs=${burnSubs}`,
+    );
 
     if (shouldCancel(jobId)) {
       updateJob(jobId, {
@@ -86,6 +96,7 @@ export async function runVodEncodeJob(opts) {
     const { localPaths, localPath } = await encodeEditorJsonToMp4({
       spec,
       workDir,
+      encodeLogPrefix: `job=${jobId}`,
       shouldCancel: () => shouldCancel(jobId),
       onProgress: (p) => {
         const scaled = 2 + ((p / 90) * (encodeProgressCap - 2));
@@ -95,6 +106,9 @@ export async function runVodEncodeJob(opts) {
         });
       },
     });
+
+    const n = Array.isArray(localPaths) ? localPaths.length : 0;
+    vodEncodeStdout(`job=${jobId} ffmpeg segments done count=${n} workDir=${workDir}`);
 
     if (shouldCancel(jobId)) {
       updateJob(jobId, {
@@ -213,9 +227,7 @@ export async function runVodEncodeJob(opts) {
       outputUrl: outputUrls[0] ?? null,
       outputUrls,
     });
-    console.log(
-      `[vod] done job=${jobId} tenant=${tenantId} keys=${s3Keys.join(",")}`,
-    );
+    vodEncodeStdout(`job=${jobId} done tenant=${tenantId} keys=${s3Keys.join(",")}`);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     if (msg === "CANCELLED" || shouldCancel(jobId)) {
@@ -225,7 +237,7 @@ export async function runVodEncodeJob(opts) {
         phase: "cancelled",
         message: "Cancelled",
       });
-      console.log(`[vod] cancelled job=${jobId} tenant=${tenantId}`);
+      vodEncodeStdout(`job=${jobId} cancelled tenant=${tenantId}`);
     } else {
       console.error(`[vod] FAILED job=${jobId} tenant=${tenantId}`);
       console.error(`[vod] error: ${msg || "(empty message)"}`);
@@ -277,7 +289,9 @@ export function startBackgroundVodJob(opts) {
   });
 
   const subs = anySubtitlesEnabled(spec);
-  console.log(`[vod] queued job=${jobId} tenant=${tenantId} subtitles=${subs ? "yes" : "no"}`);
+  vodEncodeStdout(
+    `queued job=${jobId} tenant=${tenantId} subtitles=${subs ? "yes" : "no"}${editorClipId ? ` editorClipId=${editorClipId}` : ""}`,
+  );
 
   queueMicrotask(() => {
     // runVodEncodeJob catches internally; this only fires on unexpected bugs

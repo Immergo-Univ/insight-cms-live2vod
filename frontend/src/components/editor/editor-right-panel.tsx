@@ -58,6 +58,8 @@ interface EditorRightPanelProps {
   onToggleClipSubtitle?: (clipId: string) => void;
   /** Append a frame bookmark at the current playhead for this sub-clip. */
   onCaptureClipPoster?: (clipId: string) => void;
+  onAddTextWidget?: (clipId: string) => void;
+  onAddImageWidgetFromFile?: (clipId: string, file: File) => Promise<void>;
 }
 
 /**
@@ -97,6 +99,8 @@ export function EditorRightPanel({
   onToggleClipVerticalCrop,
   onToggleClipSubtitle,
   onCaptureClipPoster,
+  onAddTextWidget,
+  onAddImageWidgetFromFile,
 }: EditorRightPanelProps) {
   const [clipMetadataId, setClipMetadataId] = useState<string | null>(null);
 
@@ -154,6 +158,8 @@ export function EditorRightPanel({
               onToggleClipSubtitle={onToggleClipSubtitle}
               onUpdateClipTitle={(clipId, title) => onUpdateClipMetadata(clipId, { title })}
               onCaptureClipPoster={onCaptureClipPoster}
+              onAddTextWidget={onAddTextWidget}
+              onAddImageWidgetFromFile={onAddImageWidgetFromFile}
               vodJobs={vodJobs}
               clipVodEncodeErrors={clipVodEncodeErrors}
               onClipStartVodEncode={onClipStartVodEncode}

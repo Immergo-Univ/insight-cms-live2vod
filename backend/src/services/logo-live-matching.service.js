@@ -26,71 +26,12 @@ const AD_START_LOOKBACK_SEC = 10;
 /** Consecutive samples with logo before closing an ad window (back to program). */
 const MIN_PRESENT_TO_CLOSE = 3;
 
-/** Throttle stderr logs when a channel has no uploaded logos yet (paths re-checked every loop). */
+/** Throttle calls when a channel has no uploaded logos yet (paths re-checked every loop). */
 const lastMissingLogoLogMs = new Map();
 const MISSING_LOGO_LOG_INTERVAL_MS = 60_000;
 
-/** channelId -> { kind: 'ok'|'absent'|'error', count } — consecutive log streak per channel */
-const logoLiveLogStreak = new Map();
-
-/** ISO timestamp for every [logo-live] log line. */
-function logoLiveNow() {
-  return new Date().toISOString();
-}
-
-/** Max code points for channel title in probe logs (Hebrew / long names truncated). */
-const LOGO_LIVE_PROBE_LABEL_MAX_CP = 22;
-
-/**
- * @param {string} text
- * @param {number} maxCp
- */
-function truncateUnicodeCodePoints(text, maxCp) {
-  const chars = [...String(text)];
-  if (chars.length <= maxCp) return chars.join("");
-  return chars.slice(0, maxCp - 1).join("") + "\u2026";
-}
-
-/**
- * Truncate then pad with spaces to maxCp so log lines stay aligned (monospace-friendly).
- * @param {string} text
- * @param {number} maxCp
- */
-function formatLogoLiveProbeLabelSlot(text, maxCp) {
-  const t = truncateUnicodeCodePoints(text, maxCp);
-  const n = [...t].length;
-  return n < maxCp ? t + " ".repeat(maxCp - n) : t;
-}
-
-/**
- * @param {LiveChannelState} st
- * @param {string} channelId
- */
-function logoLiveLabelSlot(st, channelId) {
-  const raw =
-    typeof st.title === "string" && st.title.trim() !== "" ? st.title.trim() : channelId;
-  return formatLogoLiveProbeLabelSlot(raw, LOGO_LIVE_PROBE_LABEL_MAX_CP);
-}
-
-/**
- * @param {"ok" | "absent" | "error"} kind
- * @param {{ adOpened?: boolean, adClosed?: boolean }} [flags] hysteresis: mark when ad window opens/closes
- */
-function logLogoLiveStatus(st, channelId, kind, flags = {}) {
-  const prev = logoLiveLogStreak.get(channelId);
-  const count = prev && prev.kind === kind ? prev.count + 1 : 1;
-  logoLiveLogStreak.set(channelId, { kind, count });
-
-  const label = logoLiveLabelSlot(st, channelId);
-  const sym = kind === "ok" ? "✅" : kind === "absent" ? "❌" : "⚠️";
-  let line = `${label}:  ${sym} (${count})`;
-  if (kind === "error" && typeof st.lastError === "string" && st.lastError.trim() !== "") {
-    line += ` | ${st.lastError.trim()}`;
-  }
-  if (flags.adOpened) line += " -- AD start --";
-  if (flags.adClosed) line += " -- AD end --";
-  console.log(`[logo-live] ${logoLiveNow()} ${line}`);
-}
+/** Logo live probe logging removed (stdout noise). */
+function logLogoLiveStatus(_st, _channelId, _kind, _flags = {}) {}
 
 /** Channel IDs that should keep probing (refreshed from API). */
 const liveChannelWanted = new Set();
@@ -224,8 +165,8 @@ async function loadState() {
     const raw = await fs.readFile(config.logoLiveMatching.stateFilePath, "utf8");
     const o = JSON.parse(raw);
     if (o && typeof o === "object" && o.channels && typeof o.channels === "object") return o;
-  } catch (e) {
-    if (e.code !== "ENOENT") console.warn(`[logo-live] ${logoLiveNow()} state read:`, e.message);
+  } catch {
+    /* missing or invalid state file */
   }
   return {
     version: 1,
@@ -247,9 +188,7 @@ async function saveState(doc) {
  * @param {() => Promise<void>} fn
  */
 function withPersistLock(fn) {
-  const next = persistChain.then(() => fn()).catch((e) => {
-    console.error(`[logo-live] ${logoLiveNow()} persist error:`, e.message);
-  });
+  const next = persistChain.then(() => fn()).catch(() => {});
   persistChain = next;
   return next;
 }
@@ -466,12 +405,11 @@ async function runOneChannelLoop(channelId) {
       }
       await persistLiveRow(channelId, st);
     } catch (e) {
-      console.error(`[logo-live] ${logoLiveNow()} ${channelId}: ${e.message}`);
       try {
         const state = await loadState();
         const st = state.channels[channelId];
         if (st) {
-          st.lastError = e.message;
+          st.lastError = e instanceof Error ? e.message : String(e);
           await persistLiveRow(channelId, st);
         }
       } catch {
@@ -488,7 +426,7 @@ function spawnChannelLoopIfNeeded(channelId) {
   if (channelLoopTasks.has(channelId)) return;
   const p = runOneChannelLoop(channelId);
   channelLoopTasks.set(channelId, p);
-  p.catch((e) => console.error(`[logo-live] ${logoLiveNow()} loop crashed ${channelId}:`, e.message)).finally(() => {
+  p.catch(() => {}).finally(() => {
     channelLoopTasks.delete(channelId);
     if (serviceRunning && liveChannelWanted.has(channelId)) {
       setTimeout(() => spawnChannelLoopIfNeeded(channelId), 5000);
@@ -516,7 +454,6 @@ async function discoveryTick() {
 
   for (const tr of tenantResults) {
     if (!tr.ok) {
-      console.error(`[logo-live] ${logoLiveNow()} tenant ${tr.tenantId}: ${tr.error}`);
       continue;
     }
     for (const row of tr.rows) {
@@ -546,8 +483,8 @@ async function discoveryTick() {
       }
       await saveState(state);
     });
-  } catch (e) {
-    console.error(`[logo-live] ${logoLiveNow()} discovery persist: ${e.message}`);
+  } catch {
+    /* ignore discovery persist failure */
   }
 
   for (const id of fetched) {
@@ -571,17 +508,12 @@ async function discoveryLoop() {
 
 export function startLogoLiveMatchingService() {
   if (!config.logoLiveMatching.enabled) {
-    console.log(`[logo-live] ${logoLiveNow()} Disabled (LOGO_LIVE_MATCHING_ENABLED=false)`);
     return;
   }
   if (serviceRunning) return;
   serviceRunning = true;
-  const probeGap = Math.max(1, LIVE_LOGO_PROBE_INTERVAL_MS);
-  console.log(
-    `[logo-live] ${logoLiveNow()} Started: parallel tenant discovery, one concurrent loop per channel, ≥${probeGap}ms between probes per channel`,
-  );
   loopPromise = discoveryLoop();
-  loopPromise.catch((e) => console.error(`[logo-live] ${logoLiveNow()} fatal:`, e));
+  loopPromise.catch(() => {});
 }
 
 export function stopLogoLiveMatchingService() {

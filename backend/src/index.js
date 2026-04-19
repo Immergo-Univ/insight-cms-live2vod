@@ -92,7 +92,7 @@ server.listen(PORT, () => {
   logS3LogosStartup();
   if (isS3LogosEnabled()) {
     syncChannelAdsSnapshotsFromS3OnStartup().catch((e) => console.warn("[channel-ads-s3] startup:", e.message));
-    syncAllChannelLogosFromS3().catch((e) => console.warn("[channel-logos-sync] startup:", e.message));
+    syncAllChannelLogosFromS3().catch(() => {});
     startChannelLogosS3Sync();
   }
   startLogoScanScheduler();

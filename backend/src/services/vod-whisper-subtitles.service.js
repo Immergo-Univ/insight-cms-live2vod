@@ -343,6 +343,8 @@ async function burnSubtitlesFfmpeg(opts) {
       "libx264",
       "-preset",
       "ultrafast",
+      "-crf",
+      "28",
       "-profile:v",
       "high",
       "-pix_fmt",

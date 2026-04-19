@@ -24,7 +24,6 @@ export async function syncOneChannelLogosFromS3(channelSegment) {
   try {
     doc = JSON.parse(raw);
   } catch {
-    console.warn(`[channel-logos-sync] Invalid manifest JSON for segment ${channelSegment}`);
     return { ok: false, error: "invalid_manifest_json" };
   }
 
@@ -33,9 +32,6 @@ export async function syncOneChannelLogosFromS3(channelSegment) {
   }
 
   if (safeChannelSegment(doc.channelId) !== channelSegment) {
-    console.warn(
-      `[channel-logos-sync] Manifest segment mismatch: key ${channelSegment} vs channelId ${doc.channelId}`,
-    );
     return { ok: false, error: "segment_mismatch" };
   }
 
@@ -46,7 +42,6 @@ export async function syncOneChannelLogosFromS3(channelSegment) {
     if (!e || typeof e.storedRelative !== "string") continue;
     const buf = await getLogoBuffer(e.storedRelative);
     if (!buf) {
-      console.warn(`[channel-logos-sync] Missing S3 object for ${e.storedRelative} (channel ${doc.channelId})`);
       continue;
     }
     const abs = path.join(logosDir, e.storedRelative);
@@ -78,9 +73,8 @@ export async function syncAllChannelLogosFromS3() {
       const r = await syncOneChannelLogosFromS3(seg);
       if (r.ok && !r.skipped) synced += 1;
       if (!r.ok) errors += 1;
-    } catch (e) {
+    } catch {
       errors += 1;
-      console.warn(`[channel-logos-sync] ${seg}: ${e.message}`);
     }
   }
 
@@ -94,10 +88,9 @@ export function startChannelLogosS3Sync() {
   if (!isS3LogosEnabled()) return;
 
   const run = () => {
-    syncAllChannelLogosFromS3().catch((e) => console.warn("[channel-logos-sync] cycle failed:", e.message));
+    syncAllChannelLogosFromS3().catch(() => {});
   };
 
   const ms = Math.max(5000, config.s3Logos.syncIntervalMs);
   setInterval(run, ms);
-  console.log(`[channel-logos-sync] Interval enabled (every ${ms}ms)`);
 }

@@ -62,9 +62,10 @@ RUN cd frontend && npm ci
 COPY frontend/ ./frontend/
 RUN cd frontend && npm run build
 
-# Install backend deps
+# Install backend deps + Chromium for widget HTML→PNG (Playwright)
 COPY backend/package.json backend/package-lock.json* ./backend/
-RUN cd backend && npm ci --omit=dev
+RUN cd backend && npm ci --omit=dev \
+  && npx playwright install chromium --with-deps
 
 COPY backend/src ./backend/src
 COPY --from=logo-detector-build /build/logo-detector ./backend/utils/logo-detector/logo-detector

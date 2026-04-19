@@ -124,6 +124,46 @@ export const DEFAULT_EDITOR_SUBTITLE_SETTINGS: EditorSubtitleSettings = {
   },
 };
 
+/**
+ * Normalized rectangle (0–1) within the widget layout viewport:
+ * full visible video frame when not in vertical crop, otherwise the 9:16 strip (same origin as vertical preview).
+ */
+export interface EditorClipWidgetLayout {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+export interface EditorClipTextWidget {
+  kind: "text";
+  id: string;
+  /** Sanitized-ish HTML from the in-player WYSIWYG (innerHTML). */
+  html: string;
+  color: string;
+  fontSizePx: number;
+  layout: EditorClipWidgetLayout;
+}
+
+export interface EditorClipImageWidget {
+  kind: "image";
+  id: string;
+  /** Preview URL (absolute or same-origin). */
+  src: string;
+  originalName?: string;
+  storedRelative?: string;
+  mime?: string;
+  layout: EditorClipWidgetLayout;
+}
+
+export type EditorClipWidget = EditorClipTextWidget | EditorClipImageWidget;
+
+export function cloneEditorClipWidget(w: EditorClipWidget): EditorClipWidget {
+  return w.kind === "text"
+    ? { ...w, layout: { ...w.layout } }
+    : { ...w, layout: { ...w.layout } };
+}
+
 /** Encode options stored per sub-clip (UI + exported JSON). */
 export interface EditorSubClipEncodeOptions {
   /** When true, output uses 9:16 strip crop using `cropWindow`. */
@@ -132,6 +172,8 @@ export interface EditorSubClipEncodeOptions {
   /** When true, whisper + burned-in subtitles using `subtitleSettings`. */
   subtitleMode?: boolean;
   subtitleSettings?: EditorSubtitleSettings;
+  /** Over-video widgets (text / image) for this output clip; positions are relative to the widget viewport (see docs on `EditorClipWidgetLayout`). */
+  widgets?: EditorClipWidget[];
 }
 
 /**
@@ -163,6 +205,8 @@ export interface EditorStateJsonClip {
   cropWindow?: EditorCropWindow;
   /** Per-output-clip burned-in subtitles (whisper). */
   subtitles?: EditorSubtitlesConfig;
+  /** Over-video widgets for this clip (layout relative to full frame or 9:16 strip when crop is on). */
+  widgets?: EditorClipWidget[];
 }
 
 /**
@@ -221,5 +265,6 @@ export function normalizeEditorSubClip(c: EditorSubClip): EditorSubClip {
       ? { ...c.subtitleSettings, style: { ...c.subtitleSettings.style } }
       : { ...d.subtitleSettings, style: { ...d.subtitleSettings.style } },
     posters: c.posters ? [...c.posters] : undefined,
+    widgets: c.widgets?.length ? c.widgets.map(cloneEditorClipWidget) : undefined,
   };
 }

@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "updatedAt": "2026-04-19T00:40:30.323Z",
+  "byBaseUrl": {
+    "https://rjrtvjsnlocal-ioriver-cdn.encoders.immergo.tv/2/streamPlaylist-archive.m3u8": "66e0a472ff152800235e6e75",
+    "https://ch14channel14-cdn.encoders.immergo.tv/2/streamPlaylist.m3u8": "63a2edcb4343c600125cdbb6",
+    "https://ch14channel14contentb-ioriver-cdn.encoders.immergo.tv/2/streamPlaylist.m3u8": "646e74a4de2c750012491f61",
+    "https://rjrtvjlocal-ioriver-cdn.encoders.immergo.tv/2/streamPlaylist.m3u8": "66e0a4ff7e61ef0023b6e9e8"
+  }
+}

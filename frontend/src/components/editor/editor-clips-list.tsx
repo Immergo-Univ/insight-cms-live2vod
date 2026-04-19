@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { Camera01, Clapperboard, Edit01, Play, StopCircle, Trash01 } from "@untitledui/icons";
+import { Brush01, Camera01, Clapperboard, Edit01, Play, StopCircle, Trash01 } from "@untitledui/icons";
 import { ModalOverlay, Modal, Dialog } from "@/components/application/modals/modal";
 import { CloseButton } from "@/components/base/buttons/close-button";
 import {
@@ -280,6 +280,8 @@ interface EditorClipsListProps {
   onUpdateClipTitle: (clipId: string, title: string) => void;
   /** Bookmark current playhead time as a poster capture on this clip. */
   onCaptureClipPoster?: (clipId: string) => void;
+  onAddTextWidget?: (clipId: string) => void;
+  onAddImageWidgetFromFile?: (clipId: string, file: File) => Promise<void>;
   vodJobs: VodJobRecord[];
   clipVodEncodeErrors: Record<string, string>;
   onClipStartVodEncode: (clipId: string, includeAds: boolean) => void | Promise<void>;
@@ -308,6 +310,8 @@ export function EditorClipsList({
   onClipTimesCommit,
   onUpdateClipTitle,
   onCaptureClipPoster,
+  onAddTextWidget,
+  onAddImageWidgetFromFile,
   vodJobs,
   clipVodEncodeErrors,
   onClipStartVodEncode,
@@ -323,6 +327,10 @@ export function EditorClipsList({
     url: string;
     label: string;
   } | null>(null);
+  const [imageWidgetClipId, setImageWidgetClipId] = useState<string | null>(null);
+  const [imageWidgetErr, setImageWidgetErr] = useState<string | null>(null);
+  const [imageWidgetBusy, setImageWidgetBusy] = useState(false);
+  const imageWidgetFileInputRef = useRef<HTMLInputElement>(null);
 
   useLayoutEffect(() => {
     if (!titleEditId) return;
@@ -411,6 +419,79 @@ export function EditorClipsList({
                   controls
                   playsInline
                 />
+              </div>
+            </Dialog>
+          </Modal>
+        </ModalOverlay>
+      ) : null}
+
+      {imageWidgetClipId ? (
+        <ModalOverlay
+          isOpen
+          onOpenChange={(open) => {
+            if (!open && !imageWidgetBusy) {
+              setImageWidgetClipId(null);
+              setImageWidgetErr(null);
+            }
+          }}
+          isDismissable={!imageWidgetBusy}
+          isKeyboardDismissDisabled={imageWidgetBusy}
+          className="z-[85]"
+        >
+          <Modal className="z-[86]">
+            <Dialog
+              aria-label="Upload widget image"
+              className="mx-4 flex w-full max-w-md justify-center outline-hidden sm:mx-auto"
+            >
+              <div className="relative w-full rounded-xl border border-secondary bg-primary p-4 shadow-xl">
+                <CloseButton
+                  slot="close"
+                  size="xs"
+                  label="Close"
+                  className="absolute top-3 right-3 z-10"
+                  isDisabled={imageWidgetBusy}
+                />
+                <h3 className="pr-10 text-sm font-semibold text-primary">Add image widget</h3>
+                <p className="mt-1 text-xs text-tertiary">
+                  Image is stored like channel posters. You can move and resize it on the player preview.
+                </p>
+                <input
+                  ref={imageWidgetFileInputRef}
+                  type="file"
+                  accept="image/*"
+                  className="sr-only"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    e.target.value = "";
+                    if (!f || !imageWidgetClipId) return;
+                    void (async () => {
+                      setImageWidgetBusy(true);
+                      setImageWidgetErr(null);
+                      try {
+                        await onAddImageWidgetFromFile!(imageWidgetClipId, f);
+                        setImageWidgetClipId(null);
+                      } catch (err) {
+                        setImageWidgetErr(err instanceof Error ? err.message : "Upload failed");
+                      } finally {
+                        setImageWidgetBusy(false);
+                      }
+                    })();
+                  }}
+                />
+                <div className="mt-4 flex flex-col gap-2">
+                  <button
+                    type="button"
+                    disabled={imageWidgetBusy || !channelId.trim()}
+                    onClick={() => imageWidgetFileInputRef.current?.click()}
+                    className="rounded-lg border border-secondary bg-secondary px-3 py-2 text-sm font-medium text-primary hover:bg-tertiary disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {imageWidgetBusy ? "Uploading…" : "Choose image file"}
+                  </button>
+                  {!channelId.trim() ? (
+                    <p className="text-xs text-error-primary">Channel ID is required for upload.</p>
+                  ) : null}
+                  {imageWidgetErr ? <p className="text-xs text-error-primary">{imageWidgetErr}</p> : null}
+                </div>
               </div>
             </Dialog>
           </Modal>
@@ -691,6 +772,72 @@ export function EditorClipsList({
                                 className="cursor-pointer rounded-md px-3 py-2 text-left text-sm text-primary outline-none data-[focused]:bg-secondary"
                               >
                                 Capture poster at playhead
+                              </MenuItem>
+                            </Menu>
+                          </AriaPopover>
+                        </MenuTrigger>
+                      </span>
+                    ) : null}
+                    {onAddTextWidget && onAddImageWidgetFromFile ? (
+                      <span
+                        className="relative inline-flex shrink-0"
+                        data-no-row-select
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <MenuTrigger>
+                          <AriaButton
+                            aria-label="Widgets"
+                            isDisabled={encodeActive}
+                            className={({ isPressed, isFocusVisible }) =>
+                              cx(
+                                "relative flex size-8 items-center justify-center rounded-full border border-secondary bg-primary text-fg-quaternary transition-colors",
+                                encodeActive
+                                  ? "cursor-not-allowed opacity-45"
+                                  : "cursor-pointer hover:bg-secondary hover:text-fg-secondary",
+                                (isPressed || isFocusVisible) &&
+                                  !encodeActive &&
+                                  "outline-2 outline-offset-2 outline-focus-ring",
+                              )
+                            }
+                          >
+                            <Brush01 className="size-3.5" aria-hidden />
+                          </AriaButton>
+                          <AriaPopover
+                            placement="bottom start"
+                            offset={6}
+                            className={({ isEntering, isExiting }) =>
+                              cx(
+                                "will-change-transform",
+                                isEntering &&
+                                  "duration-200 ease-out animate-in fade-in placement-bottom:slide-in-from-top-2 placement-top:slide-in-from-bottom-2",
+                                isExiting &&
+                                  "duration-150 ease-in animate-out fade-out placement-bottom:slide-out-to-top-2 placement-top:slide-out-to-bottom-2",
+                              )
+                            }
+                          >
+                            <Menu
+                              className="min-w-56 rounded-lg border border-secondary_alt bg-primary p-1 shadow-lg outline-none"
+                              onAction={(key) => {
+                                if (key === "add-text") onAddTextWidget(c.id);
+                                if (key === "add-image") {
+                                  setImageWidgetErr(null);
+                                  setImageWidgetClipId(c.id);
+                                }
+                              }}
+                            >
+                              <MenuItem
+                                id="add-text"
+                                isDisabled={encodeActive}
+                                className="cursor-pointer rounded-md px-3 py-2 text-left text-sm text-primary outline-none data-[focused]:bg-secondary"
+                              >
+                                Add Text
+                              </MenuItem>
+                              <MenuItem
+                                id="add-image"
+                                isDisabled={encodeActive || !channelId.trim()}
+                                className="cursor-pointer rounded-md px-3 py-2 text-left text-sm text-primary outline-none data-[focused]:bg-secondary"
+                              >
+                                Add Image
                               </MenuItem>
                             </Menu>
                           </AriaPopover>
