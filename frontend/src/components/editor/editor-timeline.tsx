@@ -323,6 +323,8 @@ export const EditorTimeline = forwardRef<EditorTimelineHandle, EditorTimelinePro
   const clipBodyDragRef = useRef<ClipBodyDragSession | null>(null);
   /** True after a clip-body drag moved the range (suppresses click toggle). */
   const clipBodyDragMovedRef = useRef(false);
+  /** True after clip edge trim (window mouseup); suppresses overlay click from toggling selection off. */
+  const clipTrimHandleJustReleasedRef = useRef(false);
 
   type AdBodyDragSession = {
     adId: string;
@@ -334,6 +336,8 @@ export const EditorTimeline = forwardRef<EditorTimelineHandle, EditorTimelinePro
   const [adBodyDrag, setAdBodyDrag] = useState<AdBodyDragSession | null>(null);
   const adBodyDragRef = useRef<AdBodyDragSession | null>(null);
   const adBodyDragMovedRef = useRef(false);
+  /** True after ad edge trim (window mouseup); suppresses overlay click from toggling selection off. */
+  const adTrimHandleJustReleasedRef = useRef(false);
 
   const zoomMs = ZOOM_LEVELS_MS[zoomIndex] ?? ZOOM_LEVELS_MS[0];
   const zoomSeconds = zoomMs / 1000;
@@ -344,6 +348,34 @@ export const EditorTimeline = forwardRef<EditorTimelineHandle, EditorTimelinePro
     const one = clips.find((c) => c.id === selectedClipId);
     return one != null ? [one] : clips;
   }, [clips, selectedClipId]);
+
+  /**
+   * Stack z-index by duration: longer ranges sit below (lower z), shorter on top so overlaps stay clickable.
+   * Clips (visible overlays) and ad slots share one ordering when they overlap in time.
+   */
+  const markerZIndexByKey = useMemo(() => {
+    type Entry = { key: string; durationSec: number };
+    const entries: Entry[] = [];
+    for (const ad of ads) {
+      entries.push({
+        key: `ad:${ad.id}`,
+        durationSec: Math.max(0, ad.endTime - ad.startTime),
+      });
+    }
+    for (const c of filmstripClipOverlays) {
+      entries.push({
+        key: `clip:${c.id}`,
+        durationSec: Math.max(0, c.endTime - c.startTime),
+      });
+    }
+    entries.sort((a, b) => {
+      if (b.durationSec !== a.durationSec) return b.durationSec - a.durationSec;
+      return a.key.localeCompare(b.key);
+    });
+    const map = new Map<string, number>();
+    entries.forEach((e, i) => map.set(e.key, i + 1));
+    return map;
+  }, [ads, filmstripClipOverlays]);
 
   /**
    * Fixed px per second so playhead, scrub, ads, and thumbnails share one linear time axis.
@@ -545,7 +577,10 @@ export const EditorTimeline = forwardRef<EditorTimelineHandle, EditorTimelinePro
         onSeek(newEnd);
       }
     };
-    const onMouseUp = () => setDragging(null);
+    const onMouseUp = () => {
+      clipTrimHandleJustReleasedRef.current = true;
+      setDragging(null);
+    };
     window.addEventListener("mousemove", onMouseMove);
     window.addEventListener("mouseup", onMouseUp);
     return () => {
@@ -570,7 +605,10 @@ export const EditorTimeline = forwardRef<EditorTimelineHandle, EditorTimelinePro
         onSeek(newEnd);
       }
     };
-    const onMouseUp = () => setAdDragging(null);
+    const onMouseUp = () => {
+      adTrimHandleJustReleasedRef.current = true;
+      setAdDragging(null);
+    };
     window.addEventListener("mousemove", onMouseMove);
     window.addEventListener("mouseup", onMouseUp);
     return () => {
@@ -715,6 +753,9 @@ export const EditorTimeline = forwardRef<EditorTimelineHandle, EditorTimelinePro
     (e: ReactMouseEvent<HTMLDivElement>) => {
       const target = e.target as HTMLElement;
       if (target.closest("[data-clip-overlay]") || target.closest("[data-resize-handle]")) return;
+      // Trim ended with mouseup outside overlay: no overlay click ran — do not leave suppress refs set.
+      clipTrimHandleJustReleasedRef.current = false;
+      adTrimHandleJustReleasedRef.current = false;
       seekFromClientX(e.clientX);
     },
     [seekFromClientX],
@@ -730,6 +771,10 @@ export const EditorTimeline = forwardRef<EditorTimelineHandle, EditorTimelinePro
 
   const handleClipOverlayClick = useCallback(
     (c: EditorSubClip, isSelected: boolean) => {
+      if (clipTrimHandleJustReleasedRef.current) {
+        clipTrimHandleJustReleasedRef.current = false;
+        return;
+      }
       if (clipBodyDragMovedRef.current) {
         clipBodyDragMovedRef.current = false;
         return;
@@ -747,6 +792,10 @@ export const EditorTimeline = forwardRef<EditorTimelineHandle, EditorTimelinePro
 
   const handleAdOverlayClick = useCallback(
     (ad: EditorAdMarker, isSelected: boolean) => {
+      if (adTrimHandleJustReleasedRef.current) {
+        adTrimHandleJustReleasedRef.current = false;
+        return;
+      }
       if (adBodyDragMovedRef.current) {
         adBodyDragMovedRef.current = false;
         return;
@@ -937,7 +986,7 @@ export const EditorTimeline = forwardRef<EditorTimelineHandle, EditorTimelinePro
                   });
                 }}
                 className={cx(
-                  "absolute top-0 bottom-0 z-[9] select-none touch-none transition-colors",
+                  "absolute top-0 bottom-0 select-none touch-none transition-colors",
                   onResizeAd && "cursor-move",
                   isAdSelected
                     ? "bg-rose-500/32 ring-2 ring-rose-400/55 dark:bg-rose-500/28 dark:ring-rose-400/45"
@@ -947,6 +996,7 @@ export const EditorTimeline = forwardRef<EditorTimelineHandle, EditorTimelinePro
                   left: adLeft,
                   width: Math.max(adWidth, 4),
                   minWidth: 4,
+                  zIndex: markerZIndexByKey.get(`ad:${ad.id}`) ?? 1,
                 }}
                 onMouseEnter={() => setHoverAdId(ad.id)}
                 onMouseLeave={() => setHoverAdId(null)}
@@ -1042,7 +1092,7 @@ export const EditorTimeline = forwardRef<EditorTimelineHandle, EditorTimelinePro
                   });
                 }}
                 className={cx(
-                  "absolute top-0 bottom-0 z-10 flex select-none touch-none items-start justify-center transition-colors",
+                  "absolute top-0 bottom-0 flex select-none touch-none items-start justify-center transition-colors",
                   onResizeClip && "cursor-move",
                   isSelected
                     ? "ring-2 ring-brand-solid bg-blue-500/50"
@@ -1052,6 +1102,7 @@ export const EditorTimeline = forwardRef<EditorTimelineHandle, EditorTimelinePro
                   left,
                   width: Math.max(width, 4),
                   minWidth: 4,
+                  zIndex: markerZIndexByKey.get(`clip:${c.id}`) ?? 1,
                 }}
                 onMouseEnter={() => setHoverClipId(c.id)}
                 onMouseLeave={() => setHoverClipId(null)}
