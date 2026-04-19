@@ -41,6 +41,7 @@ import {
   cloneEditorClipWidget,
   DEFAULT_EDITOR_SUBTITLE_SETTINGS,
   defaultEditorSubClipEncodeFields,
+  normalizeEditorClipTagsList,
 } from "@/types/editor";
 import { uploadEditorPosters } from "@/services/editor-posters.service";
 import { isValidWhisperSubtitlePair } from "@/types/editor-whisper-languages";
@@ -117,7 +118,7 @@ function editorSubClipToStateJsonClip(c: EditorSubClip): EditorStateJsonClip {
     metadata: {
       title: c.title?.trim() ?? "",
       description: c.description?.trim() ?? "",
-      tags: "",
+      tags: normalizeEditorClipTagsList(c.tags ?? []),
     },
     ...(c.posters?.length ? { posters: c.posters } : {}),
     ...(c.verticalCropMode && c.cropWindow ? { cropWindow: { ...c.cropWindow } } : {}),
@@ -710,7 +711,7 @@ export function EditorPage() {
   const handleUpdateClipMetadata = useCallback(
     (
       clipId: string,
-      patch: Pick<EditorSubClip, "title" | "description" | "posters">,
+      patch: Pick<EditorSubClip, "title" | "description" | "posters" | "tags">,
     ) => {
       setClips((prev) =>
         prev.map((c) => (c.id === clipId ? { ...c, ...patch } : c)),

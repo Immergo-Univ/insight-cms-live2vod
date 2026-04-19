@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { ConfigProvider, Select, Tag, theme } from "antd";
 import { Image01, Upload01 } from "@untitledui/icons";
 import { ModalOverlay, Modal, Dialog } from "@/components/application/modals/modal";
 import { CloseButton } from "@/components/base/buttons/close-button";
@@ -7,7 +8,7 @@ import {
   uploadEditorPosters,
 } from "@/services/editor-posters.service";
 import { httpClient } from "@/services/http-client";
-import type { EditorClipPoster, EditorSubClip } from "@/types/editor";
+import { normalizeEditorClipTagsList, type EditorClipPoster, type EditorSubClip } from "@/types/editor";
 import { cx } from "@/utils/cx";
 import { buildThumbnailUrl } from "./editor-constants";
 import { formatTime } from "./editor-timeline";
@@ -26,7 +27,10 @@ interface EditorClipMetadataModalProps {
   /** VOD clip URL for capture-poster thumbnails (same as timeline). */
   clipUrl: string;
   channelId: string;
-  onSave: (clipId: string, patch: Pick<EditorSubClip, "title" | "description" | "posters">) => void;
+  onSave: (
+    clipId: string,
+    patch: Pick<EditorSubClip, "title" | "description" | "posters" | "tags">,
+  ) => void;
   onSeek?: (timeSeconds: number) => void;
   /** When true, all fields are read-only (e.g. clip is encoding). Only Close is available. */
   readOnly?: boolean;
@@ -46,14 +50,26 @@ export function EditorClipMetadataModal({
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [draftPosters, setDraftPosters] = useState<EditorClipPoster[]>([]);
+  const [draftTags, setDraftTags] = useState<string[]>([]);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [antdDark, setAntdDark] = useState(false);
+
+  useEffect(() => {
+    const el = document.documentElement;
+    const sync = () => setAntdDark(el.classList.contains("dark-mode"));
+    sync();
+    const mo = new MutationObserver(sync);
+    mo.observe(el, { attributes: true, attributeFilter: ["class"] });
+    return () => mo.disconnect();
+  }, []);
 
   useEffect(() => {
     if (!isOpen || !clip) return;
     setTitle(clip.title ?? "");
     setDescription(clip.description ?? "");
     setDraftPosters(clonePosters(clip.posters));
+    setDraftTags(normalizeEditorClipTagsList(clip.tags ?? []));
     setUploadError(null);
   }, [isOpen, clip]);
 
@@ -67,9 +83,10 @@ export function EditorClipMetadataModal({
       title: title.slice(0, TITLE_MAX),
       description: description.slice(0, DESCRIPTION_MAX),
       posters: draftPosters,
+      tags: normalizeEditorClipTagsList(draftTags),
     });
     onOpenChange(false);
-  }, [clip, readOnly, title, description, draftPosters, onSave, onOpenChange]);
+  }, [clip, readOnly, title, description, draftPosters, draftTags, onSave, onOpenChange]);
 
   const removePoster = useCallback(
     async (p: EditorClipPoster) => {
@@ -139,7 +156,7 @@ export function EditorClipMetadataModal({
             <CloseButton slot="close" size="xs" label="Close" className="absolute top-3 right-3 z-10" />
             <h2 className="pr-10 text-lg font-semibold text-primary">Clip details</h2>
             <p className="mt-1 text-xs text-tertiary">
-              Title, description, and posters for this sub-clip (order #{clip.order}).
+              Title, description, tags, and posters for this sub-clip (order #{clip.order}).
             </p>
 
             {readOnly ? (
@@ -181,6 +198,46 @@ export function EditorClipMetadataModal({
                 />
                 <span className="text-[10px] text-tertiary">Max {DESCRIPTION_MAX} characters</span>
               </label>
+
+              <div className="flex flex-col gap-1.5">
+                <span className="text-xs font-medium text-secondary">Tags</span>
+                <p className="text-[10px] text-tertiary">
+                  Short labels for search or publishing; each value is stored in the export JSON as a string in{" "}
+                  <code className="rounded bg-secondary px-1 py-0.5 text-[10px]">metadata.tags</code>.
+                </p>
+                {readOnly ? (
+                  draftTags.length === 0 ? (
+                    <span className="text-xs text-tertiary">No tags</span>
+                  ) : (
+                    <div className="flex flex-wrap gap-1">
+                      {draftTags.map((t) => (
+                        <Tag key={t}>{t}</Tag>
+                      ))}
+                    </div>
+                  )
+                ) : (
+                  <ConfigProvider
+                    theme={{
+                      algorithm: antdDark ? theme.darkAlgorithm : theme.defaultAlgorithm,
+                    }}
+                  >
+                    <Select
+                      mode="tags"
+                      value={draftTags}
+                      onChange={(next) => setDraftTags(normalizeEditorClipTagsList(next))}
+                      placeholder="Add tags (Enter or comma)"
+                      disabled={readOnly}
+                      className="w-full"
+                      tokenSeparators={[","]}
+                      styles={{
+                        popup: {
+                          root: { zIndex: 9990 },
+                        },
+                      }}
+                    />
+                  </ConfigProvider>
+                )}
+              </div>
 
               <div className="flex flex-col gap-2">
                 <span className="text-xs font-medium text-secondary">Posters</span>

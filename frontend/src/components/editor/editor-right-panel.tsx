@@ -28,7 +28,7 @@ interface EditorRightPanelProps {
   onRemoveClip: (id: string) => void;
   onUpdateClipMetadata: (
     clipId: string,
-    patch: Pick<EditorSubClip, "title" | "description" | "posters">,
+    patch: Pick<EditorSubClip, "title" | "description" | "posters" | "tags">,
   ) => void;
   onSeek: (timeSeconds: number) => void;
   thumbnailsEnabled: boolean;

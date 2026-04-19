@@ -20,11 +20,41 @@ export interface EditorClipState {
   selectionMode?: EditorSelectionMode;
 }
 
+const EDITOR_CLIP_TAG_MAX_LEN = 64;
+const EDITOR_CLIP_TAGS_MAX = 100;
+
+/**
+ * Normalize clip tags from UI or hydrated JSON: trim, max length, dedupe (case-insensitive), cap count.
+ */
+export function normalizeEditorClipTagsList(raw: unknown): string[] {
+  const items: unknown[] = Array.isArray(raw)
+    ? raw
+    : typeof raw === "string" && raw.trim().length > 0
+      ? raw
+          .split(/[,;]+/)
+          .map((s) => s.trim())
+          .filter(Boolean)
+      : [];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const item of items) {
+    const s = String(item).trim().slice(0, EDITOR_CLIP_TAG_MAX_LEN);
+    if (!s) continue;
+    const k = s.toLowerCase();
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out.push(s);
+    if (out.length >= EDITOR_CLIP_TAGS_MAX) break;
+  }
+  return out;
+}
+
 /** Per-clip / export metadata (title, description, tags). */
 export interface EditorVodMetadata {
   title: string;
   description: string;
-  tags: string;
+  /** Keywords for this output clip (exported as JSON array). */
+  tags: string[];
 }
 
 /**
@@ -195,6 +225,8 @@ export interface EditorSubClip extends EditorSubClipEncodeOptions {
   endTime: number;
   title?: string;
   description?: string;
+  /** Keywords for this output clip; exported under `clips[].metadata.tags`. */
+  tags?: string[];
   posters?: EditorClipPoster[];
 }
 
@@ -272,6 +304,7 @@ export function normalizeEditorSubClip(c: EditorSubClip): EditorSubClip {
     subtitleSettings: c.subtitleSettings
       ? { ...c.subtitleSettings, style: { ...c.subtitleSettings.style } }
       : { ...d.subtitleSettings, style: { ...d.subtitleSettings.style } },
+    tags: c.tags !== undefined ? normalizeEditorClipTagsList(c.tags) : undefined,
     posters: c.posters ? [...c.posters] : undefined,
     widgets: c.widgets?.length ? c.widgets.map(cloneEditorClipWidget) : undefined,
   };

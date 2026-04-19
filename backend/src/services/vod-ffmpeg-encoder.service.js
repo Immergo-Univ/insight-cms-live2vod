@@ -516,7 +516,7 @@ function runFfmpeg(args, shouldCancel) {
 /**
  * @typedef {object} EditorEncodeSpec
  * @property {string} clipUrl
- * @property {Array<{ order: number, startTime: number, endTime: number, metadata?: { title?: string, description?: string, tags?: string }, posters?: unknown[], cropWindow?: { aspectRatio: string, centerX: number }, subtitles?: { enabled: boolean, whisperSourceLanguage?: string, whisperOutputLanguage?: string, languageMode?: string, style?: { fontSizePx?: number, textColor?: string, outlineColor?: string, outlineWidthPx?: number } }, widgets?: unknown[] }>} clips
+ * @property {Array<{ order: number, startTime: number, endTime: number, metadata?: { title?: string, description?: string, tags?: string[] }, posters?: unknown[], cropWindow?: { aspectRatio: string, centerX: number }, subtitles?: { enabled: boolean, whisperSourceLanguage?: string, whisperOutputLanguage?: string, languageMode?: string, style?: { fontSizePx?: number, textColor?: string, outlineColor?: string, outlineWidthPx?: number } }, widgets?: unknown[] }>} clips
  * @property {Array<{ startTime: number, endTime: number }>} [ads]
  * @property {{ aspectRatio: string, centerX: number }} [cropWindow] legacy: applies to all clips if clips[].cropWindow missing
  * @property {{ enabled: boolean, whisperSourceLanguage?: string, whisperOutputLanguage?: string, languageMode?: string, style?: { fontSizePx?: number, textColor?: string, outlineColor?: string, outlineWidthPx?: number } }} [subtitles] legacy: applies to all clips if clips[].subtitles missing
