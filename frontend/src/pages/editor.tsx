@@ -372,6 +372,9 @@ export function EditorPage() {
     if (!clipState?.clipUrl) {
       return [];
     }
+    if (clipState.selectionMode === "realtime") {
+      return [];
+    }
     if (!defaultFullWindowClipIdRef.current) {
       defaultFullWindowClipIdRef.current = crypto.randomUUID();
     }
@@ -389,6 +392,9 @@ export function EditorPage() {
     if (!clipState?.clipUrl) {
       return null;
     }
+    if (clipState.selectionMode === "realtime") {
+      return null;
+    }
     if (!defaultFullWindowClipIdRef.current) {
       defaultFullWindowClipIdRef.current = crypto.randomUUID();
     }
@@ -400,6 +406,8 @@ export function EditorPage() {
   );
   /** Subclip currently playing (from list row Play). Cleared on pause or when play reaches end. */
   const [playingClipId, setPlayingClipId] = useState<string | null>(null);
+  /** Realtime REC: clip id between Mark In and Mark Out (drives preview REC badge only). */
+  const [realtimeRecordingClipId, setRealtimeRecordingClipId] = useState<string | null>(null);
   const [clipVodEncodeErrors, setClipVodEncodeErrors] = useState<Record<string, string>>({});
   /** After adding a text widget, player overlay selects it (dashed frame + handles). */
   const [clipWidgetFocusRequestId, setClipWidgetFocusRequestId] = useState<string | null>(null);
@@ -608,6 +616,12 @@ export function EditorPage() {
   }, [selectedClipId, clips]);
 
   useEffect(() => {
+    if (realtimeRecordingClipId && !clips.some((c) => c.id === realtimeRecordingClipId)) {
+      setRealtimeRecordingClipId(null);
+    }
+  }, [realtimeRecordingClipId, clips]);
+
+  useEffect(() => {
     if (selectedAdId && !ads.some((a) => a.id === selectedAdId)) {
       setSelectedAdId(null);
     }
@@ -786,12 +800,55 @@ export function EditorPage() {
   const handleRealtimeRec = useCallback(() => {
     if (!clipState || clipState.selectionMode !== "realtime") return;
     const offset = Math.floor(Date.now() / 1000) - clipState.startTime;
-    if (!selectedClipId) {
-      handleMarkIn(offset);
-    } else {
-      handleMarkOut(offset);
+    const nowUnix = Date.now() / 1000;
+
+    if (realtimeRecordingClipId === null) {
+      setSelectedAdId(null);
+      const eff = getEditorEffectiveDuration(clipState, clips, duration, isRealtime, nowUnix);
+      const windowSec = (ZOOM_LEVELS_MS[zoomIndex] ?? ZOOM_LEVELS_MS[0]) / 1000;
+      let end = Math.min(offset + windowSec, eff);
+      if (end <= offset) {
+        end = Math.min(offset + FRAME_DURATION_SEC, eff);
+      }
+      if (end <= offset) return;
+      const id = crypto.randomUUID();
+      setClips((prev) => {
+        const nextOrder =
+          prev.length === 0 ? 1 : Math.max(...prev.map((c) => c.order)) + 1;
+        return [
+          ...prev,
+          {
+            id,
+            order: nextOrder,
+            startTime: offset,
+            endTime: end,
+            ...defaultEditorSubClipEncodeFields(),
+          },
+        ];
+      });
+      setSelectedClipId(id);
+      setRealtimeRecordingClipId(id);
+      return;
     }
-  }, [clipState, selectedClipId, handleMarkIn, handleMarkOut]);
+
+    const rid = realtimeRecordingClipId;
+    setClips((prev) =>
+      prev.map((c) => {
+        if (c.id !== rid) return c;
+        if (offset <= c.startTime) return c;
+        return applySubClipBoundsWithVerticalCrop(c, c.startTime, offset);
+      }),
+    );
+    setRealtimeRecordingClipId(null);
+    setSelectedClipId(null);
+  }, [
+    clipState,
+    realtimeRecordingClipId,
+    clips,
+    duration,
+    isRealtime,
+    zoomIndex,
+  ]);
 
   const handleRemoveClip = useCallback((id: string) => {
     setClips((prev) =>
@@ -920,17 +977,20 @@ export function EditorPage() {
     [handleSeek],
   );
 
-  // Arrow keys: nudge playhead by one frame. Space: play/pause preview (capture so it works while a button is focused).
+  // Arrow keys: nudge playhead by one frame. Space: in realtime mode triggers REC (Mark In/Out); otherwise play/pause.
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement;
       if (target.closest("input, textarea, select, [contenteditable='true']")) return;
 
       if (e.key === " " || e.code === "Space") {
+        if (e.repeat) return;
         e.preventDefault();
         // Stop propagation so focused clip rows (tabIndex + Space = toggle select) do not run after this.
         e.stopPropagation();
-        if (isPlaying) {
+        if (isRealtime) {
+          handleRealtimeRec();
+        } else if (isPlaying) {
           handlePause();
         } else {
           handlePlay();
@@ -957,7 +1017,17 @@ export function EditorPage() {
     };
     window.addEventListener("keydown", handler, true);
     return () => window.removeEventListener("keydown", handler, true);
-  }, [currentTime, duration, selectedClipId, clips, isPlaying, handlePlay, handlePause]);
+  }, [
+    currentTime,
+    duration,
+    selectedClipId,
+    clips,
+    isPlaying,
+    isRealtime,
+    handlePlay,
+    handlePause,
+    handleRealtimeRec,
+  ]);
 
   const handleSaveVerticalCropFromModal = useCallback(
     (
@@ -1289,6 +1359,7 @@ export function EditorPage() {
               onTransportPause={handlePause}
               onTransportStop={handleStop}
               markRangeAwaitingOut={false}
+              realtimeRecordingActive={isRealtime && realtimeRecordingClipId !== null}
                 verticalCropActive={verticalCropActive}
                 verticalCropCenterX={verticalCropCenterX}
                 onVerticalCropCenterXChange={handleVerticalCropCenterX}
@@ -1353,7 +1424,7 @@ export function EditorPage() {
           {isRealtime ? (
             <EditorRealtimeRecBar
               clips={clips}
-              selectedClipId={selectedClipId}
+              awaitingMarkOut={realtimeRecordingClipId !== null}
               onRecPress={handleRealtimeRec}
               timeZone={clientTimeZone}
               clockTick={realtimeTick}

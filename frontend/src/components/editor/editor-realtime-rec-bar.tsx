@@ -3,8 +3,8 @@ import type { EditorSubClip } from "@/types/editor";
 
 interface EditorRealtimeRecBarProps {
   clips: EditorSubClip[];
-  /** When set, REC performs Mark Out on that subclip; otherwise Mark In (new clip). */
-  selectedClipId: string | null;
+  /** True between Mark In and Mark Out for the current REC segment (not mere list selection). */
+  awaitingMarkOut: boolean;
   onRecPress: () => void;
   /** IANA zone from ?tz= (via useTimezone); drives wall-clock label. */
   timeZone: string;
@@ -15,13 +15,13 @@ interface EditorRealtimeRecBarProps {
 
 export function EditorRealtimeRecBar({
   clips,
-  selectedClipId,
+  awaitingMarkOut,
   onRecPress,
   timeZone,
   clockTick,
   isDisabled,
 }: EditorRealtimeRecBarProps) {
-  const awaitingOut = selectedClipId !== null;
+  const awaitingOut = awaitingMarkOut;
   const liveNowLabel = useMemo(
     () =>
       new Intl.DateTimeFormat(undefined, {
@@ -44,11 +44,11 @@ export function EditorRealtimeRecBar({
           </span>
           {awaitingOut ? (
             <span className="text-[11px] font-medium text-amber-600">
-              Press REC again for Mark Out
+              Press REC or Space again for Mark Out — indicator shows on the preview while recording.
             </span>
           ) : (
             <span className="text-[11px] text-tertiary">
-              Press REC for Mark In, then again for Mark Out. Clips: {clips.length}
+              REC or Space: Mark In, then again Mark Out. Clips: {clips.length}
             </span>
           )}
         </div>
@@ -58,7 +58,8 @@ export function EditorRealtimeRecBar({
           disabled={isDisabled}
           className="flex shrink-0 cursor-pointer items-center gap-2 rounded-lg border-2 border-red-600 bg-red-600/15 px-4 py-2.5 text-sm font-bold tracking-wide text-red-700 transition-colors hover:bg-red-600/25 disabled:cursor-not-allowed disabled:opacity-50 dark:text-red-400"
           aria-pressed={awaitingOut}
-          aria-label={awaitingOut ? "Mark out" : "Mark in"}
+          aria-label={awaitingOut ? "Mark out (or press Space)" : "Mark in (or press Space)"}
+          title={awaitingOut ? "Mark Out — or press Space" : "Mark In — or press Space"}
         >
           <span
             className={`size-2.5 rounded-full bg-red-600 ${awaitingOut ? "animate-pulse" : ""}`}

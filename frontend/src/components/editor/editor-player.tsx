@@ -46,6 +46,8 @@ interface EditorPlayerProps {
   onTransportStop?: () => void;
   /** True after Mark In (no clip selected): show hint until Mark Out. */
   markRangeAwaitingOut?: boolean;
+  /** Realtime editor: show pulsing on-screen REC while a clip is open for Mark Out. */
+  realtimeRecordingActive?: boolean;
   /** 9:16 vertical crop preview over the wide frame. */
   verticalCropActive?: boolean;
   verticalCropCenterX?: number;
@@ -92,6 +94,7 @@ export const EditorPlayer = forwardRef<EditorPlayerRef, EditorPlayerProps>(
       onTransportPause,
       onTransportStop,
       markRangeAwaitingOut = false,
+      realtimeRecordingActive = false,
       verticalCropActive = false,
       verticalCropCenterX = 0.5,
       onVerticalCropCenterXChange,
@@ -309,11 +312,26 @@ export const EditorPlayer = forwardRef<EditorPlayerRef, EditorPlayerProps>(
             timelineContext={clipWidgetTimelineContext}
           />
         ) : null}
-        {markRangeAwaitingOut && (
+        {realtimeRecordingActive ? (
+          <div
+            className="pointer-events-none absolute top-3 left-3 z-30 flex items-center gap-2 rounded-md border border-red-500/40 bg-black/60 px-3 py-2 shadow-lg"
+            role="status"
+            aria-live="polite"
+            aria-label="Recording"
+          >
+            <span
+              className="size-3 shrink-0 rounded-full bg-red-600 shadow-[0_0_10px_rgba(220,38,38,0.9)] motion-safe:animate-pulse"
+              aria-hidden
+            />
+            <span className="text-sm font-bold uppercase tracking-[0.2em] text-red-500 motion-safe:animate-pulse">
+              REC
+            </span>
+          </div>
+        ) : markRangeAwaitingOut ? (
           <div className="pointer-events-none absolute top-2 left-1/2 z-20 -translate-x-1/2 rounded-md bg-black/60 px-3 py-1.5 text-xs font-semibold text-white shadow">
             Select the time until Mark Out
           </div>
-        )}
+        ) : null}
         {/* Play / Pause / Stop — bottom-left, same style as Mute */}
         {(onTransportPlay || onTransportPause || onTransportStop) && (
           <div
