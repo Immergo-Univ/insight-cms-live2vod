@@ -7,12 +7,20 @@ import {
   MenuTrigger,
   Popover as AriaPopover,
 } from "react-aria-components";
-import type { EditorAdMarker, EditorSelectionMode, EditorSubClip } from "@/types/editor";
+import type {
+  EditorAdMarker,
+  EditorCropWindow,
+  EditorSelectionMode,
+  EditorSubClip,
+  EditorVerticalCropBreakpoint,
+  EditorVerticalCropPanSettings,
+} from "@/types/editor";
 import type { VodJobRecord } from "@/types/vod-job";
 import { cx } from "@/utils/cx";
 import { EditorAdsList } from "./editor-ads-list";
 import { EditorClipMetadataModal } from "./editor-clip-metadata-modal";
 import { EditorClipsList } from "./editor-clips-list";
+import { EditorVerticalCropBreakpointsModal } from "./editor-vertical-crop-breakpoints-modal";
 
 interface EditorRightPanelProps {
   selectionMode: EditorSelectionMode;
@@ -59,7 +67,15 @@ interface EditorRightPanelProps {
   onSelectAd?: (id: string | null) => void;
   onRemoveAd?: (id: string) => void;
   onAdOrderChange?: (id: string, newIndex: number) => void;
-  onToggleClipVerticalCrop?: (clipId: string) => void;
+  onSaveVerticalCropFromModal?: (
+    clipId: string,
+    patch: {
+      verticalCropMode: boolean;
+      cropWindow: EditorCropWindow | null;
+      verticalCropBreakpoints: EditorVerticalCropBreakpoint[] | undefined;
+      verticalCropPanSettings?: EditorVerticalCropPanSettings | undefined;
+    },
+  ) => void;
   onToggleClipSubtitle?: (clipId: string) => void;
   /** Append a frame bookmark at the current playhead for this sub-clip. */
   onCaptureClipPoster?: (clipId: string) => void;
@@ -102,17 +118,24 @@ export function EditorRightPanel({
   onSelectAd,
   onRemoveAd,
   onAdOrderChange,
-  onToggleClipVerticalCrop,
+  onSaveVerticalCropFromModal,
   onToggleClipSubtitle,
   onCaptureClipPoster,
   onAddTextWidget,
   onAddImageWidgetFromFile,
 }: EditorRightPanelProps) {
   const [clipMetadataId, setClipMetadataId] = useState<string | null>(null);
+  const [verticalCropModalClipId, setVerticalCropModalClipId] = useState<string | null>(null);
 
   const clipForMetadata = useMemo(
     () => (clipMetadataId ? clips.find((c) => c.id === clipMetadataId) ?? null : null),
     [clips, clipMetadataId],
+  );
+
+  const clipForVerticalCropModal = useMemo(
+    () =>
+      verticalCropModalClipId ? clips.find((c) => c.id === verticalCropModalClipId) ?? null : null,
+    [clips, verticalCropModalClipId],
   );
 
   const clipMetadataReadOnly = useMemo(() => {
@@ -137,6 +160,28 @@ export function EditorRightPanel({
     }
   }, [clips, clipMetadataId]);
 
+  useEffect(() => {
+    if (verticalCropModalClipId && !clips.some((c) => c.id === verticalCropModalClipId)) {
+      setVerticalCropModalClipId(null);
+    }
+  }, [clips, verticalCropModalClipId]);
+
+  const verticalCropModalReadOnly = useMemo(() => {
+    if (!verticalCropModalClipId) return false;
+    let best: VodJobRecord | undefined;
+    for (const j of vodJobs) {
+      if (j.editorClipId !== verticalCropModalClipId) continue;
+      if (!best || j.createdAt > best.createdAt) best = j;
+    }
+    if (!best) return false;
+    return (
+      best.status === "queued" ||
+      best.status === "processing" ||
+      best.status === "uploading" ||
+      best.status === "cancelling"
+    );
+  }, [verticalCropModalClipId, vodJobs]);
+
   return (
     <div className="flex h-full min-h-0 w-full flex-col gap-4 bg-primary">
       <section className="flex min-h-0 flex-1 flex-col gap-2 overflow-hidden">
@@ -160,7 +205,10 @@ export function EditorRightPanel({
               parentWindowDurationSec={parentWindowDurationSec}
               onClipTimesCommit={onClipTimesCommit}
               compact
-              onToggleClipVerticalCrop={onToggleClipVerticalCrop}
+              onOpenVerticalCropModal={(clipId) => {
+                onSelectClip(clipId);
+                setVerticalCropModalClipId(clipId);
+              }}
               onToggleClipSubtitle={onToggleClipSubtitle}
               onUpdateClipTitle={(clipId, title) => onUpdateClipMetadata(clipId, { title })}
               onCaptureClipPoster={onCaptureClipPoster}
@@ -266,6 +314,18 @@ export function EditorRightPanel({
         onSeek={onSeek}
         readOnly={clipMetadataReadOnly}
       />
+
+      {onSaveVerticalCropFromModal ? (
+        <EditorVerticalCropBreakpointsModal
+          isOpen={clipForVerticalCropModal !== null}
+          onOpenChange={(open) => {
+            if (!open) setVerticalCropModalClipId(null);
+          }}
+          clip={clipForVerticalCropModal}
+          readOnly={verticalCropModalReadOnly}
+          onSave={onSaveVerticalCropFromModal}
+        />
+      ) : null}
     </div>
   );
 }

@@ -19,7 +19,8 @@ import { putEditorWidgetImagePublic, sanitizeTenantSegment } from "./vod-s3.serv
  */
 export async function saveEditorWidgetImageForEncode(channelId, buffer, originalname, mimetype) {
   const ext = path.extname(originalname || "").toLowerCase();
-  const safeExt = ext === ".png" || ext === ".jpg" || ext === ".jpeg" ? ext : ".png";
+  let safeExt = ext === ".png" || ext === ".jpg" || ext === ".jpeg" || ext === ".gif" ? ext : ".png";
+  if (safeExt === ".png" && /^image\/gif$/i.test(mimetype || "")) safeExt = ".gif";
   const id = randomUUID();
   const seg = sanitizeTenantSegment(channelId);
 

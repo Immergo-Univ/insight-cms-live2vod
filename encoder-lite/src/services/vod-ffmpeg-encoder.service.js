@@ -20,6 +20,19 @@ const VOD_LIBX264_CRF = 28;
 const FFMPEG_PROGRESS_EMIT_MS = 1000;
 
 /**
+ * Extra `-i` paths for widget filter_complex; animated GIF uses `-stream_loop -1` before its `-i`.
+ * @param {Array<string | { path: string, streamLoop?: boolean }>} extraInputs
+ * @returns {string[]}
+ */
+function ffmpegWidgetExtraInputArgs(extraInputs) {
+  return extraInputs.flatMap((entry) => {
+    if (typeof entry === "string") return ["-i", entry];
+    const pre = entry.streamLoop ? ["-stream_loop", "-1"] : [];
+    return [...pre, "-i", entry.path];
+  });
+}
+
+/**
  * Best-effort: max encoded timestamp (seconds) from ffmpeg stderr (key `time=`).
  * @param {string} chunk
  * @returns {number | null}
@@ -111,6 +124,235 @@ export function subtractAdsFromInterval(clipStart, clipEnd, ads) {
     parts.push([cur, clipEnd]);
   }
   return parts;
+}
+
+function clamp01Encoder(n) {
+  const x = Number(n);
+  if (!Number.isFinite(x)) return 0.5;
+  return Math.min(1, Math.max(0, x));
+}
+
+/**
+ * @param {unknown} b
+ * @returns {{ timeSeconds: number, centerX: number } | null}
+ */
+function parseVerticalCropBp(b) {
+  if (!b || typeof b !== "object") return null;
+  const timeSeconds = Number(b.timeSeconds);
+  const centerX = Number(b.centerX);
+  if (!Number.isFinite(timeSeconds) || !Number.isFinite(centerX)) return null;
+  return { timeSeconds, centerX: clamp01Encoder(centerX) };
+}
+
+/**
+ * Sorted keyframes relative to clip start; null = use static cropWindow only.
+ * @param {unknown} clip
+ * @param {number} fallbackCenterX
+ * @returns {Array<{ timeSeconds: number, centerX: number }> | null}
+ */
+function normalizedVerticalCropBreakpointsForEncoder(clip, fallbackCenterX) {
+  const raw = clip?.verticalCropBreakpoints;
+  if (!Array.isArray(raw) || raw.length === 0) return null;
+  const clipStart = Number(clip?.startTime);
+  const clipEnd = Number(clip?.endTime);
+  const dur = Math.max(0, clipEnd - clipStart);
+  const fb = clamp01Encoder(fallbackCenterX);
+  /** @type {Array<{ timeSeconds: number, centerX: number }>} */
+  const list = [];
+  for (const item of raw) {
+    const p = parseVerticalCropBp(item);
+    if (p) list.push({ timeSeconds: Math.min(dur, Math.max(0, p.timeSeconds)), centerX: p.centerX });
+  }
+  if (list.length === 0) return null;
+  list.sort((a, b) => a.timeSeconds - b.timeSeconds);
+  /** @type {Array<{ timeSeconds: number, centerX: number }>} */
+  const dedup = [];
+  for (const p of list) {
+    const last = dedup[dedup.length - 1];
+    if (last && Math.abs(last.timeSeconds - p.timeSeconds) < 1e-4) dedup[dedup.length - 1] = p;
+    else dedup.push(p);
+  }
+  if (dedup[0].timeSeconds > 1e-4) {
+    dedup.unshift({ timeSeconds: 0, centerX: fb });
+    const d2 = [];
+    for (const p of dedup) {
+      const last = d2[d2.length - 1];
+      if (last && Math.abs(last.timeSeconds - p.timeSeconds) < 1e-4) d2[d2.length - 1] = p;
+      else d2.push(p);
+    }
+    dedup.length = 0;
+    dedup.push(...d2);
+  }
+  if (dedup.length <= 1) return null;
+  return dedup;
+}
+
+/**
+ * @param {Array<{ timeSeconds: number, centerX: number }>} sortedBps
+ * @param {number} localT
+ * @param {number} fallbackCx
+ */
+function centerXAtLocalEncoder(sortedBps, localT, fallbackCx) {
+  const t = Number.isFinite(localT) ? localT : 0;
+  let cx = clamp01Encoder(fallbackCx);
+  for (const bp of sortedBps) {
+    if (bp.timeSeconds <= t + 1e-9) cx = bp.centerX;
+    else break;
+  }
+  return cx;
+}
+
+/**
+ * @param {number} u
+ * @param {string} easing
+ */
+function applyVerticalCropPanEasingEncoder(u, easing) {
+  const x = Math.min(1, Math.max(0, u));
+  if (easing === "linear") return x;
+  return x * x * (3 - 2 * x);
+}
+
+/**
+ * @param {Array<{ timeSeconds: number, centerX: number }>} bps
+ * @param {number} localT
+ * @param {number} fallbackCx
+ * @param {string} easing
+ */
+function centerXSmoothAtLocalEncoder(bps, localT, fallbackCx, easing) {
+  const t = Number.isFinite(localT) ? localT : 0;
+  if (!bps || bps.length === 0) return clamp01Encoder(fallbackCx);
+  const first = bps[0];
+  const last = bps[bps.length - 1];
+  if (t <= first.timeSeconds + 1e-9) return first.centerX;
+  if (t >= last.timeSeconds - 1e-9) return last.centerX;
+  for (let i = 0; i < bps.length - 1; i++) {
+    const a = bps[i];
+    const b = bps[i + 1];
+    if (t <= b.timeSeconds + 1e-9) {
+      const span = b.timeSeconds - a.timeSeconds;
+      if (span < 1e-9) return b.centerX;
+      const rawU = (t - a.timeSeconds) / span;
+      const u = applyVerticalCropPanEasingEncoder(rawU, easing);
+      return clamp01Encoder(a.centerX + (b.centerX - a.centerX) * u);
+    }
+  }
+  return last.centerX;
+}
+
+/**
+ * @param {unknown} raw
+ * @returns {{ mode: string, easing: string, motionSampleSec: number }}
+ */
+function normalizeVerticalCropPanSettingsEncoder(raw) {
+  const mode = raw && typeof raw === "object" && raw.mode === "smooth" ? "smooth" : "step";
+  const easing =
+    raw && typeof raw === "object" && raw.easing === "linear" ? "linear" : "ease-in-out";
+  let motionSampleSec = raw && typeof raw === "object" ? Number(raw.motionSampleSec) : NaN;
+  if (!Number.isFinite(motionSampleSec)) motionSampleSec = 0.12;
+  motionSampleSec = Math.min(2, Math.max(0.03, motionSampleSec));
+  return { mode, easing, motionSampleSec };
+}
+
+/**
+ * Subdivide one ad-free [partStart, partEnd] by vertical crop keyframes (step or smooth centerX).
+ * @param {unknown} clip
+ * @param {unknown} spec
+ * @param {number} iw
+ * @param {number} ih
+ * @param {number} partStart
+ * @param {number} partEnd
+ * @returns {Array<{ start: number, end: number, videoFilter: string | null, cropCenterX: number | null }>}
+ */
+function buildVerticalAwareSlices(clip, spec, iw, ih, partStart, partEnd) {
+  const cropWin = clip?.cropWindow ?? spec.cropWindow;
+  const fallbackCx = cropWin && Number.isFinite(Number(cropWin.centerX)) ? Number(cropWin.centerX) : 0.5;
+  const hasVertical =
+    cropWin && cropWin.aspectRatio === "9:16" && Number.isFinite(Number(cropWin.centerX));
+  if (!hasVertical) {
+    return [{ start: partStart, end: partEnd, videoFilter: null, cropCenterX: null }];
+  }
+
+  const bps = normalizedVerticalCropBreakpointsForEncoder(clip, fallbackCx);
+  if (!bps) {
+    const { cropW, cropH, cropX, cropY } = computeNineSixteenStripCrop(iw, ih, fallbackCx);
+    return [
+      {
+        start: partStart,
+        end: partEnd,
+        videoFilter: `crop=${cropW}:${cropH}:${cropX}:${cropY}`,
+        cropCenterX: fallbackCx,
+      },
+    ];
+  }
+
+  const pan = normalizeVerticalCropPanSettingsEncoder(clip?.verticalCropPanSettings);
+  const clipStart = Number(clip.startTime);
+
+  /** @type {number[]} */
+  let points;
+  if (pan.mode === "smooth") {
+    const pointSet = new Set([partStart, partEnd]);
+    for (const bp of bps) {
+      const pt = clipStart + bp.timeSeconds;
+      if (pt > partStart + 1e-4 && pt < partEnd - 1e-4) pointSet.add(pt);
+    }
+    let g = partStart;
+    while (g < partEnd - 1e-6) {
+      g += pan.motionSampleSec;
+      if (g < partEnd - 1e-6) pointSet.add(Math.min(g, partEnd));
+    }
+    points = [...pointSet].sort((a, b) => a - b);
+  } else {
+    const inner = [];
+    for (const bp of bps) {
+      const pt = clipStart + bp.timeSeconds;
+      if (pt > partStart + 1e-4 && pt < partEnd - 1e-4) inner.push(pt);
+    }
+    inner.sort((a, b) => a - b);
+    points = [partStart, ...inner, partEnd];
+  }
+
+  /** @type {Array<{ start: number, end: number, videoFilter: string, cropCenterX: number }>} */
+  const raw = [];
+  for (let i = 0; i < points.length - 1; i++) {
+    const a = points[i];
+    const b = points[i + 1];
+    if (b - a < 1e-4) continue;
+    let cx;
+    if (pan.mode === "smooth") {
+      const midLocal = (a + b) / 2 - clipStart;
+      cx = centerXSmoothAtLocalEncoder(bps, midLocal, fallbackCx, pan.easing);
+    } else {
+      const localAtA = a - clipStart;
+      cx = centerXAtLocalEncoder(bps, localAtA, fallbackCx);
+    }
+    const { cropW, cropH, cropX, cropY } = computeNineSixteenStripCrop(iw, ih, cx);
+    raw.push({
+      start: a,
+      end: b,
+      videoFilter: `crop=${cropW}:${cropH}:${cropX}:${cropY}`,
+      cropCenterX: cx,
+    });
+  }
+  /** @type {Array<{ start: number, end: number, videoFilter: string, cropCenterX: number }>} */
+  const merged = [];
+  for (const seg of raw) {
+    const last = merged[merged.length - 1];
+    if (last && last.videoFilter === seg.videoFilter) last.end = seg.end;
+    else merged.push({ ...seg });
+  }
+  if (merged.length === 0) {
+    const { cropW, cropH, cropX, cropY } = computeNineSixteenStripCrop(iw, ih, fallbackCx);
+    return [
+      {
+        start: partStart,
+        end: partEnd,
+        videoFilter: `crop=${cropW}:${cropH}:${cropX}:${cropY}`,
+        cropCenterX: fallbackCx,
+      },
+    ];
+  }
+  return merged;
 }
 
 /**
@@ -416,7 +658,7 @@ async function runFfmpegSegmentWithOptionalWidgets(opts) {
       String(end),
       "-i",
       inputUrl,
-      ...extraInputs.flatMap((p) => ["-i", p]),
+      ...ffmpegWidgetExtraInputArgs(extraInputs),
       "-filter_complex",
       filterComplex,
       "-map",
@@ -599,7 +841,7 @@ function runFfmpeg(args, shouldCancel, progressOpts) {
 /**
  * @typedef {object} EditorEncodeSpec
  * @property {string} clipUrl
- * @property {Array<{ order: number, startTime: number, endTime: number, metadata?: { title?: string, description?: string, tags?: string[] }, posters?: unknown[], cropWindow?: { aspectRatio: string, centerX: number }, subtitles?: { enabled: boolean, whisperSourceLanguage?: string, whisperOutputLanguage?: string, languageMode?: string, style?: { fontSizePx?: number, textColor?: string, outlineColor?: string, outlineWidthPx?: number } }, widgets?: unknown[] }>} clips
+ * @property {Array<{ order: number, startTime: number, endTime: number, metadata?: { title?: string, description?: string, tags?: string[] }, posters?: unknown[], cropWindow?: { aspectRatio: string, centerX: number }, verticalCropBreakpoints?: Array<{ id?: string, timeSeconds: number, centerX: number }>, verticalCropPanSettings?: { mode?: string, easing?: string, motionSampleSec?: number }, subtitles?: { enabled: boolean, whisperSourceLanguage?: string, whisperOutputLanguage?: string, languageMode?: string, style?: { fontSizePx?: number, textColor?: string, outlineColor?: string, outlineWidthPx?: number } }, widgets?: unknown[] }>} clips
  * @property {Array<{ startTime: number, endTime: number }>} [ads]
  * @property {{ aspectRatio: string, centerX: number }} [cropWindow] legacy: applies to all clips if clips[].cropWindow missing
  * @property {{ enabled: boolean, whisperSourceLanguage?: string, whisperOutputLanguage?: string, languageMode?: string, style?: { fontSizePx?: number, textColor?: string, outlineColor?: string, outlineWidthPx?: number } }} [subtitles] legacy: applies to all clips if clips[].subtitles missing
@@ -628,10 +870,17 @@ export async function encodeEditorJsonToMp4(ctx) {
   const clipsSorted = [...(spec.clips || [])].sort((a, b) => a.order - b.order);
   if (clipsSorted.length === 0) throw new Error("No clips in spec");
 
+  vodEncodeStdout(logP, "ffprobe source dimensions…");
+  const { width: iw, height: ih } = await runFfprobeVideoSize(clipUrl);
+  vodEncodeStdout(logP, `source video ${iw}x${ih}`);
+
   let totalParts = 0;
   for (const clip of clipsSorted) {
     const parts = subtractAdsFromInterval(Number(clip.startTime), Number(clip.endTime), ads);
-    totalParts += parts.length;
+    for (const [s, e] of parts) {
+      const slices = buildVerticalAwareSlices(clip, spec, iw, ih, s, e);
+      totalParts += slices.length;
+    }
   }
   if (totalParts === 0) {
     throw new Error("No segments to encode after applying clips and ad removal");
@@ -641,24 +890,6 @@ export async function encodeEditorJsonToMp4(ctx) {
     logP,
     `plan clips=${clipsSorted.length} playableSegments=${totalParts} ads=${(ads || []).length}`,
   );
-
-  vodEncodeStdout(logP, "ffprobe source dimensions…");
-  const { width: iw, height: ih } = await runFfprobeVideoSize(clipUrl);
-  vodEncodeStdout(logP, `source video ${iw}x${ih}`);
-
-  /**
-   * @param {unknown} clip
-   * @returns {string | null}
-   */
-  function videoFilterForClip(clip) {
-    const cropWin = clip?.cropWindow ?? spec.cropWindow;
-    const centerXNum = cropWin ? Number(cropWin.centerX) : NaN;
-    if (cropWin && cropWin.aspectRatio === "9:16" && Number.isFinite(centerXNum)) {
-      const { cropW, cropH, cropX, cropY } = computeNineSixteenStripCrop(iw, ih, centerXNum);
-      return `crop=${cropW}:${cropH}:${cropX}:${cropY}`;
-    }
-    return null;
-  }
 
   let doneParts = 0;
   /** @type {string[]} */
@@ -683,7 +914,6 @@ export async function encodeEditorJsonToMp4(ctx) {
 
   for (let ci = 0; ci < clipsSorted.length; ci++) {
     const clip = clipsSorted[ci];
-    const videoFilter = videoFilterForClip(clip);
     const parts = subtractAdsFromInterval(Number(clip.startTime), Number(clip.endTime), ads);
     if (parts.length === 0) {
       throw new Error(`Clip order ${clip.order} has no playable segments after ad removal`);
@@ -692,68 +922,59 @@ export async function encodeEditorJsonToMp4(ctx) {
     const widgetN = Array.isArray(clip?.widgets) ? clip.widgets.length : 0;
     vodEncodeStdout(
       logP,
-      `clip order=${clip.order} ci=${ci} segments=${parts.length} widgets=${widgetN} out=${clipOut}`,
+      `clip order=${clip.order} ci=${ci} adParts=${parts.length} widgets=${widgetN} out=${clipOut}`,
     );
 
-    if (parts.length === 1) {
-      if (shouldCancel()) throw new Error("CANCELLED");
-      const [s, e] = parts[0];
-      await runFfmpegSegmentWithOptionalWidgets({
-        inputUrl: clipUrl,
-        start: s,
-        end: e,
-        outputPath: clipOut,
-        shouldCancel,
-        videoFilter: videoFilter || undefined,
-        clip,
-        spec,
-        iw,
-        ih,
-        workDir,
-        segmentTag: `c${ci}_p0`,
-        encodeLogPrefix: logP,
-        tenantId,
-        jobId,
-        onSegmentFraction: makeSegmentFractionEmitter(doneParts),
-      });
-      doneParts += 1;
-      onProgress?.(Math.min(90, Math.round((doneParts / totalParts) * 90)));
-    } else {
-      const segmentFiles = [];
-      for (let i = 0; i < parts.length; i++) {
+    /** @type {string[]} */
+    const piecePaths = [];
+    for (let pi = 0; pi < parts.length; pi++) {
+      const [s, e] = parts[pi];
+      const slices = buildVerticalAwareSlices(clip, spec, iw, ih, s, e);
+      for (let vi = 0; vi < slices.length; vi++) {
         if (shouldCancel()) throw new Error("CANCELLED");
-        const [s, e] = parts[i];
-        const segPath = path.join(workDir, `c${ci}_seg_${i}.mp4`);
+        const sl = slices[vi];
+        const piecePath = path.join(workDir, `c${ci}_p${pi}_v${vi}.mp4`);
+        const baseCw = clip?.cropWindow ?? spec?.cropWindow;
+        const clipPayload =
+          sl.cropCenterX != null && baseCw
+            ? { ...clip, cropWindow: { ...baseCw, aspectRatio: "9:16", centerX: sl.cropCenterX } }
+            : clip;
         await runFfmpegSegmentWithOptionalWidgets({
           inputUrl: clipUrl,
-          start: s,
-          end: e,
-          outputPath: segPath,
+          start: sl.start,
+          end: sl.end,
+          outputPath: piecePath,
           shouldCancel,
-          videoFilter: videoFilter || undefined,
-          clip,
+          videoFilter: sl.videoFilter || undefined,
+          clip: clipPayload,
           spec,
           iw,
           ih,
           workDir,
-          segmentTag: `c${ci}_s${i}`,
+          segmentTag: `c${ci}_p${pi}_v${vi}`,
           encodeLogPrefix: logP,
           tenantId,
           jobId,
           onSegmentFraction: makeSegmentFractionEmitter(doneParts),
         });
-        segmentFiles.push(segPath);
+        piecePaths.push(piecePath);
         doneParts += 1;
         onProgress?.(Math.min(90, Math.round((doneParts / totalParts) * 90)));
       }
+    }
+
+    if (piecePaths.length === 1) {
+      await fs.copyFile(piecePaths[0], clipOut);
+      await fs.unlink(piecePaths[0]).catch(() => {});
+    } else {
       const listPath = path.join(workDir, `concat_${ci}.txt`);
-      const lines = segmentFiles.map((f) => {
+      const lines = piecePaths.map((f) => {
         const abs = path.resolve(f);
         const escaped = abs.replace(/'/g, `'\\''`);
         return `file '${escaped}'`;
       });
       await fs.writeFile(listPath, `${lines.join("\n")}\n`, "utf8");
-      vodEncodeStdout(logP, `concat clip order=${clip.order} files=${segmentFiles.length} -> ${clipOut}`);
+      vodEncodeStdout(logP, `concat clip order=${clip.order} files=${piecePaths.length} -> ${clipOut}`);
       try {
         await runFfmpegConcat({ listPath, outputPath: clipOut, shouldCancel });
       } catch {
@@ -789,6 +1010,9 @@ export async function encodeEditorJsonToMp4(ctx) {
           ],
           shouldCancel,
         );
+      }
+      for (const f of piecePaths) {
+        await fs.unlink(f).catch(() => {});
       }
     }
     clipOutputPaths.push(clipOut);

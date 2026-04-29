@@ -630,7 +630,7 @@ export function EditorClipWidgetsOverlay({
                 <p className="mt-1 text-xs text-tertiary">
                   {editingWidget.kind === "text"
                     ? "Content, color, and size apply to the overlay on the player."
-                    : "Image position and size are adjusted on the preview; offsets control when it appears in the output."}
+                    : "Image or animated GIF (alpha supported): position and size on the preview; offsets control visibility in the encoded output."}
                 </p>
 
                 <div className="mt-4 flex flex-col gap-3">

@@ -21,6 +21,18 @@ const uploadMemory = multer({
   },
 });
 
+/** Clip widget images: allow animated GIF (alpha); larger limit aligned with encoder-lite. */
+const widgetImagesUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 25 * 1024 * 1024, files: 8 },
+  fileFilter: (_req, file, cb) => {
+    const okMime = /^image\/(png|jpeg|gif)$/i.test(file.mimetype || "");
+    const okName = /\.(png|jpe?g|gif)$/i.test(file.originalname || "");
+    if (okMime || okName) cb(null, true);
+    else cb(new Error("Only PNG, JPEG, or GIF images are allowed"));
+  },
+});
+
 function postersUploadMiddleware(req, res, next) {
   const mw = uploadMemory;
   mw.array("posters", 24)(req, res, (err) => {
@@ -30,7 +42,7 @@ function postersUploadMiddleware(req, res, next) {
 }
 
 function widgetImagesUploadMiddleware(req, res, next) {
-  const mw = uploadMemory;
+  const mw = widgetImagesUpload;
   mw.array("widgetImages", 8)(req, res, (err) => {
     if (err) return res.status(400).json({ error: err.message || String(err) });
     next();

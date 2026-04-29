@@ -39,10 +39,20 @@ import type {
   EditorSubtitleSettings,
 } from "@/types/editor";
 import {
+  adjustVerticalBreakpointsAfterClipBoundsChange,
   cloneEditorClipWidget,
   DEFAULT_EDITOR_SUBTITLE_SETTINGS,
   defaultEditorSubClipEncodeFields,
+  EDITOR_VERTICAL_CROP_BP_TIME_MERGE_SEC,
   normalizeEditorClipTagsList,
+  normalizeEditorVerticalCropPanSettings,
+  normalizeVerticalCropBreakpointsForClip,
+  resolveVerticalCropCenterXAtLocalTime,
+} from "@/types/editor";
+import type {
+  EditorCropWindow,
+  EditorVerticalCropBreakpoint,
+  EditorVerticalCropPanSettings,
 } from "@/types/editor";
 import { installEditorConsoleTools } from "@/utils/editor-console-debug";
 import { isValidWhisperSubtitlePair } from "@/types/editor-whisper-languages";
@@ -112,6 +122,22 @@ function parentWallEndUnix(clipState: EditorClipState, subClips: EditorSubClip[]
 
 function editorSubClipToStateJsonClip(c: EditorSubClip): EditorStateJsonClip {
   const st = c.subtitleSettings ?? DEFAULT_EDITOR_SUBTITLE_SETTINGS;
+  const clipDur = Math.max(0, c.endTime - c.startTime);
+  const sortedBps =
+    c.verticalCropMode && c.verticalCropBreakpoints?.length
+      ? normalizeVerticalCropBreakpointsForClip(
+          clipDur,
+          c.verticalCropBreakpoints,
+          c.cropWindow?.centerX ?? 0.5,
+        )
+      : null;
+  const cropForJson =
+    c.verticalCropMode && c.cropWindow
+      ? {
+          ...c.cropWindow,
+          centerX: sortedBps?.[0]?.centerX ?? c.cropWindow.centerX,
+        }
+      : c.cropWindow;
   return {
     order: c.order,
     startTime: c.startTime,
@@ -122,7 +148,17 @@ function editorSubClipToStateJsonClip(c: EditorSubClip): EditorStateJsonClip {
       tags: normalizeEditorClipTagsList(c.tags ?? []),
     },
     ...(c.posters?.length ? { posters: c.posters } : {}),
-    ...(c.verticalCropMode && c.cropWindow ? { cropWindow: { ...c.cropWindow } } : {}),
+    ...(c.verticalCropMode && cropForJson ? { cropWindow: { ...cropForJson } } : {}),
+    ...(sortedBps &&
+    (sortedBps.length > 1 || sortedBps.some((b) => b.timeSeconds > 1e-3)) &&
+    c.verticalCropMode
+      ? { verticalCropBreakpoints: sortedBps.map((b) => ({ ...b })) }
+      : {}),
+    ...(c.verticalCropMode
+      ? {
+          verticalCropPanSettings: normalizeEditorVerticalCropPanSettings(c.verticalCropPanSettings),
+        }
+      : {}),
     ...(c.subtitleMode
       ? {
           subtitles: {
@@ -265,6 +301,31 @@ function getEditorEffectiveDuration(
       : durationSeconds;
 }
 
+function applySubClipBoundsWithVerticalCrop(
+  c: EditorSubClip,
+  newStart: number,
+  newEnd: number,
+): EditorSubClip {
+  if (newEnd <= newStart) return c;
+  const base: EditorSubClip = { ...c, startTime: newStart, endTime: newEnd };
+  if (!c.verticalCropMode) return base;
+  const adj = adjustVerticalBreakpointsAfterClipBoundsChange(
+    c,
+    newStart,
+    newEnd,
+    c.verticalCropBreakpoints,
+    c.cropWindow?.centerX ?? 0.5,
+  );
+  if (!adj?.length) return base;
+  return {
+    ...base,
+    verticalCropBreakpoints: adj,
+    cropWindow: c.cropWindow
+      ? { ...c.cropWindow, centerX: adj[0].centerX }
+      : { aspectRatio: "9:16", centerX: adj[0].centerX },
+  };
+}
+
 export function EditorPage() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -399,7 +460,26 @@ export function EditorPage() {
     setClipWidgetFocusRequestId(null);
   }, []);
   const verticalCropActive = !!(selectedEncodeClip?.verticalCropMode && selectedEncodeClip?.cropWindow);
-  const verticalCropCenterX = selectedEncodeClip?.cropWindow?.centerX ?? 0.5;
+  const verticalCropCenterX = useMemo(() => {
+    const c = selectedEncodeClip;
+    if (!c?.verticalCropMode || !c.cropWindow) return 0.5;
+    const dur = Math.max(0, c.endTime - c.startTime);
+    const localT = Math.min(Math.max(0, currentTime - c.startTime), dur);
+    const bps = c.verticalCropBreakpoints;
+    if (!bps?.length) return c.cropWindow.centerX;
+    const sorted = [...bps].sort((a, b) => a.timeSeconds - b.timeSeconds);
+    const pan = normalizeEditorVerticalCropPanSettings(c.verticalCropPanSettings);
+    return resolveVerticalCropCenterXAtLocalTime(sorted, localT, c.cropWindow.centerX, pan);
+  }, [
+    selectedEncodeClip,
+    selectedEncodeClip?.verticalCropMode,
+    selectedEncodeClip?.cropWindow,
+    selectedEncodeClip?.verticalCropBreakpoints,
+    selectedEncodeClip?.verticalCropPanSettings,
+    selectedEncodeClip?.startTime,
+    selectedEncodeClip?.endTime,
+    currentTime,
+  ]);
   const subtitleOverlayActive = !!(selectedEncodeClip?.subtitleMode);
   const subtitleSettingsForPlayer =
     selectedEncodeClip?.subtitleSettings ?? DEFAULT_EDITOR_SUBTITLE_SETTINGS;
@@ -590,7 +670,7 @@ export function EditorPage() {
           prev.map((c) => {
             if (c.id !== selectedClipId) return c;
             if (timeSeconds >= c.endTime) return c;
-            return { ...c, startTime: timeSeconds };
+            return applySubClipBoundsWithVerticalCrop(c, timeSeconds, c.endTime);
           }),
         );
         return;
@@ -654,6 +734,18 @@ export function EditorPage() {
               ...encodeBase,
               verticalCropMode: true,
               cropWindow: { aspectRatio: "9:16" as const, centerX: 0.5 },
+              verticalCropBreakpoints: [
+                {
+                  id: crypto.randomUUID(),
+                  timeSeconds: 0,
+                  centerX: 0.5,
+                },
+              ],
+              verticalCropPanSettings: {
+                mode: "smooth",
+                easing: "ease-in-out",
+                motionSampleSec: 0.12,
+              },
             }
           : encodeBase;
       const id = crypto.randomUUID();
@@ -684,7 +776,7 @@ export function EditorPage() {
         prev.map((c) => {
           if (c.id !== selectedClipId) return c;
           if (timeSeconds <= c.startTime) return c;
-          return { ...c, endTime: timeSeconds };
+          return applySubClipBoundsWithVerticalCrop(c, c.startTime, timeSeconds);
         }),
       );
     },
@@ -729,7 +821,7 @@ export function EditorPage() {
           const start = newStartTime ?? c.startTime;
           const end = newEndTime ?? c.endTime;
           if (end <= start) return c;
-          return { ...c, startTime: start, endTime: end };
+          return applySubClipBoundsWithVerticalCrop(c, start, end);
         })
       );
     },
@@ -752,7 +844,7 @@ export function EditorPage() {
       if (!cur) return null;
       if (cur.startTime === r.startTime && cur.endTime === r.endTime) return null;
       setClips((prev) =>
-        prev.map((c) => (c.id === clipId ? { ...c, ...r } : c)),
+        prev.map((c) => (c.id === clipId ? applySubClipBoundsWithVerticalCrop(c, r.startTime, r.endTime) : c)),
       );
       playerRef.current?.seek(r.startTime);
       timelineRef.current?.scrollTimeToCenter(r.startTime);
@@ -867,22 +959,25 @@ export function EditorPage() {
     return () => window.removeEventListener("keydown", handler, true);
   }, [currentTime, duration, selectedClipId, clips, isPlaying, handlePlay, handlePause]);
 
-  const handleToggleClipVerticalCrop = useCallback((clipId: string) => {
-    let turningOff = false;
-    setClips((prev) => {
-      const cur = prev.find((c) => c.id === clipId);
-      turningOff = !!(cur?.verticalCropMode);
-      return prev.map((c) => {
-        if (c.id !== clipId) return c;
-        if (turningOff) return { ...c, verticalCropMode: false, cropWindow: null };
-        return {
-          ...c,
-          verticalCropMode: true,
-          cropWindow: c.cropWindow ?? { aspectRatio: "9:16", centerX: 0.5 },
-        };
-      });
-    });
-  }, []);
+  const handleSaveVerticalCropFromModal = useCallback(
+    (
+      clipId: string,
+      patch: {
+        verticalCropMode: boolean;
+        cropWindow: EditorCropWindow | null;
+        verticalCropBreakpoints: EditorVerticalCropBreakpoint[] | undefined;
+        verticalCropPanSettings?: EditorVerticalCropPanSettings | undefined;
+      },
+    ) => {
+      setClips((prev) =>
+        prev.map((c) => {
+          if (c.id !== clipId) return c;
+          return { ...c, ...patch };
+        }),
+      );
+    },
+    [],
+  );
 
   const handleToggleClipSubtitle = useCallback((clipId: string) => {
     let turningOff = false;
@@ -907,21 +1002,43 @@ export function EditorPage() {
   const handleVerticalCropCenterX = useCallback(
     (centerX: number) => {
       if (!selectedClipId) return;
+      const tParent = playerRef.current?.getCurrentTime() ?? currentTime;
       setClips((prev) =>
         prev.map((c) => {
           if (c.id !== selectedClipId) return c;
-          if (c.cropWindow && c.verticalCropMode) {
-            return { ...c, cropWindow: { ...c.cropWindow, centerX } };
+          if (!c.verticalCropMode) return c;
+          const clipLen = Math.max(FRAME_DURATION_SEC * 2, c.endTime - c.startTime);
+          const localT = Math.min(Math.max(0, tParent - c.startTime), clipLen - 1e-6);
+          const existing = [...(c.verticalCropBreakpoints ?? [])];
+          const merge = EDITOR_VERTICAL_CROP_BP_TIME_MERGE_SEC;
+          const matchIdx = existing.findIndex((bp) => Math.abs(bp.timeSeconds - localT) <= merge);
+          let nextBps: EditorVerticalCropBreakpoint[];
+          if (matchIdx >= 0) {
+            nextBps = existing.map((bp, i) => (i === matchIdx ? { ...bp, centerX } : bp));
+          } else {
+            nextBps = [
+              ...existing,
+              { id: crypto.randomUUID(), timeSeconds: localT, centerX },
+            ];
           }
+          const normalized = normalizeVerticalCropBreakpointsForClip(
+            c.endTime - c.startTime,
+            nextBps,
+            c.cropWindow?.centerX ?? 0.5,
+          );
           return {
             ...c,
             verticalCropMode: true,
-            cropWindow: { aspectRatio: "9:16", centerX },
+            cropWindow: {
+              aspectRatio: "9:16" as const,
+              centerX: normalized[0]?.centerX ?? centerX,
+            },
+            verticalCropBreakpoints: normalized,
           };
         }),
       );
     },
-    [selectedClipId],
+    [selectedClipId, currentTime],
   );
 
   const handleSelectedClipSubtitleSettingsChange = useCallback(
@@ -1222,7 +1339,7 @@ export function EditorPage() {
               onSelectAd={handleSelectAd}
               onRemoveAd={handleRemoveAd}
             onAdOrderChange={handleAdOrderChange}
-              onToggleClipVerticalCrop={handleToggleClipVerticalCrop}
+              onSaveVerticalCropFromModal={handleSaveVerticalCropFromModal}
               onToggleClipSubtitle={handleToggleClipSubtitle}
               onCaptureClipPoster={handleCaptureClipPoster}
               onAddTextWidget={handleAddTextWidget}

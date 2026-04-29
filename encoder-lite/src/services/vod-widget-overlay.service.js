@@ -1,7 +1,8 @@
 /**
  * Burn editor clip widgets (text + image) into encoded video using ffmpeg filter_complex.
- * Each widget is materialized as a transparent PNG (text via headless HTML, images via sharp)
- * and composited with overlay only — no ffmpeg text filters.
+ * Each widget is materialized as a transparent PNG (text via headless HTML, still images via sharp)
+ * or as the original GIF file when the widget is an animated GIF (ffmpeg decodes frames + alpha).
+ * Composited with overlay only — no ffmpeg text filters.
  *
  * Layout is normalized 0–1 in the same space as the editor: full frame, or 9:16 strip after crop.
  */
@@ -30,13 +31,14 @@ const MAX_IMAGE_BYTES = 25 * 1024 * 1024;
  * @param {string} opts.fileName
  * @param {string} opts.absPath
  * @param {string} opts.logPrefix
+ * @param {string} [opts.contentType]
  */
 async function uploadAssembledWidgetPngToS3(opts) {
-  const { tenantId, jobId, fileName, absPath, logPrefix } = opts;
+  const { tenantId, jobId, fileName, absPath, logPrefix, contentType } = opts;
   if (!tenantId || !jobId || !config.s3Logos.enabled) return;
   try {
     const body = await fs.readFile(absPath);
-    const up = await putWidgetImagePublic({ tenantId, jobId, fileName, body });
+    const up = await putWidgetImagePublic({ tenantId, jobId, fileName, body, contentType });
     if (up?.publicUrl) vodEncodeStdout(logPrefix, `widget-images (public-read) ${up.publicUrl}`);
   } catch (e) {
     const m = e instanceof Error ? e.message : String(e);
@@ -56,14 +58,41 @@ function posterIdFromEditorApiPath(pathname) {
   return isValidEditorPosterId(id) ? id : null;
 }
 
+function bufferLooksLikeGif(buf) {
+  if (!buf || buf.length < 6) return false;
+  const h = buf.subarray(0, 6).toString("latin1");
+  return h === "GIF87a" || h === "GIF89a";
+}
+
 /**
- * Copy widget image bytes to a temp PNG for ffmpeg `-i` (disk, editor poster API path, or http(s)).
- *
- * @param {{ src?: string, storedRelative?: string }} imageWidget
- * @param {string} destPngPath absolute path ending in .png
- * @returns {Promise<string>} absolute path written (.png)
+ * Detect animated GIF (multiple frames) for encoder overlay path.
+ * @param {Buffer} buf
+ * @returns {Promise<boolean>}
  */
-export async function materializeWidgetImageForFfmpeg(imageWidget, destPngPath) {
+async function bufferIsAnimatedGif(buf) {
+  if (!bufferLooksLikeGif(buf)) return false;
+  try {
+    const sharp = (await import("sharp")).default;
+    const meta = await sharp(buf).metadata();
+    const pages = meta.pages;
+    if (typeof pages === "number" && pages > 1) return true;
+    const delays = meta.delay;
+    if (Array.isArray(delays) && delays.length > 1) return true;
+    return false;
+  } catch {
+    return bufferLooksLikeGif(buf);
+  }
+}
+
+/**
+ * Copy widget image bytes to a temp file for ffmpeg `-i` (disk, editor poster API path, or http(s)).
+ * Still images → PNG with alpha (sharp). Animated GIF → original bytes (.gif) so ffmpeg keeps animation.
+ *
+ * @param {{ src?: string, storedRelative?: string, mime?: string }} imageWidget
+ * @param {string} destBasePath absolute path with any extension (normalized to .png or .gif)
+ * @returns {Promise<{ path: string, isAnimatedGif: boolean }>}
+ */
+export async function materializeWidgetImageForFfmpeg(imageWidget, destBasePath) {
   const srcRaw = typeof imageWidget.src === "string" ? imageWidget.src.trim() : "";
   const storedRelative =
     typeof imageWidget.storedRelative === "string" ? imageWidget.storedRelative.trim() : "";
@@ -145,10 +174,18 @@ export async function materializeWidgetImageForFfmpeg(imageWidget, destPngPath) 
     throw new Error(`Widget image too large (>${MAX_IMAGE_BYTES} bytes)`);
   }
 
-  const out = destPngPath.replace(/\.[^/.]+$/, "") + ".png";
+  const mimeHint = typeof imageWidget.mime === "string" ? imageWidget.mime.trim().toLowerCase() : "";
+  const treatAsGifCandidate = mimeHint === "image/gif" || bufferLooksLikeGif(buf);
+  if (treatAsGifCandidate && (await bufferIsAnimatedGif(buf))) {
+    const outGif = destBasePath.replace(/\.[^/.]+$/, "") + ".gif";
+    await fs.writeFile(outGif, buf);
+    return { path: outGif, isAnimatedGif: true };
+  }
+
+  const out = destBasePath.replace(/\.[^/.]+$/, "") + ".png";
   const sharp = (await import("sharp")).default;
   await sharp(buf).ensureAlpha().png().toFile(out);
-  return out;
+  return { path: out, isAnimatedGif: false };
 }
 
 /**
@@ -180,6 +217,11 @@ function evenPositive(n) {
  */
 function widgetPngScalePadFilter(inputIdx, Pw, Ph, imgLabel) {
   return `[${inputIdx}:v]scale=w=${Pw}:h=${Ph}:flags=fast_bilinear:force_original_aspect_ratio=decrease,pad=${Pw}:${Ph}:(ow-iw)/2:(oh-ih)/2:color=0x00000000[${imgLabel}]`;
+}
+
+/** Animated / palette GIF: normalize to RGBA for overlay with transparency. */
+function widgetGifScalePadFilter(inputIdx, Pw, Ph, imgLabel) {
+  return `[${inputIdx}:v]scale=w=${Pw}:h=${Ph}:flags=fast_bilinear:force_original_aspect_ratio=decrease,pad=${Pw}:${Ph}:(ow-iw)/2:(oh-ih)/2:color=0x00000000,format=rgba[${imgLabel}]`;
 }
 
 /**
@@ -254,7 +296,7 @@ function widgetEnableWindowInSegment(p) {
  * @param {string} [opts.encodeLogPrefix]
  * @param {string} [opts.tenantId] for S3 widget-images uploads
  * @param {string} [opts.jobId] for S3 widget-images uploads
- * @returns {Promise<{ filterComplex: string, extraInputs: string[], tempFiles: string[] }>}
+ * @returns {Promise<{ filterComplex: string, extraInputs: Array<string | { path: string, streamLoop?: boolean }>, tempFiles: string[] }>}
  */
 export async function buildWidgetOverlayFilterComplex(opts) {
   const {
@@ -387,20 +429,30 @@ export async function buildWidgetOverlayFilterComplex(opts) {
         if (!src && !sr) continue;
         const imgPath = path.join(workDir, `widget_img_${tag}_${inputIdx}.png`);
         vodEncodeStdout(encodeLogPrefix, `widget image materialize tag=${tag} idx=${inputIdx}`);
-        const written = await materializeWidgetImageForFfmpeg(raw, imgPath);
+        const { path: written, isAnimatedGif } = await materializeWidgetImageForFfmpeg(raw, imgPath);
+        const assembledExt = isAnimatedGif ? "gif" : "png";
         await uploadAssembledWidgetPngToS3({
           tenantId,
           jobId,
-          fileName: `image_${tag}_${inputIdx}.png`,
+          fileName: `image_${tag}_${inputIdx}.${assembledExt}`,
           absPath: written,
           logPrefix: encodeLogPrefix,
+          contentType: isAnimatedGif ? "image/gif" : "image/png",
         });
         tempFiles.push(written);
-        extraInputs.push(written);
+        extraInputs.push(isAnimatedGif ? { path: written, streamLoop: true } : written);
         const imgLabel = `im${inputIdx}`;
         const outLabel = `wim${inputIdx}`;
-        parts.push(widgetPngScalePadFilter(inputIdx, Pw, Ph, imgLabel));
-        parts.push(`[${last}][${imgLabel}]overlay=${px}:${py}:format=auto${enableOpt}[${outLabel}]`);
+        parts.push(
+          isAnimatedGif
+            ? widgetGifScalePadFilter(inputIdx, Pw, Ph, imgLabel)
+            : widgetPngScalePadFilter(inputIdx, Pw, Ph, imgLabel),
+        );
+        // Looping GIF is an infinite stream; without shortest=1, overlay output never ends and ffmpeg hangs.
+        const overlayShortestOpt = isAnimatedGif ? ":shortest=1" : "";
+        parts.push(
+          `[${last}][${imgLabel}]overlay=${px}:${py}:format=auto${overlayShortestOpt}${enableOpt}[${outLabel}]`,
+        );
         last = outLabel;
         inputIdx += 1;
       }

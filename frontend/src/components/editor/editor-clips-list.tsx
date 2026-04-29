@@ -266,7 +266,8 @@ interface EditorClipsListProps {
   emptyHint?: string;
   /** Narrow sidebar layout (smaller thumbs, tighter row). */
   compact?: boolean;
-  onToggleClipVerticalCrop?: (clipId: string) => void;
+  /** Opens vertical crop modal and selects the clip (parent should focus timeline on this clip). */
+  onOpenVerticalCropModal?: (clipId: string) => void;
   onToggleClipSubtitle?: (clipId: string) => void;
   /** Max time (seconds) in the parent window; used to clamp edited in/out. */
   parentWindowDurationSec: number;
@@ -304,7 +305,7 @@ export function EditorClipsList({
   thumbnailsEnabled = true,
   emptyHint = "Use Mark In / Mark Out to add ranges.",
   compact = false,
-  onToggleClipVerticalCrop,
+  onOpenVerticalCropModal,
   onToggleClipSubtitle,
   parentWindowDurationSec,
   onClipTimesCommit,
@@ -453,12 +454,13 @@ export function EditorClipsList({
                 />
                 <h3 className="pr-10 text-sm font-semibold text-primary">Add image widget</h3>
                 <p className="mt-1 text-xs text-tertiary">
-                  Image is stored like channel posters. You can move and resize it on the player preview.
+                  PNG, JPEG, or animated GIF (including transparent GIFs). Stored for preview and VOD encode; move and
+                  resize on the player.
                 </p>
                 <input
                   ref={imageWidgetFileInputRef}
                   type="file"
-                  accept="image/*"
+                  accept="image/png,image/jpeg,image/gif,.png,.jpg,.jpeg,.gif"
                   className="sr-only"
                   onChange={(e) => {
                     const f = e.target.files?.[0];
@@ -712,13 +714,13 @@ export function EditorClipsList({
                         />
                       </span>
                     ) : null}
-                    {onToggleClipVerticalCrop ? (
+                    {onOpenVerticalCropModal ? (
                       <span onClick={(e) => e.stopPropagation()} className="inline-flex">
                         <EditorVerticalCropButton
                           variant="inline"
                           active={!!c.verticalCropMode}
                           disabled={encodeActive}
-                          onToggle={() => onToggleClipVerticalCrop(c.id)}
+                          onOpen={() => onOpenVerticalCropModal(c.id)}
                         />
                       </span>
                     ) : null}

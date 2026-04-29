@@ -31,6 +31,7 @@ export function editorPostersPostersDirAbs() {
 export function mimeForPosterExt(ext) {
   const e = String(ext).toLowerCase();
   if (e === ".png") return "image/png";
+  if (e === ".gif") return "image/gif";
   return "image/jpeg";
 }
 
@@ -42,7 +43,8 @@ export function mimeForPosterExt(ext) {
  */
 export async function saveEditorPosterFromBuffer(buffer, originalname, mimetype) {
   const ext = path.extname(originalname || "").toLowerCase();
-  const safeExt = ext === ".png" || ext === ".jpg" || ext === ".jpeg" ? ext : ".png";
+  let safeExt = ext === ".png" || ext === ".jpg" || ext === ".jpeg" || ext === ".gif" ? ext : ".png";
+  if (safeExt === ".png" && /^image\/gif$/i.test(mimetype || "")) safeExt = ".gif";
   const id = randomUUID();
   const storedRelative = `posters/${id}${safeExt}`;
   const abs = path.join(config.editorPosters.dataDir, storedRelative);
