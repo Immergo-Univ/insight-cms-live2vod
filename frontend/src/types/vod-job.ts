@@ -49,6 +49,14 @@ export interface VodJobRecord {
   jobKind?: VodJobKind;
   /** Plain transcript from realtime_transcribe jobs when completed. */
   transcriptText?: string;
+  /** OpenAI news article derived from the transcript (English). */
+  transcriptNewsEn?: string;
+  /** OpenAI news article (Spanish). */
+  transcriptNewsEs?: string;
+  /** OpenAI news article (Hebrew). */
+  transcriptNewsHe?: string;
+  /** Set when news generation was attempted but failed; raw transcript may still be present. */
+  transcriptNewsError?: string;
   /** When set, this job was started from the editor for a specific sub-clip row. */
   editorClipId?: string;
   createdAt: string;

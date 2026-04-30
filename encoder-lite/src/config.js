@@ -53,4 +53,10 @@ export const config = {
   vodWidgetFetchTimeoutMs: Math.max(3000, parseInt(process.env.VOD_WIDGET_FETCH_TIMEOUT_MS || "60000", 10) || 60000),
   /** Optional local mirror of editor posters (same layout as backend data/editor-posters). */
   editorPostersDataDir: (process.env.EDITOR_POSTERS_DATA_DIR || "").trim(),
+  /** OpenAI API key for post-transcript news drafting (realtime transcribe jobs). Env: OPENAI_API_KEY */
+  openaiApiKey: (process.env.OPENAI_API_KEY || "").trim(),
+  /** Chat model for news articles after whisper. Env: OPENAI_NEWS_MODEL (default gpt-4o-mini). */
+  openaiNewsModel: (process.env.OPENAI_NEWS_MODEL || "gpt-4o-mini").trim(),
+  /** Request timeout for OpenAI news step (ms). Env: OPENAI_NEWS_TIMEOUT_MS */
+  openaiNewsTimeoutMs: Math.max(30_000, parseInt(process.env.OPENAI_NEWS_TIMEOUT_MS || "120000", 10) || 120_000),
 };

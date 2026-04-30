@@ -14,6 +14,10 @@ const ENCODER_PATCH_KEYS = new Set([
   "outputUrl",
   "outputUrls",
   "transcriptText",
+  "transcriptNewsEn",
+  "transcriptNewsEs",
+  "transcriptNewsHe",
+  "transcriptNewsError",
 ]);
 
 export const encoderCallbackRouter = Router();

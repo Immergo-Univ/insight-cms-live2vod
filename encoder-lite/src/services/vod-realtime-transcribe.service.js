@@ -10,6 +10,8 @@ import { ffmpegInputGlobalArgs } from "./vod-ffmpeg-encoder.service.js";
 import { transcribeWavFileToPlainText } from "./vod-whisper-subtitles.service.js";
 import { vodEncodeStdout } from "../utils/vod-encode-log.js";
 import { spawnFailureMessage } from "../utils/spawn-failure-message.js";
+import { config } from "../config.js";
+import { generateNewsArticlesFromTvTranscript } from "./openai-news-agent.service.js";
 
 const MIN_SEGMENT_SEC = 0.08;
 
@@ -166,13 +168,47 @@ export async function runRealtimeTranscribeOnlyJob(opts) {
       shouldCancel,
     });
 
-    await reportJob({
+    if (shouldCancel()) throw new Error("CANCELLED");
+
+    /** @type {Record<string, unknown>} */
+    const completionPatch = {
       status: "completed",
       progress: 100,
       phase: "completed",
       message: "Transcript ready",
       transcriptText: text,
-    });
+    };
+
+    const apiKey = config.openaiApiKey;
+    if (apiKey) {
+      await reportJob({
+        status: "processing",
+        progress: 72,
+        phase: "generating_news",
+        message: "Drafting news articles (OpenAI)…",
+      });
+      if (shouldCancel()) throw new Error("CANCELLED");
+      try {
+        const news = await generateNewsArticlesFromTvTranscript({
+          apiKey,
+          model: config.openaiNewsModel,
+          transcriptText: text,
+          timeoutMs: config.openaiNewsTimeoutMs,
+        });
+        completionPatch.transcriptNewsEn = news.en;
+        completionPatch.transcriptNewsEs = news.es;
+        completionPatch.transcriptNewsHe = news.he;
+        completionPatch.message = "Transcript and news ready";
+        vodEncodeStdout(`realtime-transcribe openai job=${jobId} en=${news.en.length} es=${news.es.length} he=${news.he.length}`);
+      } catch (e) {
+        const m = e instanceof Error ? e.message : String(e);
+        completionPatch.transcriptNewsError = m.slice(0, 600);
+        completionPatch.message = "Transcript ready (news generation failed)";
+        vodEncodeStdout(`realtime-transcribe openai failed job=${jobId} err=${m.slice(0, 300)}`);
+      }
+    }
+
+    await reportJob(completionPatch);
     vodEncodeStdout(`realtime-transcribe done job=${jobId} chars=${text.length}`);
   } finally {
     await fs.rm(safeWorkDir, { recursive: true, force: true }).catch(() => {});

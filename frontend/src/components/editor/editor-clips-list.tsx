@@ -10,6 +10,7 @@ import {
   Trash01,
 } from "@untitledui/icons";
 import { ModalOverlay, Modal, Dialog } from "@/components/application/modals/modal";
+import { Tabs } from "@/components/application/tabs/tabs";
 import { CloseButton } from "@/components/base/buttons/close-button";
 import {
   Button as AriaButton,
@@ -53,6 +54,73 @@ function vodJobIsActive(status: VodJobRecord["status"]): boolean {
 
 function vodJobCanCancel(status: VodJobRecord["status"]): boolean {
   return vodJobIsActive(status);
+}
+
+function TranscriptAndNewsTabs({ job }: { job: VodJobRecord }) {
+  const raw = job.transcriptText?.trim() ?? "";
+  const newsEn = job.transcriptNewsEn?.trim() ?? "";
+  const newsEs = job.transcriptNewsEs?.trim() ?? "";
+  const newsHe = job.transcriptNewsHe?.trim() ?? "";
+  const newsErr = job.transcriptNewsError?.trim();
+
+  const hasAnyNews = Boolean(newsEn || newsEs || newsHe);
+
+  return (
+    <div className="min-w-0">
+      {newsErr ? (
+        <p className="mb-2 rounded-md border border-error_subtle bg-error-primary/5 px-2 py-1.5 text-xs text-error-primary">
+          {newsErr}
+        </p>
+      ) : null}
+      {!hasAnyNews && !newsErr ? (
+        <p className="mb-2 text-xs text-tertiary">
+          No AI news drafts: configure <span className="rounded bg-secondary px-1 font-mono text-[11px]">OPENAI_API_KEY</span>{" "}
+          on the encoder service to generate English, Spanish, and Hebrew articles from this transcript.
+        </p>
+      ) : null}
+      <Tabs defaultSelectedKey="raw" className="min-w-0 gap-3">
+        <Tabs.List
+          type="underline"
+          orientation="horizontal"
+          fullWidth
+          items={[
+            { id: "raw", label: "Transcript", children: "Transcript" },
+            { id: "en", label: "English", children: "English" },
+            { id: "es", label: "Español", children: "Español" },
+            { id: "he", label: "עברית", children: "עברית" },
+          ]}
+        />
+        <Tabs.Panel id="raw" className="min-h-[100px] pt-1">
+          {raw ? (
+            <pre className="whitespace-pre-wrap font-sans text-sm leading-relaxed text-primary">{raw}</pre>
+          ) : (
+            <p className="text-tertiary">No transcript text.</p>
+          )}
+        </Tabs.Panel>
+        <Tabs.Panel id="en" className="min-h-[100px] pt-1" lang="en">
+          {newsEn ? (
+            <pre className="whitespace-pre-wrap font-sans text-sm leading-relaxed text-primary">{newsEn}</pre>
+          ) : (
+            <p className="text-tertiary">No English news draft.</p>
+          )}
+        </Tabs.Panel>
+        <Tabs.Panel id="es" className="min-h-[100px] pt-1" lang="es">
+          {newsEs ? (
+            <pre className="whitespace-pre-wrap font-sans text-sm leading-relaxed text-primary">{newsEs}</pre>
+          ) : (
+            <p className="text-tertiary">No Spanish news draft.</p>
+          )}
+        </Tabs.Panel>
+        <Tabs.Panel id="he" className="min-h-[100px] pt-1" dir="rtl" lang="he">
+          {newsHe ? (
+            <pre className="whitespace-pre-wrap font-sans text-sm leading-relaxed text-primary">{newsHe}</pre>
+          ) : (
+            <p className="text-tertiary">No Hebrew news draft.</p>
+          )}
+        </Tabs.Panel>
+      </Tabs>
+    </div>
+  );
 }
 
 function firstNonEmptyOutputUrl(job: VodJobRecord): string | null {
@@ -544,7 +612,7 @@ export function EditorClipsList({
           <Modal className="z-[86]">
             <Dialog
               aria-label="Clip transcript"
-              className="mx-4 flex w-full max-w-lg justify-center outline-hidden sm:mx-auto"
+              className="mx-4 flex w-full max-w-2xl justify-center outline-hidden sm:mx-auto"
             >
               <div className="relative max-h-[85vh] w-full overflow-y-auto rounded-xl border border-secondary bg-primary p-5 shadow-xl">
                 <CloseButton
@@ -554,7 +622,7 @@ export function EditorClipsList({
                   className="absolute top-3 right-3 z-10"
                 />
                 <h3 className="pr-10 text-sm font-semibold text-primary">
-                  Transcript
+                  Transcript & news
                   {transcriptModalClip ? (
                     <span className="block text-xs font-normal text-tertiary">
                       {transcriptModalClip.title?.trim() || `Clip ${transcriptModalClip.order}`}
@@ -567,13 +635,18 @@ export function EditorClipsList({
                   ) : transcriptModalJob.status === "failed" ? (
                     <p className="text-error-primary">{transcriptModalJob.error ?? "Transcript failed"}</p>
                   ) : vodJobIsActive(transcriptModalJob.status) ? (
-                    <p className="text-tertiary">
-                      {transcriptModalJob.message ?? transcriptModalJob.phase ?? "Processing…"}
-                    </p>
+                    <div className="space-y-2">
+                      <p className="text-tertiary">
+                        {transcriptModalJob.message ?? transcriptModalJob.phase ?? "Processing…"}
+                      </p>
+                      {transcriptModalJob.phase === "generating_news" ? (
+                        <p className="text-xs text-tertiary">
+                          Drafting broadcast-style news in English, Spanish, and Hebrew (OpenAI)…
+                        </p>
+                      ) : null}
+                    </div>
                   ) : transcriptModalJob.transcriptText?.trim() ? (
-                    <pre className="whitespace-pre-wrap font-sans text-sm leading-relaxed text-primary">
-                      {transcriptModalJob.transcriptText}
-                    </pre>
+                    <TranscriptAndNewsTabs job={transcriptModalJob} />
                   ) : (
                     <p className="text-tertiary">No text returned.</p>
                   )}
