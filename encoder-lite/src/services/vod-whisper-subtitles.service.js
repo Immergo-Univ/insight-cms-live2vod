@@ -322,6 +322,75 @@ async function runWhisperCli(opts) {
 }
 
 /**
+ * @param {string} srtContent
+ * @returns {string}
+ */
+export function parseSrtContentToPlainText(srtContent) {
+  const lines = String(srtContent || "").split(/\r?\n/);
+  const blocks = [];
+  let mode = 0;
+  /** @type {string[]} */
+  let buf = [];
+  for (const line of lines) {
+    if (mode === 0) {
+      if (/^\d+$/.test(line.trim())) mode = 1;
+      continue;
+    }
+    if (mode === 1) {
+      if (line.includes("-->")) mode = 2;
+      continue;
+    }
+    if (mode === 2) {
+      const t = line.trim();
+      if (t === "") {
+        if (buf.length) blocks.push(buf.join(" "));
+        buf = [];
+        mode = 0;
+      } else {
+        buf.push(t);
+      }
+    }
+  }
+  if (buf.length) blocks.push(buf.join(" "));
+  return blocks.join("\n\n").trim();
+}
+
+/**
+ * Transcribe 16 kHz mono WAV with whisper.cpp → plain text (no video).
+ *
+ * @param {object} ctx
+ * @param {string} ctx.wavPath
+ * @param {string} ctx.workDir
+ * @param {object} [ctx.subtitles]
+ * @param {() => boolean} ctx.shouldCancel
+ * @returns {Promise<string>}
+ */
+export async function transcribeWavFileToPlainText(ctx) {
+  const { wavPath, workDir, subtitles, shouldCancel } = ctx;
+  const { source, output } = resolveWhisperLanguages(subtitles);
+  const langArgs = buildWhisperLangArgs(source, output);
+  const whisperCli = resolveWhisperCliPath();
+  const modelPath = resolveWhisperModelPath();
+  const srtBase = path.join(workDir, "rt_whisper_subs");
+  const srtPath = `${srtBase}.srt`;
+  await runWhisperCli({
+    whisperCli,
+    modelPath,
+    wavPath,
+    srtBase,
+    langArgs,
+    shouldCancel,
+  });
+  try {
+    await fs.access(srtPath);
+  } catch {
+    throw new Error("Whisper did not produce an SRT file");
+  }
+  const raw = await fs.readFile(srtPath, "utf8");
+  return parseSrtContentToPlainText(raw);
+}
+
+/**
  * @param {object} opts
  * @param {string} opts.inputMp4
  * @param {string} opts.vf

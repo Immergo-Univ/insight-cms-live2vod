@@ -73,7 +73,7 @@ function ffmpegArgsWithProgressableStderr(args) {
  * @param {string} inputUrl
  * @returns {string[]}
  */
-function ffmpegInputGlobalArgs(inputUrl) {
+export function ffmpegInputGlobalArgs(inputUrl) {
   const out = [];
   if (!/^https?:\/\//i.test(String(inputUrl || ""))) return out;
   out.push("-protocol_whitelist", "file,http,https,tcp,tls,crypto,subfile");

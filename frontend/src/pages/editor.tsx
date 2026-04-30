@@ -20,6 +20,7 @@ import { uploadEditorWidgetImages } from "@/services/editor-widget-images.servic
 import { cancelVodJob, startVodJob } from "@/services/vod.service";
 import { useVodProcessing } from "@/providers/vod-processing-provider";
 import type { VodJobRecord } from "@/types/vod-job";
+import { pickLatestVodEncodeJobForEditorClip } from "@/types/vod-job";
 import {
   FRAME_DURATION_SEC,
   ZOOM_LEVELS_MS,
@@ -216,13 +217,50 @@ function buildSingleClipEditorStateJson(
   };
 }
 
-function pickLatestJobForEditorClip(jobs: VodJobRecord[], clipId: string): VodJobRecord | undefined {
-  let best: VodJobRecord | undefined;
-  for (const j of jobs) {
-    if (j.editorClipId !== clipId) continue;
-    if (!best || j.createdAt > best.createdAt) best = j;
-  }
-  return best;
+/** Spec for encoder-lite: audio extract from origin HLS + whisper only (no MP4). */
+function buildRealtimeTranscribeSpec(
+  clipState: EditorClipState,
+  allClips: EditorSubClip[],
+  clipStartRel: number,
+  clipEndRel: number,
+  nowUnix: number,
+): EditorStateJson {
+  const parentWallEnd = parentWallEndUnix(clipState, allClips, nowUnix);
+  const parentClipUrl = buildClipWindowUrl(clipState, clipState.startTime, parentWallEnd);
+  const st = DEFAULT_EDITOR_SUBTITLE_SETTINGS;
+  return {
+    clipUrl: parentClipUrl,
+    sourceM3u8: clipState.sourceM3u8,
+    startTime: clipState.startTime,
+    endTime: parentWallEnd,
+    posters: [],
+    realtimeTranscribeOnly: true,
+    clips: [
+      {
+        order: 1,
+        startTime: clipStartRel,
+        endTime: clipEndRel,
+        metadata: {
+          title: "",
+          description: "",
+          tags: normalizeEditorClipTagsList([]),
+        },
+        subtitles: {
+          enabled: true,
+          whisperSourceLanguage: st.whisperSourceLanguage,
+          whisperOutputLanguage: st.whisperOutputLanguage,
+          style: { ...st.style },
+        },
+      },
+    ],
+    ads: [],
+    subtitles: {
+      enabled: true,
+      whisperSourceLanguage: st.whisperSourceLanguage,
+      whisperOutputLanguage: st.whisperOutputLanguage,
+      style: { ...st.style },
+    },
+  };
 }
 
 function vodJobIsActive(status: VodJobRecord["status"]): boolean {
@@ -408,6 +446,8 @@ export function EditorPage() {
   const [playingClipId, setPlayingClipId] = useState<string | null>(null);
   /** Realtime REC: clip id between Mark In and Mark Out (drives preview REC badge only). */
   const [realtimeRecordingClipId, setRealtimeRecordingClipId] = useState<string | null>(null);
+  /** When true, completing a REC segment (Mark Out) queues a transcript job on origin HLS audio only. */
+  const [realtimeTranscribeOnRec, setRealtimeTranscribeOnRec] = useState(false);
   const [clipVodEncodeErrors, setClipVodEncodeErrors] = useState<Record<string, string>>({});
   /** After adding a text widget, player overlay selects it (dashed frame + handles). */
   const [clipWidgetFocusRequestId, setClipWidgetFocusRequestId] = useState<string | null>(null);
@@ -755,11 +795,11 @@ export function EditorPage() {
                   centerX: 0.5,
                 },
               ],
-              verticalCropPanSettings: {
+              verticalCropPanSettings: normalizeEditorVerticalCropPanSettings({
                 mode: "smooth",
                 easing: "ease-in-out",
                 motionSampleSec: 0.12,
-              },
+              }),
             }
           : encodeBase;
       const id = crypto.randomUUID();
@@ -832,15 +872,39 @@ export function EditorPage() {
     }
 
     const rid = realtimeRecordingClipId;
-    setClips((prev) =>
-      prev.map((c) => {
-        if (c.id !== rid) return c;
-        if (offset <= c.startTime) return c;
-        return applySubClipBoundsWithVerticalCrop(c, c.startTime, offset);
-      }),
-    );
+    const cur = clips.find((c) => c.id === rid);
+    if (!cur || offset <= cur.startTime) {
+      setRealtimeRecordingClipId(null);
+      setSelectedClipId(null);
+      return;
+    }
+    const clipsAfter = clips.map((c) => {
+      if (c.id !== rid) return c;
+      return applySubClipBoundsWithVerticalCrop(c, c.startTime, offset);
+    });
+    setClips(clipsAfter);
     setRealtimeRecordingClipId(null);
     setSelectedClipId(null);
+
+    if (realtimeTranscribeOnRec && httpClient.getTenantId()) {
+      const nowSec = Date.now() / 1000;
+      const spec = buildRealtimeTranscribeSpec(
+        clipState,
+        clipsAfter,
+        cur.startTime,
+        offset,
+        nowSec,
+      );
+      void (async () => {
+        try {
+          await startVodJob(spec, { editorClipId: rid });
+          await refreshVodJobs();
+        } catch {
+          /* best-effort; WS may still show job if queued */
+          await refreshVodJobs();
+        }
+      })();
+    }
   }, [
     clipState,
     realtimeRecordingClipId,
@@ -848,6 +912,8 @@ export function EditorPage() {
     duration,
     isRealtime,
     zoomIndex,
+    realtimeTranscribeOnRec,
+    refreshVodJobs,
   ]);
 
   const handleRemoveClip = useCallback((id: string) => {
@@ -1200,7 +1266,7 @@ export function EditorPage() {
       const clip = clips.find((c) => c.id === clipId);
       if (!clip) return;
 
-      const existing = pickLatestJobForEditorClip(vodJobsRef.current, clipId);
+      const existing = pickLatestVodEncodeJobForEditorClip(vodJobsRef.current, clipId);
       if (existing && vodJobIsActive(existing.status)) {
         setClipVodEncodeErrors((p) => ({
           ...p,
@@ -1262,7 +1328,7 @@ export function EditorPage() {
 
   const handleClipCancelVodEncode = useCallback(
     async (clipId: string) => {
-      const j = pickLatestJobForEditorClip(vodJobsRef.current, clipId);
+      const j = pickLatestVodEncodeJobForEditorClip(vodJobsRef.current, clipId);
       if (!j || !vodJobCanCancel(j.status)) return;
       try {
         await cancelVodJob(j.id);
@@ -1415,6 +1481,7 @@ export function EditorPage() {
               onCaptureClipPoster={handleCaptureClipPoster}
               onAddTextWidget={handleAddTextWidget}
               onAddImageWidgetFromFile={handleAddImageWidgetFromFile}
+              realtimeTranscriptUi={isRealtime}
           />
           </aside>
         </div>
@@ -1428,6 +1495,8 @@ export function EditorPage() {
               onRecPress={handleRealtimeRec}
               timeZone={clientTimeZone}
               clockTick={realtimeTick}
+              transcribeOnRec={realtimeTranscribeOnRec}
+              onTranscribeOnRecChange={setRealtimeTranscribeOnRec}
             />
           ) : (
             <EditorTimeline

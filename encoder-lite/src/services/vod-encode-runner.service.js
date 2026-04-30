@@ -8,6 +8,7 @@ import os from "os";
 import path from "path";
 import { encodeEditorJsonToMp4 } from "./vod-ffmpeg-encoder.service.js";
 import { putVodMp4 } from "./vod-s3.service.js";
+import { runRealtimeTranscribeOnlyJob } from "./vod-realtime-transcribe.service.js";
 import { transcribeAndBurnSubtitles } from "./vod-whisper-subtitles.service.js";
 import { vodEncodeStdout } from "../utils/vod-encode-log.js";
 import { patchBackendJob } from "./backend-client.service.js";
@@ -168,6 +169,43 @@ export async function runVodEncodeJob(opts) {
         phase: "cancelled",
         message: "Cancelled",
       });
+      clearCancelJob(jobId);
+      return;
+    }
+
+    if (spec?.realtimeTranscribeOnly === true) {
+      startBackendProgressTicker(jobId);
+      try {
+        if (shouldCancel(jobId)) throw new Error("CANCELLED");
+        await runRealtimeTranscribeOnlyJob({
+          jobId,
+          spec,
+          shouldCancel: () => shouldCancel(jobId),
+          reportJob: (patch) => reportJob(jobId, patch),
+        });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        stopBackendProgressTicker(jobId);
+        if (msg === "CANCELLED" || shouldCancel(jobId)) {
+          await reportJob(jobId, {
+            status: "cancelled",
+            progress: 0,
+            phase: "cancelled",
+            message: "Cancelled",
+          });
+        } else {
+          await reportJob(jobId, {
+            status: "failed",
+            progress: 0,
+            phase: "failed",
+            error: msg || "Unknown error",
+            message: msg ? `Failed: ${msg.slice(0, 200)}` : "Failed",
+          });
+        }
+        clearCancelJob(jobId);
+        return;
+      }
+      stopBackendProgressTicker(jobId);
       clearCancelJob(jobId);
       return;
     }

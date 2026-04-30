@@ -481,6 +481,11 @@ export interface EditorStateJson {
   subtitles?: EditorSubtitlesConfig;
   /** @deprecated Use `clips[].metadata` per output clip */
   metadata?: EditorVodMetadata;
+  /**
+   * Encoder-lite: extract audio from origin HLS for clip bounds and run whisper only (no video encode).
+   * Used for realtime editor transcript-after-REC.
+   */
+  realtimeTranscribeOnly?: boolean;
 }
 
 /** Defaults for encode-related fields when creating or hydrating a sub-clip. */

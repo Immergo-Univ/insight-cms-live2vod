@@ -1,5 +1,14 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { Brush01, Camera01, Clapperboard, Edit01, Play, StopCircle, Trash01 } from "@untitledui/icons";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  Brush01,
+  Camera01,
+  Clapperboard,
+  Clipboard,
+  Edit01,
+  Play,
+  StopCircle,
+  Trash01,
+} from "@untitledui/icons";
 import { ModalOverlay, Modal, Dialog } from "@/components/application/modals/modal";
 import { CloseButton } from "@/components/base/buttons/close-button";
 import {
@@ -11,6 +20,10 @@ import {
 } from "react-aria-components";
 import type { EditorSubClip } from "@/types/editor";
 import type { VodJobRecord } from "@/types/vod-job";
+import {
+  pickLatestRealtimeTranscribeJobForEditorClip,
+  pickLatestVodEncodeJobForEditorClip,
+} from "@/types/vod-job";
 import { cx } from "@/utils/cx";
 import { buildMarkOutThumbnailUrl, buildThumbnailUrl, FRAME_DURATION_SEC } from "./editor-constants";
 import { EditorSubtitleButton } from "./editor-subtitle-button";
@@ -28,15 +41,6 @@ const THUMB_HEIGHT_COMPACT = 28;
 
 /** Same cap as metadata modal. */
 const CLIP_TITLE_MAX_LEN = 255;
-
-function pickLatestJobForEditorClip(jobs: VodJobRecord[], clipId: string): VodJobRecord | undefined {
-  let best: VodJobRecord | undefined;
-  for (const j of jobs) {
-    if (j.editorClipId !== clipId) continue;
-    if (!best || j.createdAt > best.createdAt) best = j;
-  }
-  return best;
-}
 
 function vodJobIsActive(status: VodJobRecord["status"]): boolean {
   return (
@@ -63,7 +67,12 @@ function pickLatestCompletedOutputUrlForEditorClip(
   jobs: VodJobRecord[],
   clipId: string,
 ): string | null {
-  const completed = jobs.filter((j) => j.editorClipId === clipId && j.status === "completed");
+  const completed = jobs.filter(
+    (j) =>
+      j.editorClipId === clipId &&
+      j.status === "completed" &&
+      j.jobKind !== "realtime_transcribe",
+  );
   completed.sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
   for (const j of completed) {
     const url = firstNonEmptyOutputUrl(j);
@@ -283,6 +292,8 @@ interface EditorClipsListProps {
   onCaptureClipPoster?: (clipId: string) => void;
   onAddTextWidget?: (clipId: string) => void;
   onAddImageWidgetFromFile?: (clipId: string, file: File) => Promise<void>;
+  /** Realtime session: show transcript viewer control on each clip row. */
+  realtimeTranscriptUi?: boolean;
   vodJobs: VodJobRecord[];
   clipVodEncodeErrors: Record<string, string>;
   onClipStartVodEncode: (clipId: string, includeAds: boolean) => void | Promise<void>;
@@ -313,6 +324,7 @@ export function EditorClipsList({
   onCaptureClipPoster,
   onAddTextWidget,
   onAddImageWidgetFromFile,
+  realtimeTranscriptUi = false,
   vodJobs,
   clipVodEncodeErrors,
   onClipStartVodEncode,
@@ -332,6 +344,19 @@ export function EditorClipsList({
   const [imageWidgetErr, setImageWidgetErr] = useState<string | null>(null);
   const [imageWidgetBusy, setImageWidgetBusy] = useState(false);
   const imageWidgetFileInputRef = useRef<HTMLInputElement>(null);
+  const [transcriptModalClipId, setTranscriptModalClipId] = useState<string | null>(null);
+
+  const transcriptModalClip = useMemo(
+    () => (transcriptModalClipId ? clips.find((x) => x.id === transcriptModalClipId) ?? null : null),
+    [clips, transcriptModalClipId],
+  );
+  const transcriptModalJob = useMemo(
+    () =>
+      transcriptModalClipId
+        ? pickLatestRealtimeTranscribeJobForEditorClip(vodJobs, transcriptModalClipId)
+        : null,
+    [vodJobs, transcriptModalClipId],
+  );
 
   useLayoutEffect(() => {
     if (!titleEditId) return;
@@ -348,8 +373,14 @@ export function EditorClipsList({
   }, [clips, titleEditId]);
 
   useEffect(() => {
+    if (transcriptModalClipId && !clips.some((c) => c.id === transcriptModalClipId)) {
+      setTranscriptModalClipId(null);
+    }
+  }, [clips, transcriptModalClipId]);
+
+  useEffect(() => {
     if (!titleEditId) return;
-    const j = pickLatestJobForEditorClip(vodJobs, titleEditId);
+    const j = pickLatestVodEncodeJobForEditorClip(vodJobs, titleEditId);
     if (j && vodJobIsActive(j.status)) {
       setTitleEditId(null);
     }
@@ -500,6 +531,59 @@ export function EditorClipsList({
         </ModalOverlay>
       ) : null}
 
+      {transcriptModalClipId ? (
+        <ModalOverlay
+          isOpen
+          onOpenChange={(open) => {
+            if (!open) setTranscriptModalClipId(null);
+          }}
+          isDismissable
+          isKeyboardDismissDisabled={false}
+          className="z-[85]"
+        >
+          <Modal className="z-[86]">
+            <Dialog
+              aria-label="Clip transcript"
+              className="mx-4 flex w-full max-w-lg justify-center outline-hidden sm:mx-auto"
+            >
+              <div className="relative max-h-[85vh] w-full overflow-y-auto rounded-xl border border-secondary bg-primary p-5 shadow-xl">
+                <CloseButton
+                  slot="close"
+                  size="xs"
+                  label="Close"
+                  className="absolute top-3 right-3 z-10"
+                />
+                <h3 className="pr-10 text-sm font-semibold text-primary">
+                  Transcript
+                  {transcriptModalClip ? (
+                    <span className="block text-xs font-normal text-tertiary">
+                      {transcriptModalClip.title?.trim() || `Clip ${transcriptModalClip.order}`}
+                    </span>
+                  ) : null}
+                </h3>
+                <div className="mt-3 text-sm text-primary">
+                  {!transcriptModalJob ? (
+                    <p className="text-tertiary">No transcript job for this clip yet. Enable Transcribe on the REC bar and finish a segment.</p>
+                  ) : transcriptModalJob.status === "failed" ? (
+                    <p className="text-error-primary">{transcriptModalJob.error ?? "Transcript failed"}</p>
+                  ) : vodJobIsActive(transcriptModalJob.status) ? (
+                    <p className="text-tertiary">
+                      {transcriptModalJob.message ?? transcriptModalJob.phase ?? "Processing…"}
+                    </p>
+                  ) : transcriptModalJob.transcriptText?.trim() ? (
+                    <pre className="whitespace-pre-wrap font-sans text-sm leading-relaxed text-primary">
+                      {transcriptModalJob.transcriptText}
+                    </pre>
+                  ) : (
+                    <p className="text-tertiary">No text returned.</p>
+                  )}
+                </div>
+              </div>
+            </Dialog>
+          </Modal>
+        </ModalOverlay>
+      ) : null}
+
       <div className="flex flex-col gap-1">
       <p className="shrink-0 text-xs font-medium text-secondary">Clips</p>
       <ul className="flex flex-col gap-1">
@@ -519,7 +603,8 @@ export function EditorClipsList({
           const tw = thumbWidth;
           const th = thumbHeight;
           const posterCount = c.posters?.length ?? 0;
-          const vodJob = pickLatestJobForEditorClip(vodJobs, c.id);
+          const vodJob = pickLatestVodEncodeJobForEditorClip(vodJobs, c.id);
+          const transcribeJob = pickLatestRealtimeTranscribeJobForEditorClip(vodJobs, c.id);
           const encodeActive = !!(vodJob && vodJobIsActive(vodJob.status));
           const encodeFailed = vodJob?.status === "failed";
           const rowEncodeError =
@@ -677,6 +762,27 @@ export function EditorClipsList({
                         className="flex size-8 shrink-0 items-center justify-center rounded-full border-2 border-utility-success-300 bg-utility-success-100 text-utility-success-800 shadow-sm transition-colors hover:bg-utility-success-200 hover:border-utility-success-400"
                       >
                         <Play className="size-3.5" aria-hidden />
+                      </button>
+                    </span>
+                  ) : null}
+                  {realtimeTranscriptUi ? (
+                    <span data-no-row-select onClick={(e) => e.stopPropagation()} className="inline-flex shrink-0">
+                      <button
+                        type="button"
+                        disabled={encodeActive}
+                        onClick={() => setTranscriptModalClipId(c.id)}
+                        title="View transcript"
+                        aria-label="View transcript"
+                        className={cx(
+                          "flex size-8 shrink-0 items-center justify-center rounded-full border border-secondary bg-primary text-fg-quaternary transition-colors",
+                          encodeActive && "cursor-not-allowed opacity-45 hover:bg-primary",
+                          !encodeActive && "hover:bg-secondary hover:text-fg-secondary",
+                          transcribeJob &&
+                            vodJobIsActive(transcribeJob.status) &&
+                            "border-amber-500/80 text-amber-700 dark:text-amber-400",
+                        )}
+                      >
+                        <Clipboard className="size-3.5" aria-hidden />
                       </button>
                     </span>
                   ) : null}

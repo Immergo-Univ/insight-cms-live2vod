@@ -22,6 +22,8 @@ import { vodEncodeStdout } from "../utils/vod-encode-log.js";
  * @property {string[]} [s3Keys]
  * @property {string|null} [outputUrl]
  * @property {(string|null)[]} [outputUrls]
+ * @property {string} [transcriptText] plain text from realtime transcribe-only jobs
+ * @property {'vod_encode'|'realtime_transcribe'} [jobKind]
  * @property {string} [editorClipId] client sub-clip id when job was started from the editor row
  */
 
@@ -102,7 +104,7 @@ function logVodEncodeJobLine(job, suffix) {
 
 /**
  * @param {string} id
- * @param {Partial<Pick<VodJob, 'status' | 'progress' | 'phase' | 'message' | 'error' | 's3Key' | 's3Keys' | 'outputUrl' | 'outputUrls'>>} patch
+ * @param {Partial<Pick<VodJob, 'status' | 'progress' | 'phase' | 'message' | 'error' | 's3Key' | 's3Keys' | 'outputUrl' | 'outputUrls' | 'transcriptText' | 'jobKind'>>} patch
  */
 export function updateJob(id, patch) {
   const job = jobsById.get(id);

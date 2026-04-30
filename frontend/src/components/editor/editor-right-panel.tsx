@@ -81,6 +81,8 @@ interface EditorRightPanelProps {
   onCaptureClipPoster?: (clipId: string) => void;
   onAddTextWidget?: (clipId: string) => void;
   onAddImageWidgetFromFile?: (clipId: string, file: File) => Promise<void>;
+  /** Realtime mode: show per-clip transcript action + modal. */
+  realtimeTranscriptUi?: boolean;
 }
 
 /**
@@ -123,6 +125,7 @@ export function EditorRightPanel({
   onCaptureClipPoster,
   onAddTextWidget,
   onAddImageWidgetFromFile,
+  realtimeTranscriptUi = false,
 }: EditorRightPanelProps) {
   const [clipMetadataId, setClipMetadataId] = useState<string | null>(null);
   const [verticalCropModalClipId, setVerticalCropModalClipId] = useState<string | null>(null);
@@ -143,6 +146,7 @@ export function EditorRightPanel({
     let best: VodJobRecord | undefined;
     for (const j of vodJobs) {
       if (j.editorClipId !== clipMetadataId) continue;
+      if (j.jobKind === "realtime_transcribe") continue;
       if (!best || j.createdAt > best.createdAt) best = j;
     }
     if (!best) return false;
@@ -171,6 +175,7 @@ export function EditorRightPanel({
     let best: VodJobRecord | undefined;
     for (const j of vodJobs) {
       if (j.editorClipId !== verticalCropModalClipId) continue;
+      if (j.jobKind === "realtime_transcribe") continue;
       if (!best || j.createdAt > best.createdAt) best = j;
     }
     if (!best) return false;
@@ -214,6 +219,7 @@ export function EditorRightPanel({
               onCaptureClipPoster={onCaptureClipPoster}
               onAddTextWidget={onAddTextWidget}
               onAddImageWidgetFromFile={onAddImageWidgetFromFile}
+              realtimeTranscriptUi={realtimeTranscriptUi}
               vodJobs={vodJobs}
               clipVodEncodeErrors={clipVodEncodeErrors}
               onClipStartVodEncode={onClipStartVodEncode}

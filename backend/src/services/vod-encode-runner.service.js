@@ -51,6 +51,7 @@ export function startBackgroundVodJob(opts) {
     phase: "queued",
     message: "Queued",
     clipUrl: clipUrlPreview || spec.clipUrl,
+    jobKind: spec?.realtimeTranscribeOnly === true ? "realtime_transcribe" : "vod_encode",
     ...(editorClipId ? { editorClipId } : {}),
   });
 

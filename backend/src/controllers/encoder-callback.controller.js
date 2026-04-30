@@ -13,6 +13,7 @@ const ENCODER_PATCH_KEYS = new Set([
   "s3Keys",
   "outputUrl",
   "outputUrls",
+  "transcriptText",
 ]);
 
 export const encoderCallbackRouter = Router();
