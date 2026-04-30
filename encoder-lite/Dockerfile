@@ -10,8 +10,9 @@ RUN apk add --no-cache \
     perl \
     wget
 WORKDIR /opt/whisper-src
+# GGML_NATIVE=OFF avoids SIGILL when the image runs on a CPU older or different from the build host (CI vs prod, QEMU, etc.).
 RUN git clone --depth 1 https://github.com/ggerganov/whisper.cpp.git . \
-    && cmake -B build -DCMAKE_BUILD_TYPE=Release \
+    && cmake -B build -DCMAKE_BUILD_TYPE=Release -DGGML_NATIVE=OFF \
     && cmake --build build --config Release -j"$(nproc)" --target whisper-cli
 RUN sh ./models/download-ggml-model.sh base
 RUN mkdir -p /out/bin /out/lib /out/models \
