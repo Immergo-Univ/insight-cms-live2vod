@@ -9,6 +9,7 @@ import { spawn } from "child_process";
 import { ffmpegInputGlobalArgs } from "./vod-ffmpeg-encoder.service.js";
 import { transcribeWavFileToPlainText } from "./vod-whisper-subtitles.service.js";
 import { vodEncodeStdout } from "../utils/vod-encode-log.js";
+import { spawnFailureMessage } from "../utils/spawn-failure-message.js";
 
 const MIN_SEGMENT_SEC = 0.08;
 
@@ -37,7 +38,7 @@ function runFfmpegArgs(args, shouldCancel) {
       clearInterval(check);
       reject(err);
     });
-    proc.on("close", (code) => {
+    proc.on("close", (code, signal) => {
       clearInterval(check);
       if (shouldCancel()) {
         reject(new Error("CANCELLED"));
@@ -45,8 +46,13 @@ function runFfmpegArgs(args, shouldCancel) {
       }
       if (code === 0) resolve();
       else {
-        const tail = stderr.trim() || "(no stderr)";
-        reject(new Error(tail.length > 800 ? `${tail.slice(0, 800)}…` : tail || `ffmpeg exited ${code}`));
+        const msg = spawnFailureMessage({
+          commandLabel: "ffmpeg",
+          code: code ?? null,
+          signal: signal ?? null,
+          stderr,
+        });
+        reject(new Error(msg.length > 800 ? `${msg.slice(0, 800)}…` : msg));
       }
     });
   });

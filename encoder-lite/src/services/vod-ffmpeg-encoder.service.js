@@ -7,6 +7,7 @@ import { spawn } from "child_process";
 import fs from "fs/promises";
 import path from "path";
 import { vodEncodeStdout } from "../utils/vod-encode-log.js";
+import { spawnFailureMessage } from "../utils/spawn-failure-message.js";
 import { widgetRenderBrowserRef, widgetRenderBrowserUnref } from "./vod-widget-html2png.service.js";
 import { buildWidgetOverlayFilterComplex } from "./vod-widget-overlay.service.js";
 
@@ -446,9 +447,14 @@ async function runFfprobeVideoSize(inputUrl) {
         }
         reject(err);
       });
-      proc.on("close", (code) => {
+      proc.on("close", (code, signal) => {
         if (code !== 0) {
-          const errText = stderr.trim() || `ffprobe exited with code ${code}`;
+          const errText = spawnFailureMessage({
+            commandLabel: "ffprobe",
+            code: code ?? null,
+            signal: signal ?? null,
+            stderr,
+          });
           console.error(
             "[vod][ffprobe]",
             errText.length > 4000 ? `${errText.slice(0, 4000)}…` : errText,
@@ -819,7 +825,7 @@ function runFfmpeg(args, shouldCancel, progressOpts) {
       }
       reject(err);
     });
-    proc.on("close", (code) => {
+    proc.on("close", (code, signal) => {
       clearInterval(check);
       if (shouldCancel()) {
         reject(new Error("CANCELLED"));
@@ -827,12 +833,17 @@ function runFfmpeg(args, shouldCancel, progressOpts) {
       }
       if (code === 0) resolve();
       else {
-        const tail = stderr.trim() || "(no stderr output)";
+        const msg = spawnFailureMessage({
+          commandLabel: "ffmpeg",
+          code: code ?? null,
+          signal: signal ?? null,
+          stderr,
+        });
         vodEncodeStdout(
-          `ffmpeg exit=${code}`,
-          tail.length > 4000 ? `${tail.slice(0, 4000)}…` : tail,
+          `ffmpeg exit=${code ?? "null"} signal=${signal ?? ""}`,
+          msg.length > 4000 ? `${msg.slice(0, 4000)}…` : msg,
         );
-        reject(new Error(tail.length > 800 ? `${tail.slice(0, 800)}…` : tail || `ffmpeg exited with code ${code}`));
+        reject(new Error(msg.length > 800 ? `${msg.slice(0, 800)}…` : msg));
       }
     });
   });

@@ -6,6 +6,7 @@ import { execFileSync, spawn } from "child_process";
 import { accessSync } from "fs";
 import fs from "fs/promises";
 import path from "path";
+import { spawnFailureMessage } from "../utils/spawn-failure-message.js";
 
 /** Docker image defaults (no env required). */
 const BUNDLED_WHISPER_CLI = "/opt/whisper/whisper-cli";
@@ -135,7 +136,7 @@ function runProc(cmd, args, shouldCancel) {
       }
       reject(err);
     });
-    proc.on("close", (code) => {
+    proc.on("close", (code, signal) => {
       clearInterval(check);
       if (shouldCancel()) {
         reject(new Error("CANCELLED"));
@@ -143,10 +144,15 @@ function runProc(cmd, args, shouldCancel) {
       }
       if (code === 0) resolve();
       else {
-        const tail = stderr.trim() || "(no stderr output)";
         const label = path.basename(cmd);
-        console.error(`[vod][${label}] exit=${code}`, tail.length > 4000 ? `${tail.slice(0, 4000)}…` : tail);
-        reject(new Error(tail.length > 800 ? `${tail.slice(0, 800)}…` : tail || `${label} exited with code ${code}`));
+        const msg = spawnFailureMessage({
+          commandLabel: label,
+          code: code ?? null,
+          signal: signal ?? null,
+          stderr,
+        });
+        console.error(`[vod][${label}] exit=${code ?? "null"} signal=${signal ?? ""}`, msg.length > 4000 ? `${msg.slice(0, 4000)}…` : msg);
+        reject(new Error(msg.length > 800 ? `${msg.slice(0, 800)}…` : msg));
       }
     });
   });
