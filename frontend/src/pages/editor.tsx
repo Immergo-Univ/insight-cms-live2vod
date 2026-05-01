@@ -25,6 +25,7 @@ import {
   FRAME_DURATION_SEC,
   ZOOM_LEVELS_MS,
 } from "@/components/editor/editor-constants";
+import type { RealtimeTranscribeSettings } from "@/components/editor/editor-transcribe-settings-modal";
 import { clampClipTimeRange } from "@/components/editor/editor-timeline";
 import type { EditorPlayerRef, EditorTimelineHandle } from "@/components/editor";
 import { detectAds, getPrecalculatedAds } from "@/services/ads.service";
@@ -60,6 +61,30 @@ import { isValidWhisperSubtitlePair } from "@/types/editor-whisper-languages";
 
 /** Default length for a manually inserted ad slot (seconds). */
 const DEFAULT_NEW_AD_DURATION_SEC = 30;
+
+const RT_TRANSCRIBE_SETTINGS_KEY = "live2vod-rt-transcribe-settings-v1";
+
+function loadRealtimeTranscribeSettings(): RealtimeTranscribeSettings {
+  try {
+    const raw = sessionStorage.getItem(RT_TRANSCRIBE_SETTINGS_KEY);
+    if (!raw) return { speakerDiarization: true, generateNews: true };
+    const p = JSON.parse(raw) as Partial<RealtimeTranscribeSettings>;
+    return {
+      speakerDiarization: p.speakerDiarization !== false,
+      generateNews: p.generateNews !== false,
+    };
+  } catch {
+    return { speakerDiarization: true, generateNews: true };
+  }
+}
+
+function persistRealtimeTranscribeSettings(s: RealtimeTranscribeSettings) {
+  try {
+    sessionStorage.setItem(RT_TRANSCRIBE_SETTINGS_KEY, JSON.stringify(s));
+  } catch {
+    /* ignore */
+  }
+}
 
 /** One sub-clip spanning the full parent window (relative t=0 .. duration). */
 function createDefaultFullWindowSubClip(
@@ -224,6 +249,7 @@ function buildRealtimeTranscribeSpec(
   clipStartRel: number,
   clipEndRel: number,
   nowUnix: number,
+  transcribeSettings: RealtimeTranscribeSettings,
 ): EditorStateJson {
   const parentWallEnd = parentWallEndUnix(clipState, allClips, nowUnix);
   const parentClipUrl = buildClipWindowUrl(clipState, clipState.startTime, parentWallEnd);
@@ -235,6 +261,8 @@ function buildRealtimeTranscribeSpec(
     endTime: parentWallEnd,
     posters: [],
     realtimeTranscribeOnly: true,
+    transcribeSpeakerDiarization: transcribeSettings.speakerDiarization,
+    transcribeGenerateNews: transcribeSettings.generateNews,
     clips: [
       {
         order: 1,
@@ -448,6 +476,13 @@ export function EditorPage() {
   const [realtimeRecordingClipId, setRealtimeRecordingClipId] = useState<string | null>(null);
   /** When true, completing a REC segment (Mark Out) queues a transcript job on origin HLS audio only. */
   const [realtimeTranscribeOnRec, setRealtimeTranscribeOnRec] = useState(false);
+  const [realtimeTranscribeSettings, setRealtimeTranscribeSettings] = useState<RealtimeTranscribeSettings>(() =>
+    loadRealtimeTranscribeSettings(),
+  );
+
+  useEffect(() => {
+    persistRealtimeTranscribeSettings(realtimeTranscribeSettings);
+  }, [realtimeTranscribeSettings]);
   const [clipVodEncodeErrors, setClipVodEncodeErrors] = useState<Record<string, string>>({});
   /** After adding a text widget, player overlay selects it (dashed frame + handles). */
   const [clipWidgetFocusRequestId, setClipWidgetFocusRequestId] = useState<string | null>(null);
@@ -846,10 +881,10 @@ export function EditorPage() {
       setSelectedAdId(null);
       const eff = getEditorEffectiveDuration(clipState, clips, duration, isRealtime, nowUnix);
       const windowSec = (ZOOM_LEVELS_MS[zoomIndex] ?? ZOOM_LEVELS_MS[0]) / 1000;
-      let end = Math.min(offset + windowSec, eff);
-      if (end <= offset) {
-        end = Math.min(offset + FRAME_DURATION_SEC, eff);
-      }
+      // At the live timeline head, `getEditorEffectiveDuration` often yields `eff === offset`, so
+      // `min(offset + windowSec, eff)` becomes `offset` and we bail — REC / Space appear dead after a clip.
+      const effForEnd = Math.max(eff, offset + FRAME_DURATION_SEC);
+      const end = Math.min(offset + windowSec, effForEnd);
       if (end <= offset) return;
       const id = crypto.randomUUID();
       setClips((prev) => {
@@ -894,6 +929,7 @@ export function EditorPage() {
         cur.startTime,
         offset,
         nowSec,
+        realtimeTranscribeSettings,
       );
       void (async () => {
         try {
@@ -913,6 +949,7 @@ export function EditorPage() {
     isRealtime,
     zoomIndex,
     realtimeTranscribeOnRec,
+    realtimeTranscribeSettings,
     refreshVodJobs,
   ]);
 
@@ -1482,6 +1519,7 @@ export function EditorPage() {
               onAddTextWidget={handleAddTextWidget}
               onAddImageWidgetFromFile={handleAddImageWidgetFromFile}
               realtimeTranscriptUi={isRealtime}
+              onVodJobsRefresh={refreshVodJobs}
           />
           </aside>
         </div>
@@ -1497,6 +1535,8 @@ export function EditorPage() {
               clockTick={realtimeTick}
               transcribeOnRec={realtimeTranscribeOnRec}
               onTranscribeOnRecChange={setRealtimeTranscribeOnRec}
+              transcribeSettings={realtimeTranscribeSettings}
+              onTranscribeSettingsChange={setRealtimeTranscribeSettings}
             />
           ) : (
             <EditorTimeline

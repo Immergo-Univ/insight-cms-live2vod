@@ -3,19 +3,16 @@
  * Empty stderr is common when the process is killed or uses illegal instructions before logging.
  *
  * @param {object} p
- * @param {string} p.commandLabel e.g. "ffmpeg", "ffprobe", "whisper-cli"
+ * @param {string} p.commandLabel e.g. "ffmpeg", "ffprobe"
  * @param {number | null} p.code exit code (null if killed)
  * @param {string | null | undefined} p.signal e.g. "SIGKILL"
  * @param {string} [p.stderr]
  * @returns {string}
  */
-function signalHint(signal, commandLabel) {
-  const isWhisper = /whisper/i.test(commandLabel);
+function signalHint(signal) {
   switch (signal) {
     case "SIGILL":
-      return isWhisper
-        ? " Illegal instruction: whisper-cli was usually built with CPU flags the host does not support. Rebuild whisper.cpp with -DGGML_NATIVE=OFF (see encoder-lite Dockerfile) or build the image on the same CPU family as production."
-        : " Illegal instruction: the binary likely targets a newer CPU than this host. Rebuild with portable compiler flags.";
+      return " Illegal instruction: the binary likely targets a newer CPU than this host. Rebuild with portable compiler flags.";
     case "SIGKILL":
       return " Often OOM, timeout, or explicit cancel.";
     case "SIGTERM":
@@ -33,7 +30,7 @@ export function spawnFailureMessage({ commandLabel, code, signal, stderr }) {
     return tail.length > 2000 ? `${tail.slice(0, 2000)}…` : tail;
   }
   if (signal) {
-    const hint = signalHint(signal, commandLabel);
+    const hint = signalHint(signal);
     return `${commandLabel} was terminated by ${signal} with no stderr captured.${hint}`;
   }
   const c = code === null || code === undefined ? "unknown" : String(code);

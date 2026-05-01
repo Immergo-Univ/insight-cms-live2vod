@@ -1,27 +1,140 @@
 /**
- * OpenAI Chat Completions: turn a live-TV ASR transcript into short news articles (EN / ES / HE).
+ * OpenAI Chat Completions: turn a live-TV ASR transcript into structured news (EN / ES / HE).
  */
+
+import {
+  buildOpenAiClipUsageReport,
+  normalizeUsageFromResponseJson,
+  usageStepRow,
+} from "../utils/openai-usage.js";
 
 const OPENAI_CHAT_URL = "https://api.openai.com/v1/chat/completions";
 
 /** Keep user message within a safe size for mini models. */
 const MAX_TRANSCRIPT_CHARS = 18_000;
 
-const SYSTEM_PROMPT = `You are an experienced TV news editor. The user message contains a raw automatic transcript from a LIVE TV channel broadcast (speech-to-text). It may contain errors, repetitions, filler words, unrelated chatter, or garbled phrases.
+const SYSTEM_PROMPT = `You are an experienced TV news editor. The user message contains a raw automatic transcript from a LIVE TV channel (speech-to-text). It may contain errors, repetitions, filler, or garbled phrases.
 
-Your task: write a concise, factual NEWS-STYLE article based only on what the transcript plausibly supports. If the audio is unclear or content is thin, say so briefly—do not invent facts, quotes, or events.
+Your task: produce FINAL NEWS ARTIFACTS for publication—title, summary, poster caption, and body—using ONLY what the transcript plausibly supports. Do not invent facts, quotes, dates, or events.
 
-Style:
-- Short headline is optional inside the body first line if natural.
-- Use short paragraphs separated by a blank line.
-- Attribute statements to "the broadcast" or named speakers only if the transcript clearly names them.
+CRITICAL — output must read as finished journalism, NOT as commentary on the transcript:
+- FORBIDDEN: "the transcript says…", "in the transcription…", "they discussed…" as meta-frame, "se menciona…", "en la transcripción…", meta-summary of the act of speaking.
+- REQUIRED: direct, declarative news voice; headline-quality title; body reads on-air or on a news site.
 
-Output: return ONLY valid JSON with exactly three string keys:
-- "en": full article in English
-- "es": full article in Spanish
-- "he": full article in Hebrew (modern Israeli news Hebrew)
+Per locale you MUST return four string fields (all non-null strings; use "" only if absolutely nothing can be said—then title still a short neutral line like "Audio unclear"):
+- "title": concise headline (max ~120 chars).
+- "description": 1–3 sentence lead / dek for social previews and under-headline summary (plain text, no HTML).
+- "posterCaption": one line for under the hero image (credit, context, or kicker—plain text, no HTML).
+- "htmlBody": main story as HTML only. Allowed tags: <p>, <strong>, <em>, <br/>, <ul>, <ol>, <li>. No attributes except optional class on <p>. No <a>, no <img>, no scripts, no inline styles. At least one <p>.
 
-No markdown code fences, no keys other than en, es, he.`;
+Style: active voice; present or near-present for live TV; name entities only when clearly supported.
+
+Output: return ONLY valid JSON with exactly three object keys "en", "es", "he". Each value is an object with exactly the four string keys: title, description, posterCaption, htmlBody.
+
+No markdown code fences, no other top-level keys.`;
+
+/**
+ * @param {string} html
+ */
+function stripScripts(html) {
+  return String(html ?? "").replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "");
+}
+
+/**
+ * @param {string} html
+ */
+function stripTagsPlain(html) {
+  return String(html ?? "")
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
+ * @param {string} html
+ */
+function sanitizeNewsHtmlBody(html) {
+  let s = stripScripts(String(html ?? "").trim());
+  s = s.replace(/\s+on\w+\s*=/gi, " data-removed=");
+  if (!s) return "<p></p>";
+  return s;
+}
+
+/**
+ * @param {unknown} v
+ * @returns {{ title: string, description: string, posterCaption: string, htmlBody: string }}
+ */
+function normalizeAiLocale(v) {
+  if (typeof v === "string") {
+    const t = v.trim();
+    if (!t) {
+      return {
+        title: "News",
+        description: "",
+        posterCaption: "",
+        htmlBody: "<p></p>",
+      };
+    }
+    const nl = t.indexOf("\n");
+    const title = nl === -1 ? t.slice(0, 120) || "News" : t.slice(0, nl).trim().slice(0, 200) || "News";
+    const rest = (nl === -1 ? t : t.slice(nl + 1)).trim();
+    const paras = rest.split(/\n\s*\n/).filter(Boolean);
+    const inner =
+      paras.length > 0
+        ? paras.map((p) => `<p>${escapeHtmlPlain(p).replace(/\n/g, "<br/>")}</p>`).join("")
+        : `<p>${escapeHtmlPlain(rest || t).replace(/\n/g, "<br/>")}</p>`;
+    return {
+      title,
+      description: "",
+      posterCaption: "",
+      htmlBody: inner || "<p></p>",
+    };
+  }
+  if (!v || typeof v !== "object") {
+    return { title: "News", description: "", posterCaption: "", htmlBody: "<p></p>" };
+  }
+  const o = /** @type {Record<string, unknown>} */ (v);
+  const title = typeof o.title === "string" && o.title.trim() ? o.title.trim().slice(0, 300) : "News";
+  const description = typeof o.description === "string" ? o.description.trim() : "";
+  const posterCaption = typeof o.posterCaption === "string" ? o.posterCaption.trim() : "";
+  const htmlBody = sanitizeNewsHtmlBody(typeof o.htmlBody === "string" ? o.htmlBody : "");
+  return { title, description, posterCaption, htmlBody };
+}
+
+/**
+ * @param {string} s
+ */
+function escapeHtmlPlain(s) {
+  return String(s ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+/**
+ * @param {{ title: string, description: string, posterCaption: string, htmlBody: string }} b
+ */
+function legacyPlainFromBlock(b) {
+  const bodyPlain = stripTagsPlain(b.htmlBody);
+  return [b.title, b.description, b.posterCaption, bodyPlain].filter((x) => x && String(x).trim()).join("\n\n");
+}
+
+/**
+ * @param {string} iso
+ * @returns {{ date: string, time: string }}
+ */
+function wallPartsFromIso(iso) {
+  const d = iso ? new Date(iso) : new Date();
+  if (Number.isNaN(d.getTime())) {
+    const n = new Date();
+    return { date: n.toISOString().slice(0, 10), time: n.toTimeString().slice(0, 5) };
+  }
+  return {
+    date: d.toISOString().slice(0, 10),
+    time: d.toTimeString().slice(0, 5),
+  };
+}
 
 /**
  * @param {object} opts
@@ -29,7 +142,11 @@ No markdown code fences, no keys other than en, es, he.`;
  * @param {string} [opts.model] default gpt-4o-mini
  * @param {string} opts.transcriptText
  * @param {number} [opts.timeoutMs]
- * @returns {Promise<{ en: string, es: string, he: string }>}
+ * @returns {Promise<{
+ *   bundle: { version: number, en: object, es: object, he: object },
+ *   legacyPlain: { en: string, es: string, he: string },
+ *   openaiClipUsage: Record<string, unknown>
+ * }>}
  */
 export async function generateNewsArticlesFromTvTranscript(opts) {
   const { apiKey, model, transcriptText, timeoutMs = 120_000 } = opts;
@@ -47,7 +164,7 @@ export async function generateNewsArticlesFromTvTranscript(opts) {
       { role: "system", content: SYSTEM_PROMPT },
       {
         role: "user",
-        content: `Transcript (may be truncated to ${MAX_TRANSCRIPT_CHARS} characters):\n\n${text.slice(0, MAX_TRANSCRIPT_CHARS)}`,
+        content: `Source material — raw transcript only (may be truncated to ${MAX_TRANSCRIPT_CHARS} characters). Use it internally; your JSON must be standalone news with NO reference to a transcript or "mentions".\n\n${text.slice(0, MAX_TRANSCRIPT_CHARS)}`,
       },
     ],
   };
@@ -75,6 +192,7 @@ export async function generateNewsArticlesFromTvTranscript(opts) {
     } catch {
       throw new Error("OpenAI response was not valid JSON");
     }
+    const usageNorm = normalizeUsageFromResponseJson(data);
     const content = /** @type {any} */ (data)?.choices?.[0]?.message?.content;
     if (typeof content !== "string" || !content.trim()) {
       throw new Error("OpenAI response missing assistant message content");
@@ -87,13 +205,44 @@ export async function generateNewsArticlesFromTvTranscript(opts) {
       throw new Error("Assistant content was not valid JSON");
     }
     const o = /** @type {Record<string, unknown>} */ (parsed && typeof parsed === "object" ? parsed : {});
-    const en = typeof o.en === "string" ? o.en.trim() : "";
-    const es = typeof o.es === "string" ? o.es.trim() : "";
-    const he = typeof o.he === "string" ? o.he.trim() : "";
-    if (!en && !es && !he) {
-      throw new Error("OpenAI returned empty en, es, and he strings");
+    const en = normalizeAiLocale(o.en);
+    const es = normalizeAiLocale(o.es);
+    const he = normalizeAiLocale(o.he);
+    if (
+      !stripTagsPlain(en.htmlBody) &&
+      !stripTagsPlain(es.htmlBody) &&
+      !stripTagsPlain(he.htmlBody)
+    ) {
+      throw new Error("OpenAI returned empty htmlBody for all locales");
     }
-    return { en, es, he };
+    const datelineIso = new Date().toISOString();
+    const { date, time } = wallPartsFromIso(datelineIso);
+    const block = (loc) => ({
+      ...loc,
+      date,
+      time,
+      posterUrl: null,
+      posterDataUrl: null,
+    });
+    const bundle = {
+      version: 1,
+      en: block(en),
+      es: block(es),
+      he: block(he),
+    };
+    const legacyPlain = {
+      en: legacyPlainFromBlock(en),
+      es: legacyPlainFromBlock(es),
+      he: legacyPlainFromBlock(he),
+    };
+    const openaiClipUsage = buildOpenAiClipUsageReport([
+      usageStepRow({
+        step: "news_trilingual_chat",
+        model: body.model,
+        usage: usageNorm,
+      }),
+    ]);
+    return { bundle, legacyPlain, openaiClipUsage };
   } catch (e) {
     if (e && typeof e === "object" && /** @type {any} */ (e).name === "AbortError") {
       throw new Error(`OpenAI request timed out after ${timeoutMs}ms`);

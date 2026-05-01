@@ -27,6 +27,9 @@ import { vodEncodeStdout } from "../utils/vod-encode-log.js";
  * @property {string} [transcriptNewsEs] OpenAI news article (Spanish)
  * @property {string} [transcriptNewsHe] OpenAI news article (Hebrew)
  * @property {string} [transcriptNewsError] when news drafting failed; transcript may still exist
+ * @property {object} [transcriptDiarization] diarized segments + speakerLabels for realtime STT
+ * @property {object} [openaiClipUsage] per-step OpenAI token usage + estimated USD for realtime clip STT/news
+ * @property {object} [transcriptNewsBundle] rich news fields per locale (editor PATCH + public share page)
  * @property {'vod_encode'|'realtime_transcribe'} [jobKind]
  * @property {string} [editorClipId] client sub-clip id when job was started from the editor row
  */
@@ -108,7 +111,7 @@ function logVodEncodeJobLine(job, suffix) {
 
 /**
  * @param {string} id
- * @param {Partial<Pick<VodJob, 'status' | 'progress' | 'phase' | 'message' | 'error' | 's3Key' | 's3Keys' | 'outputUrl' | 'outputUrls' | 'transcriptText' | 'transcriptNewsEn' | 'transcriptNewsEs' | 'transcriptNewsHe' | 'transcriptNewsError' | 'jobKind'>>} patch
+ * @param {Partial<Pick<VodJob, 'status' | 'progress' | 'phase' | 'message' | 'error' | 's3Key' | 's3Keys' | 'outputUrl' | 'outputUrls' | 'transcriptText' | 'transcriptDiarization' | 'transcriptNewsEn' | 'transcriptNewsEs' | 'transcriptNewsHe' | 'transcriptNewsError' | 'openaiClipUsage' | 'transcriptNewsBundle' | 'jobKind'>>} patch
  */
 export function updateJob(id, patch) {
   const job = jobsById.get(id);

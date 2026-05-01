@@ -162,15 +162,15 @@ Optional **debug / CDN**: assembled widget PNGs may be uploaded with **`putWidge
 
 ---
 
-## Subtitles (whisper) after encode
+## Subtitles (OpenAI STT) after encode
 
 If **`clips[].subtitles.enabled`** (or legacy root **`subtitles.enabled`**), encoder-lite:
 
 1. Finishes **video+audio** MP4 per clip.
-2. Runs **whisper.cpp** (via `vod-whisper-subtitles.service.js`) and **burns** subtitles into a new MP4.
+2. Extracts **lightweight mono Opus** from the MP4 with ffmpeg, runs **OpenAI Audio transcription** (with optional chunking under ~10MB and silence-aware split via ffmpeg `silencedetect`), then **burns** the merged SRT into a new MP4 (`vod-openai-audio-stt.service.js`).
 3. Uploads the **final** files.
 
-Progress phases: `transcribing`, `burning_subtitles`. Progress scale is split between ffmpeg and whisper in `vod-encode-runner.service.js`.
+Requires **`OPENAI_API_KEY`** on the encoder. Progress phases: `transcribing`, `burning_subtitles`.
 
 ---
 
@@ -179,7 +179,7 @@ Progress phases: `transcribing`, `burning_subtitles`. Progress scale is split be
 When **`spec.realtimeTranscribeOnly === true`**:
 
 - Encoder-lite **does not** produce an MP4.
-- It uses **`spec.clipUrl`**, **`spec.clips[0].startTime` / `endTime`** (and optional subtitles config) to **extract 16 kHz mono WAV** with ffmpeg (`vod-realtime-transcribe.service.js`), then **whisper** to plain text.
+- It uses **`spec.clipUrl`**, **`spec.clips[0].startTime` / `endTime`** (and optional subtitles config) to **extract lightweight mono Opus** with ffmpeg only (`vod-realtime-transcribe.service.js`); audio files are sent to **OpenAI STT** (never the raw m3u8 URL). Long audio is chunked under ~10MB with silence-aware boundaries, then optional **news** generation runs on the transcript text.
 - Completes with **`PATCH` including `transcriptText`** (and `status: completed`).
 
 Backend sets **`jobKind`: `realtime_transcribe`** vs **`vod_encode`** when creating the job (`vod-encode-runner.service.js`).
@@ -260,6 +260,7 @@ Here the first (and only) output clip keeps `[120.5, 200)` and `[230, 300)` — 
 | ffmpeg plan + concat | `encoder-lite/src/services/vod-ffmpeg-encoder.service.js` |
 | Widget overlays | `encoder-lite/src/services/vod-widget-overlay.service.js` |
 | Realtime transcribe | `encoder-lite/src/services/vod-realtime-transcribe.service.js` |
+| OpenAI STT + subtitle burn | `encoder-lite/src/services/vod-openai-audio-stt.service.js` |
 | PATCH helper | `encoder-lite/src/services/backend-client.service.js` |
 
 ---

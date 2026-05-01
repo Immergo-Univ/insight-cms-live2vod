@@ -1,5 +1,5 @@
 /**
- * Orchestrates a single VOD job: ffmpeg → whisper (optional) → S3 upload, reporting state to backend.
+ * Orchestrates a single VOD job: ffmpeg → OpenAI STT + burn subs (optional) → S3 upload, reporting state to backend.
  */
 
 import fs from "fs/promises";
@@ -9,7 +9,7 @@ import path from "path";
 import { encodeEditorJsonToMp4 } from "./vod-ffmpeg-encoder.service.js";
 import { putVodMp4 } from "./vod-s3.service.js";
 import { runRealtimeTranscribeOnlyJob } from "./vod-realtime-transcribe.service.js";
-import { transcribeAndBurnSubtitles } from "./vod-whisper-subtitles.service.js";
+import { transcribeAndBurnSubtitles } from "./vod-openai-audio-stt.service.js";
 import { vodEncodeStdout } from "../utils/vod-encode-log.js";
 import { patchBackendJob } from "./backend-client.service.js";
 
@@ -143,9 +143,10 @@ async function reportJob(jobId, patch) {
  * @param {string} opts.jobId
  * @param {string} opts.tenantId
  * @param {object} opts.spec
+ * @param {string} [opts.editorClipId] editor sub-clip id (from backend dispatch)
  */
 export async function runVodEncodeJob(opts) {
-  const { jobId, tenantId, spec } = opts;
+  const { jobId, tenantId, spec, editorClipId } = opts;
   const workDir = path.join(os.tmpdir(), `vod-job-${jobId}`);
   const burnSubs = anySubtitlesEnabled(spec);
 
@@ -179,6 +180,8 @@ export async function runVodEncodeJob(opts) {
         if (shouldCancel(jobId)) throw new Error("CANCELLED");
         await runRealtimeTranscribeOnlyJob({
           jobId,
+          tenantId,
+          editorClipId,
           spec,
           shouldCancel: () => shouldCancel(jobId),
           reportJob: (patch) => reportJob(jobId, patch),
@@ -274,8 +277,8 @@ export async function runVodEncodeJob(opts) {
           phase: "transcribing",
           message:
             nClips > 1
-              ? `Transcribing audio (whisper.cpp) — clip ${i + 1}/${nClips}`
-              : "Transcribing audio (whisper.cpp)",
+              ? `Transcribing audio (OpenAI STT) — clip ${i + 1}/${nClips}`
+              : "Transcribing audio (OpenAI STT)",
         });
         const sliceStart = 50 + (i / nClips) * 38;
         const sliceEnd = 50 + ((i + 1) / nClips) * 38;
@@ -292,7 +295,7 @@ export async function runVodEncodeJob(opts) {
               phase === "transcribing"
                 ? nClips > 1
                   ? `Transcribing clip ${i + 1}/${nClips}`
-                  : "Transcribing audio (whisper.cpp)"
+                  : "Transcribing audio (OpenAI STT)"
                 : nClips > 1
                   ? `Burning subtitles (clip ${i + 1}/${nClips})`
                   : "Burning subtitles into video";

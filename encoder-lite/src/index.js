@@ -38,6 +38,11 @@ encoderRouter.post("/jobs", (req, res) => {
   const jobId = typeof req.body?.jobId === "string" ? req.body.jobId.trim() : "";
   const tenantId = typeof req.body?.tenantId === "string" ? req.body.tenantId.trim() : "";
   const spec = req.body?.spec ?? null;
+  const editorClipIdRaw = req.body?.editorClipId;
+  const editorClipId =
+    typeof editorClipIdRaw === "string" && editorClipIdRaw.trim().length > 0
+      ? editorClipIdRaw.trim()
+      : undefined;
   if (!jobId || !tenantId || !spec || typeof spec !== "object" || !spec.clipUrl) {
     return res.status(400).json({
       error: "Expected JSON body: { jobId, tenantId, spec } with spec.clipUrl",
@@ -45,7 +50,7 @@ encoderRouter.post("/jobs", (req, res) => {
   }
   res.status(202).json({ ok: true, jobId });
   queueMicrotask(() => {
-    void runVodEncodeJob({ jobId, tenantId, spec }).catch((e) => {
+    void runVodEncodeJob({ jobId, tenantId, spec, editorClipId }).catch((e) => {
       const m = e instanceof Error ? e.message : String(e);
       console.error(`[encoder] unexpected rejection job=${jobId}`, m);
       if (e instanceof Error && e.stack) console.error(e.stack);

@@ -486,6 +486,10 @@ export interface EditorStateJson {
    * Used for realtime editor transcript-after-REC.
    */
   realtimeTranscribeOnly?: boolean;
+  /** When false, STT uses a non-diarized model (no speaker segments). Default true when omitted. */
+  transcribeSpeakerDiarization?: boolean;
+  /** When false, skip OpenAI news generation for this job. Default true when omitted. */
+  transcribeGenerateNews?: boolean;
 }
 
 /** Defaults for encode-related fields when creating or hydrating a sub-clip. */

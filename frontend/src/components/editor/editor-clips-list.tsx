@@ -25,8 +25,17 @@ import {
   pickLatestRealtimeTranscribeJobForEditorClip,
   pickLatestVodEncodeJobForEditorClip,
 } from "@/types/vod-job";
+import { patchVodJobNewsBundle, patchVodJobTranscriptSpeakers } from "@/services/vod.service";
+import type { TranscriptNewsBundle, TranscriptNewsLocaleBlock } from "@/types/vod-job";
+import { deriveTranscriptNewsBundleFromJob } from "@/utils/transcript-news-bundle";
+import {
+  collectUniqueSpeakerIds,
+  defaultSpeakerDisplayName,
+  rebuildTranscriptPreviewText,
+} from "@/utils/transcript-diarization";
 import { cx } from "@/utils/cx";
 import { buildMarkOutThumbnailUrl, buildThumbnailUrl, FRAME_DURATION_SEC } from "./editor-constants";
+import { TranscriptNewsLocalePanel } from "./transcript-news-locale-panel";
 import { EditorSubtitleButton } from "./editor-subtitle-button";
 import { EditorVerticalCropButton } from "./editor-vertical-crop-button";
 import {
@@ -56,14 +65,117 @@ function vodJobCanCancel(status: VodJobRecord["status"]): boolean {
   return vodJobIsActive(status);
 }
 
-function TranscriptAndNewsTabs({ job }: { job: VodJobRecord }) {
-  const raw = job.transcriptText?.trim() ?? "";
+function vodJobHasDiarizedTranscript(job: VodJobRecord): boolean {
+  const di = job.transcriptDiarization;
+  return Boolean(di && Array.isArray(di.segments) && di.segments.length > 0);
+}
+
+function emptyNewsBlock(): TranscriptNewsLocaleBlock {
+  const d = new Date();
+  return {
+    title: "News",
+    description: "",
+    posterCaption: "",
+    date: d.toISOString().slice(0, 10),
+    time: d.toTimeString().slice(0, 5),
+    posterUrl: null,
+    posterDataUrl: null,
+    htmlBody: "<p></p>",
+  };
+}
+
+function TranscriptAndNewsTabs({
+  job,
+  onVodJobsRefresh,
+  clipUrl,
+  channelId,
+  clipStartTime,
+}: {
+  job: VodJobRecord;
+  onVodJobsRefresh?: () => Promise<void>;
+  clipUrl: string;
+  channelId: string;
+  clipStartTime: number;
+}) {
+  const di = job.transcriptDiarization;
+  const hasDi = vodJobHasDiarizedTranscript(job);
+  const speakerIds = useMemo(() => (hasDi && di ? collectUniqueSpeakerIds(di) : []), [hasDi, di]);
+
+  const [localLabels, setLocalLabels] = useState<Record<string, string>>({});
+  const [saveErr, setSaveErr] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  const defaultPosterUrl = useMemo(
+    () => buildThumbnailUrl(clipUrl, clipStartTime, channelId),
+    [clipUrl, clipStartTime, channelId],
+  );
+
+  const [bundle, setBundle] = useState<TranscriptNewsBundle>(() =>
+    deriveTranscriptNewsBundleFromJob(job, { defaultPosterUrl }),
+  );
+  const [newsSaveErr, setNewsSaveErr] = useState<string | null>(null);
+  const [newsSaving, setNewsSaving] = useState(false);
+
+  useEffect(() => {
+    const base = job.transcriptDiarization?.speakerLabels;
+    setLocalLabels(base && typeof base === "object" ? { ...base } : {});
+    setSaveErr(null);
+  }, [job.id, job.updatedAt, job.transcriptDiarization?.speakerLabels]);
+
+  const mergedDiForPreview = useMemo(() => {
+    if (!hasDi || !di) return null;
+    return {
+      ...di,
+      speakerLabels: { ...(di.speakerLabels ?? {}), ...localLabels },
+    };
+  }, [hasDi, di, localLabels]);
+
+  const raw = useMemo(() => {
+    if (mergedDiForPreview) return rebuildTranscriptPreviewText(mergedDiForPreview);
+    return job.transcriptText?.trim() ?? "";
+  }, [mergedDiForPreview, job.transcriptText]);
+
   const newsEn = job.transcriptNewsEn?.trim() ?? "";
   const newsEs = job.transcriptNewsEs?.trim() ?? "";
   const newsHe = job.transcriptNewsHe?.trim() ?? "";
   const newsErr = job.transcriptNewsError?.trim();
 
   const hasAnyNews = Boolean(newsEn || newsEs || newsHe);
+
+  const handleSaveSpeakers = useCallback(async () => {
+    if (!hasDi || !di || speakerIds.length === 0) return;
+    setSaveErr(null);
+    setSaving(true);
+    try {
+      const transcriptSpeakerLabels: Record<string, string> = {};
+      for (const id of speakerIds) {
+        transcriptSpeakerLabels[id] = (localLabels[id] ?? "").trim();
+      }
+      await patchVodJobTranscriptSpeakers(job.id, transcriptSpeakerLabels);
+      await onVodJobsRefresh?.();
+    } catch (e) {
+      setSaveErr(e instanceof Error ? e.message : "Failed to save speaker names");
+    } finally {
+      setSaving(false);
+    }
+  }, [hasDi, di, speakerIds, localLabels, job.id, onVodJobsRefresh]);
+
+  const handleSaveNews = useCallback(async () => {
+    setNewsSaveErr(null);
+    setNewsSaving(true);
+    try {
+      await patchVodJobNewsBundle(job.id, bundle);
+      await onVodJobsRefresh?.();
+    } catch (e) {
+      setNewsSaveErr(e instanceof Error ? e.message : "Failed to save news");
+    } finally {
+      setNewsSaving(false);
+    }
+  }, [job.id, bundle, onVodJobsRefresh]);
+
+  const enBlock = bundle.en ?? emptyNewsBlock();
+  const esBlock = bundle.es ?? emptyNewsBlock();
+  const heBlock = bundle.he ?? emptyNewsBlock();
 
   return (
     <div className="min-w-0">
@@ -74,9 +186,68 @@ function TranscriptAndNewsTabs({ job }: { job: VodJobRecord }) {
       ) : null}
       {!hasAnyNews && !newsErr ? (
         <p className="mb-2 text-xs text-tertiary">
-          No AI news drafts: configure <span className="rounded bg-secondary px-1 font-mono text-[11px]">OPENAI_API_KEY</span>{" "}
-          on the encoder service to generate English, Spanish, and Hebrew articles from this transcript.
+          No AI news drafts: enable <strong>News tabs</strong> in transcribe settings and configure{" "}
+          <span className="rounded bg-secondary px-1 font-mono text-[11px]">OPENAI_API_KEY</span> on the encoder, or
+          edit cards below manually and save.
         </p>
+      ) : null}
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <p className="text-xs font-medium text-secondary">News cards</p>
+        <button
+          type="button"
+          data-no-row-select
+          disabled={newsSaving}
+          onClick={() => void handleSaveNews()}
+          className="rounded-lg border border-secondary bg-secondary px-3 py-1.5 text-xs font-medium text-primary hover:bg-tertiary disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {newsSaving ? "Saving…" : "Save news cards"}
+        </button>
+      </div>
+      {newsSaveErr ? (
+        <p className="mb-2 text-xs text-error-primary">{newsSaveErr}</p>
+      ) : null}
+      {hasDi && speakerIds.length > 0 ? (
+        <div className="mb-3 rounded-lg border border-secondary bg-secondary/40 px-3 py-2.5">
+          <p className="text-xs font-medium text-secondary">Speakers</p>
+          <p className="mt-0.5 text-[11px] text-tertiary">
+            Override display names for each system speaker id. Empty uses the default label (e.g. Speaker A).
+          </p>
+          <ul className="mt-2 flex flex-col gap-2">
+            {speakerIds.map((id) => (
+              <li key={id} className="flex min-w-0 flex-col gap-0.5 sm:flex-row sm:items-center sm:gap-2">
+                <span className="shrink-0 font-mono text-[11px] text-tertiary" title="Diarization id">
+                  {id}
+                </span>
+                <input
+                  type="text"
+                  data-no-row-select
+                  className="min-w-0 flex-1 rounded border border-secondary bg-primary px-2 py-1 text-sm text-primary outline-none placeholder:text-placeholder"
+                  placeholder={defaultSpeakerDisplayName(id)}
+                  value={localLabels[id] ?? ""}
+                  onChange={(e) =>
+                    setLocalLabels((prev) => ({
+                      ...prev,
+                      [id]: e.target.value,
+                    }))
+                  }
+                  aria-label={`Display name for speaker ${id}`}
+                />
+              </li>
+            ))}
+          </ul>
+          {saveErr ? <p className="mt-2 text-xs text-error-primary">{saveErr}</p> : null}
+          <div className="mt-2 flex justify-end">
+            <button
+              type="button"
+              data-no-row-select
+              disabled={saving}
+              onClick={() => void handleSaveSpeakers()}
+              className="rounded-lg border border-secondary bg-secondary px-3 py-1.5 text-xs font-medium text-primary hover:bg-tertiary disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {saving ? "Saving…" : "Save speaker names"}
+            </button>
+          </div>
+        </div>
       ) : null}
       <Tabs defaultSelectedKey="raw" className="min-w-0 gap-3">
         <Tabs.List
@@ -96,27 +267,42 @@ function TranscriptAndNewsTabs({ job }: { job: VodJobRecord }) {
           ) : (
             <p className="text-tertiary">No transcript text.</p>
           )}
+          {hasDi ? (
+            <p className="mt-2 text-[11px] text-tertiary">
+              Transcript lines follow diarized turns. Unsaved name edits are reflected in this preview only until you
+              save.
+            </p>
+          ) : null}
         </Tabs.Panel>
-        <Tabs.Panel id="en" className="min-h-[100px] pt-1" lang="en">
-          {newsEn ? (
-            <pre className="whitespace-pre-wrap font-sans text-sm leading-relaxed text-primary">{newsEn}</pre>
-          ) : (
-            <p className="text-tertiary">No English news draft.</p>
-          )}
+        <Tabs.Panel id="en" className="min-h-[120px] max-h-[55vh] overflow-y-auto pt-1" lang="en">
+          <TranscriptNewsLocalePanel
+            locale="en"
+            jobId={job.id}
+            jobContentStamp={job.updatedAt ?? job.createdAt}
+            block={enBlock}
+            onChange={(next) => setBundle((b) => ({ ...b, version: 1, en: next }))}
+            defaultPosterUrl={defaultPosterUrl}
+          />
         </Tabs.Panel>
-        <Tabs.Panel id="es" className="min-h-[100px] pt-1" lang="es">
-          {newsEs ? (
-            <pre className="whitespace-pre-wrap font-sans text-sm leading-relaxed text-primary">{newsEs}</pre>
-          ) : (
-            <p className="text-tertiary">No Spanish news draft.</p>
-          )}
+        <Tabs.Panel id="es" className="min-h-[120px] max-h-[55vh] overflow-y-auto pt-1" lang="es">
+          <TranscriptNewsLocalePanel
+            locale="es"
+            jobId={job.id}
+            jobContentStamp={job.updatedAt ?? job.createdAt}
+            block={esBlock}
+            onChange={(next) => setBundle((b) => ({ ...b, version: 1, es: next }))}
+            defaultPosterUrl={defaultPosterUrl}
+          />
         </Tabs.Panel>
-        <Tabs.Panel id="he" className="min-h-[100px] pt-1" dir="rtl" lang="he">
-          {newsHe ? (
-            <pre className="whitespace-pre-wrap font-sans text-sm leading-relaxed text-primary">{newsHe}</pre>
-          ) : (
-            <p className="text-tertiary">No Hebrew news draft.</p>
-          )}
+        <Tabs.Panel id="he" className="min-h-[120px] max-h-[55vh] overflow-y-auto pt-1" dir="rtl" lang="he">
+          <TranscriptNewsLocalePanel
+            locale="he"
+            jobId={job.id}
+            jobContentStamp={job.updatedAt ?? job.createdAt}
+            block={heBlock}
+            onChange={(next) => setBundle((b) => ({ ...b, version: 1, he: next }))}
+            defaultPosterUrl={defaultPosterUrl}
+          />
         </Tabs.Panel>
       </Tabs>
     </div>
@@ -366,6 +552,8 @@ interface EditorClipsListProps {
   clipVodEncodeErrors: Record<string, string>;
   onClipStartVodEncode: (clipId: string, includeAds: boolean) => void | Promise<void>;
   onClipCancelVodEncode: (clipId: string) => void | Promise<void>;
+  /** After PATCH transcript speakers; keeps job list in sync (optional). */
+  onVodJobsRefresh?: () => Promise<void>;
 }
 
 export function EditorClipsList({
@@ -397,6 +585,7 @@ export function EditorClipsList({
   clipVodEncodeErrors,
   onClipStartVodEncode,
   onClipCancelVodEncode,
+  onVodJobsRefresh,
 }: EditorClipsListProps) {
   const thumbHeight = compact ? THUMB_HEIGHT_COMPACT : THUMB_HEIGHT_DEFAULT;
   const thumbWidth = Math.round(thumbHeight * (16 / 9));
@@ -612,7 +801,7 @@ export function EditorClipsList({
           <Modal className="z-[86]">
             <Dialog
               aria-label="Clip transcript"
-              className="mx-4 flex w-full max-w-2xl justify-center outline-hidden sm:mx-auto"
+              className="mx-4 flex w-full max-w-4xl justify-center outline-hidden sm:mx-auto"
             >
               <div className="relative max-h-[85vh] w-full overflow-y-auto rounded-xl border border-secondary bg-primary p-5 shadow-xl">
                 <CloseButton
@@ -645,8 +834,15 @@ export function EditorClipsList({
                         </p>
                       ) : null}
                     </div>
-                  ) : transcriptModalJob.transcriptText?.trim() ? (
-                    <TranscriptAndNewsTabs job={transcriptModalJob} />
+                  ) : transcriptModalJob.transcriptText?.trim() || vodJobHasDiarizedTranscript(transcriptModalJob) ? (
+                    <TranscriptAndNewsTabs
+                      key={`${transcriptModalJob.id}-${transcriptModalJob.updatedAt ?? transcriptModalJob.createdAt}`}
+                      job={transcriptModalJob}
+                      onVodJobsRefresh={onVodJobsRefresh}
+                      clipUrl={clipUrl}
+                      channelId={channelId}
+                      clipStartTime={transcriptModalClip?.startTime ?? 0}
+                    />
                   ) : (
                     <p className="text-tertiary">No text returned.</p>
                   )}

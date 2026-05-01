@@ -83,6 +83,8 @@ interface EditorRightPanelProps {
   onAddImageWidgetFromFile?: (clipId: string, file: File) => Promise<void>;
   /** Realtime mode: show per-clip transcript action + modal. */
   realtimeTranscriptUi?: boolean;
+  /** Refetch VOD jobs after transcript speaker PATCH (realtime modal). */
+  onVodJobsRefresh?: () => Promise<void>;
 }
 
 /**
@@ -126,6 +128,7 @@ export function EditorRightPanel({
   onAddTextWidget,
   onAddImageWidgetFromFile,
   realtimeTranscriptUi = false,
+  onVodJobsRefresh,
 }: EditorRightPanelProps) {
   const [clipMetadataId, setClipMetadataId] = useState<string | null>(null);
   const [verticalCropModalClipId, setVerticalCropModalClipId] = useState<string | null>(null);
@@ -224,6 +227,7 @@ export function EditorRightPanel({
               clipVodEncodeErrors={clipVodEncodeErrors}
               onClipStartVodEncode={onClipStartVodEncode}
               onClipCancelVodEncode={onClipCancelVodEncode}
+              onVodJobsRefresh={onVodJobsRefresh}
             />
             {selectionMode !== "realtime" &&
             onSelectAd &&

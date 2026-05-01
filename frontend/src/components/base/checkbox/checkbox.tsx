@@ -101,7 +101,7 @@ export const Checkbox = ({ label, hint, size = "sm", className, ...ariaCheckboxP
                         className={label || hint ? "mt-0.5" : ""}
                     />
                     {(label || hint) && (
-                        <div className={cx("inline-flex flex-col", sizes[size].textWrapper)}>
+                        <div className={cx("flex min-w-0 flex-col break-words", sizes[size].textWrapper)}>
                             {label && <p className={cx("text-secondary select-none", sizes[size].label)}>{label}</p>}
                             {hint && (
                                 <span className={cx("text-tertiary", sizes[size].hint)} onClick={(event) => event.stopPropagation()}>

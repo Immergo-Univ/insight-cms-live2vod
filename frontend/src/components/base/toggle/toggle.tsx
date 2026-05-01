@@ -102,7 +102,8 @@ export const Toggle = ({ label, hint, className, size = "sm", slim, ...ariaSwitc
             {...ariaSwitchProps}
             className={(renderProps) =>
                 cx(
-                    "flex w-max items-start",
+                    /* min-w-0 + max-w-full so long labels/hints wrap inside constrained parents (e.g. realtime REC bar). */
+                    "flex w-max min-w-0 max-w-full items-start",
                     renderProps.isDisabled && "cursor-not-allowed",
                     sizes[size].root,
                     typeof className === "function" ? className(renderProps) : className,
@@ -122,10 +123,13 @@ export const Toggle = ({ label, hint, className, size = "sm", slim, ...ariaSwitc
                     />
 
                     {(label || hint) && (
-                        <div className={cx("flex flex-col", sizes[size].textWrapper)}>
+                        <div className={cx("flex min-w-0 flex-col break-words", sizes[size].textWrapper)}>
                             {label && <p className={cx("text-secondary select-none", sizes[size].label)}>{label}</p>}
                             {hint && (
-                                <span className={cx("text-tertiary", sizes[size].hint)} onClick={(event) => event.stopPropagation()}>
+                                <span
+                                    className={cx("text-tertiary", sizes[size].hint)}
+                                    onClick={(event) => event.stopPropagation()}
+                                >
                                     {hint}
                                 </span>
                             )}

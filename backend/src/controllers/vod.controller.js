@@ -59,6 +59,92 @@ vodRouter.get("/jobs", async (req, res) => {
   }
 });
 
+/**
+ * Rebuild dash-prefixed transcript lines from diarized segments + speaker label map.
+ * @param {object} di
+ * @returns {string}
+ */
+function rebuildTranscriptTextFromDiarization(di) {
+  if (!di || !Array.isArray(di.segments)) return "";
+  const labels = di.speakerLabels && typeof di.speakerLabels === "object" && !Array.isArray(di.speakerLabels) ? di.speakerLabels : {};
+  /** @param {string} id */
+  const defaultName = (id) => {
+    const x = String(id || "").trim();
+    if (/^[A-Z]$/.test(x)) return `Speaker ${x}`;
+    return x || "Speaker";
+  };
+  return di.segments
+    .map((/** @type {{ speaker?: string, text?: string }} */ s) => {
+      const id = String(s.speaker || "").trim() || "A";
+      const custom = typeof labels[id] === "string" ? labels[id].trim() : "";
+      const name = custom || defaultName(id);
+      const line = String(s.text || "")
+        .trim()
+        .replace(/\s*\n\s*/g, " ");
+      return `- ${name}: ${line}`;
+    })
+    .join("\n\n");
+}
+
+vodRouter.patch("/jobs/:jobId", async (req, res) => {
+  try {
+    const tenantId = getTenantId(req);
+    if (!tenantId) {
+      return res.status(400).json({ error: "Missing tenantId (query or x-tenant-id header)" });
+    }
+    await resolveTenant(tenantId);
+    const { jobId } = req.params;
+    const job = getJob(jobId);
+    if (!job || job.tenantId !== tenantId) {
+      return res.status(404).json({ error: "Job not found" });
+    }
+    const body = req.body && typeof req.body === "object" ? req.body : {};
+    const incomingLabels = body.transcriptSpeakerLabels;
+    const hasLabels =
+      incomingLabels && typeof incomingLabels === "object" && !Array.isArray(incomingLabels);
+    const hasNewsBundle =
+      body.transcriptNewsBundle !== undefined &&
+      body.transcriptNewsBundle !== null &&
+      typeof body.transcriptNewsBundle === "object" &&
+      !Array.isArray(body.transcriptNewsBundle);
+
+    if (!hasLabels && !hasNewsBundle) {
+      return res.status(400).json({ error: "Body must include transcriptSpeakerLabels and/or transcriptNewsBundle" });
+    }
+
+    /** @type {Record<string, unknown>} */
+    const patch = {};
+
+    if (hasLabels) {
+      const base = job.transcriptDiarization;
+      if (!base || typeof base !== "object" || !Array.isArray(base.segments) || base.segments.length === 0) {
+        return res.status(400).json({ error: "This job has no diarized transcript to edit" });
+      }
+      const prevLabels =
+        base.speakerLabels && typeof base.speakerLabels === "object" && !Array.isArray(base.speakerLabels)
+          ? base.speakerLabels
+          : {};
+      const di = {
+        ...base,
+        segments: base.segments,
+        speakerLabels: { ...prevLabels, ...incomingLabels },
+      };
+      patch.transcriptDiarization = di;
+      patch.transcriptText = rebuildTranscriptTextFromDiarization(di);
+    }
+
+    if (hasNewsBundle) {
+      patch.transcriptNewsBundle = body.transcriptNewsBundle;
+    }
+
+    updateJob(jobId, patch);
+    res.json({ ok: true, job: getJob(jobId) });
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    res.status(400).json({ error: message });
+  }
+});
+
 vodRouter.post("/jobs/:jobId/cancel", async (req, res) => {
   try {
     const tenantId = getTenantId(req);

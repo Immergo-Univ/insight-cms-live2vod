@@ -12,6 +12,7 @@ import { m3u8Router } from "./controllers/m3u8.controller.js";
 import { adsRouter } from "./controllers/ads.controller.js";
 import { authRouter } from "./controllers/auth.controller.js";
 import { vodRouter } from "./controllers/vod.controller.js";
+import { publicTranscriptNewsRouter } from "./controllers/public-transcript-news.controller.js";
 import { encoderCallbackRouter } from "./controllers/encoder-callback.controller.js";
 import { config } from "./config.js";
 import { startLogoScanScheduler } from "./services/logo-scheduler.service.js";
@@ -36,6 +37,7 @@ app.use("/api/channels", channelsRouter);
 app.use("/api/m3u8", m3u8Router);
 app.use("/api/ads", adsRouter);
 app.use("/api/vod", vodRouter);
+app.use("/api/public", publicTranscriptNewsRouter);
 app.use("/api/encoder", encoderCallbackRouter);
 
 const frontendBuildPath = path.join(__dirname, "../../frontend/dist");

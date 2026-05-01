@@ -18,6 +18,9 @@ const ENCODER_PATCH_KEYS = new Set([
   "transcriptNewsEs",
   "transcriptNewsHe",
   "transcriptNewsError",
+  "transcriptDiarization",
+  "openaiClipUsage",
+  "transcriptNewsBundle",
 ]);
 
 export const encoderCallbackRouter = Router();
