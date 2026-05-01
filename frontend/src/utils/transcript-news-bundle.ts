@@ -85,11 +85,14 @@ export function deriveTranscriptNewsBundleFromJob(
 ): TranscriptNewsBundle {
   const updatedAt = job.updatedAt || job.createdAt;
   const posterUrl = opts.defaultPosterUrl?.trim() || undefined;
+  const enBase = blockFromPlain(job.transcriptNewsEn?.trim() ?? "", { posterUrl, updatedAt });
+  const esBase = blockFromPlain(job.transcriptNewsEs?.trim() ?? "", { posterUrl, updatedAt });
+  const heBase = blockFromPlain(job.transcriptNewsHe?.trim() ?? "", { posterUrl, updatedAt });
   const base: TranscriptNewsBundle = {
     version: 1,
-    en: blockFromPlain(job.transcriptNewsEn?.trim() ?? "", { posterUrl, updatedAt }),
-    es: blockFromPlain(job.transcriptNewsEs?.trim() ?? "", { posterUrl, updatedAt }),
-    he: blockFromPlain(job.transcriptNewsHe?.trim() ?? "", { posterUrl, updatedAt }),
+    en: enBase,
+    es: esBase,
+    he: heBase,
   };
   const existing = job.transcriptNewsBundle;
   if (!existing || typeof existing !== "object") return base;
@@ -108,8 +111,8 @@ export function deriveTranscriptNewsBundleFromJob(
   };
   return {
     version: 1,
-    en: mergeLocale("en", base.en),
-    es: mergeLocale("es", base.es),
-    he: mergeLocale("he", base.he),
+    en: mergeLocale("en", enBase),
+    es: mergeLocale("es", esBase),
+    he: mergeLocale("he", heBase),
   };
 }
