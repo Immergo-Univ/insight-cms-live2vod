@@ -73,7 +73,7 @@ export function wrapSubtitleCuePlainText(text, maxCharsPerLine = 36, maxLines = 
     .filter(Boolean);
   if (rawWords.length === 0) return "";
   const L = Math.max(18, Math.floor(Number(maxCharsPerLine) || 36));
-  const maxL = Math.max(1, Math.min(2, Math.floor(Number(maxLines) || 2)));
+  const maxL = Math.max(1, Math.min(5, Math.floor(Number(maxLines) || 2)));
 
   /** Split oversize tokens so wrapping fits narrow burns (e.g. long Hebrew strings). */
   const words = rawWords.flatMap((w) => {
@@ -108,25 +108,32 @@ export function wrapSubtitleCuePlainText(text, maxCharsPerLine = 36, maxLines = 
     const w0 = words[0];
     return w0.length <= L ? w0 : `${w0.slice(0, Math.max(1, L - 1))}…`;
   }
-  if (maxL === 1 || first.idx >= words.length) {
-    if (first.idx < words.length) {
-      const tail = words.slice(first.idx).join(" ");
-      const merged = `${first.line} ${tail}`.trim();
-      return merged.length <= L ? merged : `${first.line.slice(0, Math.max(1, L - 1))}…`;
-    }
-    return first.line;
+
+  /** @type {string[]} */
+  const lines = [first.line];
+  let idx = first.idx;
+  while (lines.length < maxL && idx < words.length) {
+    const next = fillFrom(idx);
+    if (!next.line) break;
+    lines.push(next.line);
+    idx = next.idx;
   }
 
-  const second = fillFrom(first.idx);
-  let line2 = second.line;
-  const restIdx = second.idx;
-  if (restIdx < words.length && line2) {
-    const tail = words.slice(restIdx).join(" ");
-    const merged = `${line2} ${tail}`.trim();
-    line2 =
-      merged.length <= L ? merged : line2.length + 1 <= L ? `${line2}…` : `${line2.slice(0, Math.max(1, L - 1))}…`;
+  if (idx >= words.length) {
+    return lines.join("\n");
   }
-  return line2 ? `${first.line}\n${line2}` : first.line;
+
+  const tail = words.slice(idx).join(" ");
+  const last = lines[lines.length - 1];
+  const merged = `${last} ${tail}`.trim();
+  if (merged.length <= L) {
+    lines[lines.length - 1] = merged;
+  } else {
+    lines[lines.length - 1] =
+      last.length + 1 <= L ? `${last}…` : `${last.slice(0, Math.max(1, L - 1))}…`;
+  }
+
+  return lines.join("\n");
 }
 
 /**

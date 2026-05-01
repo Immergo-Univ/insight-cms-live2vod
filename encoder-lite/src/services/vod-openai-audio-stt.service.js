@@ -393,17 +393,23 @@ export async function ffprobeVideoDimensionsPx(inputPath) {
 }
 
 /**
- * ASS font size for burn-in: same idea as editor preview `(stylePx * height) / 720`, then tuned down
- * because libass + outline reads larger than browser overlay on TV-sized frames.
+ * ASS font size for burn-in: landscape uses `(stylePx * height) / 720`. Portrait / vertical 9:16 uses the
+ * **narrow frame width** as the scale reference so glyphs are not sized for full pixel height while fitting
+ * a much smaller horizontal strip (prevents overflow past the vertical window).
  *
  * @param {number} styleFontPx
  * @param {number} videoHeightPx
+ * @param {number} [videoWidthPx] when set and portrait, scales from min(width,height)
  */
-function assFontSizeMatchEditorPreview(styleFontPx, videoHeightPx) {
+function assFontSizeMatchEditorPreview(styleFontPx, videoHeightPx, videoWidthPx) {
   const refH = 720;
   const h = Math.max(180, Math.floor(Number(videoHeightPx) || refH));
+  const w = Math.floor(Number(videoWidthPx) || 0);
+  const portrait = w > 0 && h > w * 1.02;
+  /** Narrow strip (vertical export): tie size to width; landscape: tie to height */
+  const refDim = portrait ? Math.max(200, Math.min(w, h)) : h;
   const base = Math.max(8, Number(styleFontPx) || 28);
-  let scaled = (base * h) / refH;
+  let scaled = (base * refDim) / refH;
   const burnTune = Number(process.env.VOD_SUBTITLE_BURN_FONT_SCALE);
   const factor = Number.isFinite(burnTune) && burnTune > 0 && burnTune <= 1.5 ? burnTune : 0.52;
   scaled *= factor;
@@ -417,18 +423,20 @@ function assFontSizeMatchEditorPreview(styleFontPx, videoHeightPx) {
  * @param {number} videoWidthPx
  * @param {number} assFontSize
  * @param {number} marginLR one side margin in px (MarginL = MarginR)
+ * @param {{ portrait?: boolean }} [opts] portrait → fewer chars per line so wrapping uses more rows
  */
-function burnSubtitleCharsPerLineFromVideoWidth(videoWidthPx, assFontSize, marginLR) {
-  const w = Math.max(320, Math.floor(Number(videoWidthPx) || 1280));
+function burnSubtitleCharsPerLineFromVideoWidth(videoWidthPx, assFontSize, marginLR, opts = {}) {
+  const portrait = opts.portrait === true;
+  const w = Math.max(portrait ? 200 : 320, Math.floor(Number(videoWidthPx) || 1280));
   const fs = Math.max(10, Math.floor(Number(assFontSize) || 22));
-  const m = Math.max(40, Math.floor(Number(marginLR) || 80));
-  const usable = Math.max(160, w - 2 * m);
+  const m = Math.max(portrait ? 10 : 40, Math.floor(Number(marginLR) || 80));
+  const usable = Math.max(portrait ? 120 : 160, w - 2 * m);
   const envBase = Math.floor(Number(process.env.VOD_SUBTITLE_MAX_CHARS_PER_LINE) || 0);
-  /** ~px per glyph incl. outline (Hebrew / RTL needs more headroom than Latin) */
-  const estGlyphPx = fs * 0.86;
+  /** ~px per glyph incl. outline (Hebrew / RTL); portrait uses extra headroom to avoid horizontal clip */
+  const estGlyphPx = fs * (portrait ? 0.94 : 0.86);
   const fromRatio = Math.floor(usable / estGlyphPx);
   const base = envBase > 0 ? envBase : fromRatio;
-  return Math.max(12, Math.min(28, base));
+  return Math.max(portrait ? 8 : 12, Math.min(portrait ? 20 : 28, base));
 }
 
 /**
@@ -616,14 +624,14 @@ function shiftSrtContent(srt, offsetMs, firstIndex) {
  * @returns {string}
  */
 /**
- * Re-wrap each SRT cue body to at most two on-screen lines (burn-in readability).
+ * Re-wrap each SRT cue body to a bounded number of on-screen lines (burn-in readability).
  *
  * @param {string} srt
- * @param {{ maxCharsPerLine?: number; maxLines?: number }} [opts]
+ * @param {{ maxCharsPerLine?: number; maxLines?: number }} [opts] maxLines up to 5 (e.g. portrait / vertical)
  */
 export function applyBurnSubtitleWrappingToSrtDocument(srt, opts = {}) {
   const maxCharsPerLine = Math.max(18, Math.floor(Number(opts.maxCharsPerLine) || 36));
-  const maxLines = Math.max(1, Math.min(2, Math.floor(Number(opts.maxLines) || 2)));
+  const maxLines = Math.max(1, Math.min(5, Math.floor(Number(opts.maxLines) || 2)));
   const blocks = String(srt || "")
     .trim()
     .split(/\n\s*\n/)
@@ -1317,14 +1325,26 @@ export async function transcribeAndBurnSubtitles(ctx) {
     width: 1280,
     height: 720,
   }));
+  const portrait = videoW > 0 && videoH > videoW * 1.02;
   const marginPctRaw = Number(process.env.VOD_SUBTITLE_MARGIN_WIDTH_PCT);
   const marginPct =
     Number.isFinite(marginPctRaw) && marginPctRaw > 0.02 && marginPctRaw < 0.22 ? marginPctRaw : 0.09;
   const marginHDefault = Math.round(videoW * marginPct);
-  const marginH = Math.max(56, Math.min(260, Math.floor(Number(process.env.VOD_SUBTITLE_MARGIN_LR) || marginHDefault)));
-  const fontSize = assFontSizeMatchEditorPreview(Number(style?.fontSizePx) || 28, videoH);
-  const maxChars = burnSubtitleCharsPerLineFromVideoWidth(videoW, fontSize, marginH);
-  const wrappedSrt = applyBurnSubtitleWrappingToSrtDocument(mergedSrt, { maxCharsPerLine: maxChars, maxLines: 2 });
+  let marginH = Math.floor(Number(process.env.VOD_SUBTITLE_MARGIN_LR) || marginHDefault);
+  if (portrait) {
+    const cap = Math.max(24, Math.floor(videoW * 0.18));
+    marginH = Math.max(12, Math.min(cap, marginH));
+  } else {
+    marginH = Math.max(56, Math.min(260, marginH));
+  }
+  const fontSize = assFontSizeMatchEditorPreview(Number(style?.fontSizePx) || 28, videoH, videoW);
+  const maxChars = burnSubtitleCharsPerLineFromVideoWidth(videoW, fontSize, marginH, { portrait });
+  const portraitMaxLines = Math.max(2, Math.min(5, Math.floor(Number(process.env.VOD_SUBTITLE_PORTRAIT_MAX_LINES) || 4)));
+  const burnMaxLines = portrait ? portraitMaxLines : 2;
+  const wrappedSrt = applyBurnSubtitleWrappingToSrtDocument(mergedSrt, {
+    maxCharsPerLine: maxChars,
+    maxLines: burnMaxLines,
+  });
   await fs.writeFile(srtPath, wrappedSrt, "utf8");
 
   onProgress?.(76);
