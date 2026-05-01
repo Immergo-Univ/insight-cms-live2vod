@@ -9,7 +9,18 @@ import path from "path";
 import { encodeEditorJsonToMp4 } from "./vod-ffmpeg-encoder.service.js";
 import { putVodMp4 } from "./vod-s3.service.js";
 import { runRealtimeTranscribeOnlyJob } from "./vod-realtime-transcribe.service.js";
-import { transcribeAndBurnSubtitles } from "./vod-openai-audio-stt.service.js";
+import {
+  transcribeAndBurnSubtitles,
+  postEncodeTranscribeFromEncodedMp4,
+  ffprobeDurationSec,
+} from "./vod-openai-audio-stt.service.js";
+import { formatTranscriptDashLines } from "./openai-stt-diarize.service.js";
+import {
+  generateNewsArticlesFromTvTranscript,
+  filterTrilingualNewsByLocaleFlags,
+} from "./openai-news-agent.service.js";
+import { config } from "../config.js";
+import { mergeOpenAiClipUsageReports, logOpenAiClipUsage } from "../utils/openai-usage.js";
 import { vodEncodeStdout } from "../utils/vod-encode-log.js";
 import { patchBackendJob } from "./backend-client.service.js";
 
@@ -108,6 +119,51 @@ function subtitlesConfigForClip(spec, clip) {
   if (clip?.subtitles?.enabled) return clip.subtitles;
   if (spec?.subtitles?.enabled) return spec.subtitles;
   return null;
+}
+
+/**
+ * Language hints for OpenAI STT when no per-clip subtitles are enabled (defaults to auto).
+ * @param {object} spec
+ */
+function subtitlesHintsForSpec(spec) {
+  const clipsSorted = [...(spec.clips || [])].sort((a, b) => a.order - b.order);
+  for (const row of clipsSorted) {
+    const s = subtitlesConfigForClip(spec, row);
+    if (s) return s;
+  }
+  return spec?.subtitles && typeof spec.subtitles === "object" ? spec.subtitles : undefined;
+}
+
+/**
+ * @param {object | null | undefined} base
+ * @param {object | null | undefined} next
+ * @param {number} offsetSec
+ */
+function mergeTranscriptDiarizationPayloads(base, next, offsetSec) {
+  if (!next || typeof next !== "object" || !Array.isArray(next.segments) || next.segments.length === 0) {
+    return base && typeof base === "object" ? base : null;
+  }
+  const nextLabels =
+    next.speakerLabels && typeof next.speakerLabels === "object" ? { ...next.speakerLabels } : {};
+  const shifted = {
+    version: 1,
+    segments: next.segments.map((s) => ({
+      ...s,
+      start: Number(s.start ?? 0) + offsetSec,
+      end: Number(s.end ?? 0) + offsetSec,
+    })),
+    speakerLabels: nextLabels,
+  };
+  if (!base || typeof base !== "object" || !Array.isArray(base.segments) || base.segments.length === 0) {
+    return shifted;
+  }
+  const baseLabels =
+    base.speakerLabels && typeof base.speakerLabels === "object" ? { ...base.speakerLabels } : {};
+  return {
+    version: 1,
+    segments: [...base.segments, ...shifted.segments],
+    speakerLabels: { ...baseLabels, ...shifted.speakerLabels },
+  };
 }
 
 /**
@@ -221,7 +277,8 @@ export async function runVodEncodeJob(opts) {
     });
     startBackendProgressTicker(jobId);
 
-    const encodeProgressCap = burnSubs ? 50 : 89;
+    const wantsPostEncodeStt = !burnSubs && Boolean(config.openaiApiKey);
+    const encodeProgressCap = burnSubs || wantsPostEncodeStt ? 50 : 89;
     const { localPaths, localPath } = await encodeEditorJsonToMp4({
       spec,
       workDir,
@@ -257,15 +314,31 @@ export async function runVodEncodeJob(opts) {
     let pathsToUpload =
       Array.isArray(localPaths) && localPaths.length > 0 ? [...localPaths] : [localPath].filter(Boolean);
 
+    /** @type {string[]} */
+    const aggregatedTranscriptParts = [];
+    /** @type {object | null} */
+    let aggregatedDi = null;
+    /** @type {Record<string, unknown> | null | undefined} */
+    let aggregatedUsage = null;
+    let timeOffsetSec = 0;
+
+    const speakerDiarization = spec?.transcribeSpeakerDiarization !== false;
+    const sttHints = subtitlesHintsForSpec(spec);
+    const nSeg = pathsToUpload.length;
+
     if (burnSubs) {
       const clipsSorted = [...(spec.clips || [])].sort((a, b) => a.order - b.order);
-      const nClips = pathsToUpload.length;
       const subtitled = [];
-      for (let i = 0; i < nClips; i++) {
+      for (let i = 0; i < nSeg; i++) {
         const clipRow = clipsSorted[i];
         const subs = subtitlesConfigForClip(spec, clipRow);
         if (!subs) {
           subtitled.push(pathsToUpload[i]);
+          try {
+            timeOffsetSec += await ffprobeDurationSec(pathsToUpload[i]);
+          } catch {
+            /* ignore */
+          }
           continue;
         }
         const style = subs.style || {};
@@ -276,39 +349,139 @@ export async function runVodEncodeJob(opts) {
           progress: 50,
           phase: "transcribing",
           message:
-            nClips > 1
-              ? `Transcribing audio (OpenAI STT) — clip ${i + 1}/${nClips}`
+            nSeg > 1
+              ? `Transcribing audio (OpenAI STT) — clip ${i + 1}/${nSeg}`
               : "Transcribing audio (OpenAI STT)",
         });
-        const sliceStart = 50 + (i / nClips) * 38;
-        const sliceEnd = 50 + ((i + 1) / nClips) * 38;
+        const sliceStart = 50 + (i / nSeg) * 38;
+        const sliceEnd = 50 + ((i + 1) / nSeg) * 38;
         const mapPct = (pct) => sliceStart + ((pct - 52) / (88 - 52)) * (sliceEnd - sliceStart);
-        const { localPath: subPath } = await transcribeAndBurnSubtitles({
-          inputMp4: pathsToUpload[i],
-          workDir: subWorkDir,
-          style,
-          subtitles: subs,
-          shouldCancel: () => shouldCancel(jobId),
-          onProgress: (pct) => {
-            const phase = pct < 72 ? "transcribing" : "burning_subtitles";
-            const msg =
-              phase === "transcribing"
-                ? nClips > 1
-                  ? `Transcribing clip ${i + 1}/${nClips}`
-                  : "Transcribing audio (OpenAI STT)"
-                : nClips > 1
-                  ? `Burning subtitles (clip ${i + 1}/${nClips})`
-                  : "Burning subtitles into video";
-            applyProgressSnapshot(jobId, {
-              progress: Math.max(50, Math.min(89, Math.round(mapPct(pct)))),
-              phase,
-              message: msg,
-            });
-          },
-        });
+        const { localPath: subPath, transcriptText, transcriptDiarization, openaiClipUsage } =
+          await transcribeAndBurnSubtitles({
+            inputMp4: pathsToUpload[i],
+            workDir: subWorkDir,
+            style,
+            subtitles: subs,
+            speakerDiarization,
+            shouldCancel: () => shouldCancel(jobId),
+            onProgress: (pct) => {
+              const phase = pct < 72 ? "transcribing" : "burning_subtitles";
+              const msg =
+                phase === "transcribing"
+                  ? nSeg > 1
+                    ? `Transcribing clip ${i + 1}/${nSeg}`
+                    : "Transcribing audio (OpenAI STT)"
+                  : nSeg > 1
+                    ? `Burning subtitles (clip ${i + 1}/${nSeg})`
+                    : "Burning subtitles into video";
+              applyProgressSnapshot(jobId, {
+                progress: Math.max(50, Math.min(89, Math.round(mapPct(pct)))),
+                phase,
+                message: msg,
+              });
+            },
+          });
         subtitled.push(subPath);
+        if (transcriptText?.trim()) aggregatedTranscriptParts.push(String(transcriptText).trim());
+        aggregatedDi = mergeTranscriptDiarizationPayloads(aggregatedDi, transcriptDiarization, timeOffsetSec);
+        aggregatedUsage = mergeOpenAiClipUsageReports(aggregatedUsage, openaiClipUsage);
+        try {
+          timeOffsetSec += await ffprobeDurationSec(subPath);
+        } catch {
+          /* ignore */
+        }
       }
       pathsToUpload = subtitled;
+    } else if (wantsPostEncodeStt) {
+      for (let i = 0; i < nSeg; i++) {
+        const subWorkDir = path.join(workDir, `post_stt_${i}`);
+        await fs.mkdir(subWorkDir, { recursive: true });
+        const sliceStart = 50 + (i / nSeg) * 38;
+        const sliceEnd = 50 + ((i + 1) / nSeg) * 38;
+        await reportJob(jobId, {
+          status: "processing",
+          progress: Math.round(sliceStart),
+          phase: "transcribing",
+          message:
+            nSeg > 1
+              ? `Transcribing audio (OpenAI STT) — clip ${i + 1}/${nSeg}`
+              : "Transcribing audio (OpenAI STT)",
+        });
+        const stt = await postEncodeTranscribeFromEncodedMp4({
+          inputMp4: pathsToUpload[i],
+          workDir: subWorkDir,
+          subtitles: sttHints,
+          speakerDiarization,
+          inferSpeakerNames: spec?.transcribeInferSpeakerNames === true,
+          shouldCancel: () => shouldCancel(jobId),
+        });
+        applyProgressSnapshot(jobId, {
+          progress: Math.max(50, Math.min(89, Math.round(sliceEnd))),
+          phase: "transcribing",
+          message:
+            nSeg > 1 ? `Transcribed clip ${i + 1}/${nSeg} (OpenAI STT)` : "Transcribed audio (OpenAI STT)",
+        });
+        if (stt.transcriptText?.trim()) aggregatedTranscriptParts.push(String(stt.transcriptText).trim());
+        aggregatedDi = mergeTranscriptDiarizationPayloads(aggregatedDi, stt.transcriptDiarization, timeOffsetSec);
+        aggregatedUsage = mergeOpenAiClipUsageReports(aggregatedUsage, stt.openaiClipUsage);
+        try {
+          timeOffsetSec += await ffprobeDurationSec(pathsToUpload[i]);
+        } catch {
+          /* ignore */
+        }
+      }
+    }
+
+    /** @type {Record<string, unknown>} */
+    const transcriptCompletion = {};
+    const joinedPlain = aggregatedTranscriptParts.filter(Boolean).join("\n\n---\n\n").trim();
+    if (aggregatedDi && Array.isArray(aggregatedDi.segments) && aggregatedDi.segments.length > 0) {
+      transcriptCompletion.transcriptDiarization = aggregatedDi;
+      transcriptCompletion.transcriptText = formatTranscriptDashLines(
+        aggregatedDi.segments,
+        aggregatedDi.speakerLabels && typeof aggregatedDi.speakerLabels === "object"
+          ? aggregatedDi.speakerLabels
+          : {},
+      );
+    } else if (joinedPlain) {
+      transcriptCompletion.transcriptText = joinedPlain;
+    }
+    if (aggregatedUsage && typeof aggregatedUsage === "object") {
+      transcriptCompletion.openaiClipUsage = aggregatedUsage;
+    }
+
+    const textForNews = String(transcriptCompletion.transcriptText || "").trim();
+    if (spec?.transcribeGenerateNews !== false && config.openaiApiKey && textForNews) {
+      await reportJob(jobId, {
+        status: "processing",
+        progress: 88,
+        phase: "generating_news",
+        message: "Drafting news articles (OpenAI)…",
+      });
+      try {
+        const newsRaw = await generateNewsArticlesFromTvTranscript({
+          apiKey: config.openaiApiKey,
+          model: config.openaiNewsModel,
+          transcriptText: textForNews,
+          timeoutMs: config.openaiNewsTimeoutMs,
+        });
+        const news = filterTrilingualNewsByLocaleFlags(newsRaw, spec?.transcribeNewsLocales);
+        transcriptCompletion.transcriptNewsBundle = news.bundle;
+        transcriptCompletion.transcriptNewsEn = news.legacyPlain.en;
+        transcriptCompletion.transcriptNewsEs = news.legacyPlain.es;
+        transcriptCompletion.transcriptNewsHe = news.legacyPlain.he;
+        transcriptCompletion.openaiClipUsage = mergeOpenAiClipUsageReports(
+          /** @type {Record<string, unknown>} */ (transcriptCompletion.openaiClipUsage),
+          /** @type {Record<string, unknown>} */ (news.openaiClipUsage),
+        );
+      } catch (e) {
+        const m = e instanceof Error ? e.message : String(e);
+        transcriptCompletion.transcriptNewsError = m.slice(0, 600);
+      }
+    }
+
+    if (transcriptCompletion.openaiClipUsage && typeof transcriptCompletion.openaiClipUsage === "object") {
+      logOpenAiClipUsage(jobId, "vod_encode", transcriptCompletion.openaiClipUsage);
     }
 
     if (shouldCancel(jobId)) {
@@ -361,6 +534,7 @@ export async function runVodEncodeJob(opts) {
       s3Keys,
       outputUrl: outputUrls[0] ?? null,
       outputUrls,
+      ...transcriptCompletion,
     });
     vodEncodeStdout(`job=${jobId} done tenant=${tenantId} keys=${s3Keys.join(",")}`);
   } catch (err) {

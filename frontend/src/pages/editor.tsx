@@ -47,6 +47,7 @@ import {
   defaultEditorSubClipEncodeFields,
   EDITOR_VERTICAL_CROP_BP_TIME_MERGE_SEC,
   normalizeEditorClipTagsList,
+  normalizeEditorSubtitleSettings,
   normalizeEditorVerticalCropPanSettings,
   normalizeVerticalCropBreakpointsForClip,
   resolveVerticalCropCenterXAtLocalTime,
@@ -147,7 +148,7 @@ function parentWallEndUnix(clipState: EditorClipState, subClips: EditorSubClip[]
 }
 
 function editorSubClipToStateJsonClip(c: EditorSubClip): EditorStateJsonClip {
-  const st = c.subtitleSettings ?? DEFAULT_EDITOR_SUBTITLE_SETTINGS;
+  const st = normalizeEditorSubtitleSettings(c.subtitleSettings);
   const clipDur = Math.max(0, c.endTime - c.startTime);
   const sortedBps =
     c.verticalCropMode && c.verticalCropBreakpoints?.length
@@ -192,6 +193,13 @@ function editorSubClipToStateJsonClip(c: EditorSubClip): EditorStateJsonClip {
             whisperSourceLanguage: st.whisperSourceLanguage,
             whisperOutputLanguage: st.whisperOutputLanguage,
             style: { ...st.style },
+            transcribeSpeakerDiarization: st.transcribeSpeakerDiarization,
+            transcribeInferSpeakerNames: st.transcribeInferSpeakerNames,
+            transcribeNewsLocales: {
+              en: st.transcribeNewsLocales.en,
+              es: st.transcribeNewsLocales.es,
+              he: st.transcribeNewsLocales.he,
+            },
           },
         }
       : {}),
@@ -231,6 +239,21 @@ function buildSingleClipEditorStateJson(
     }));
   }
 
+  const transcribeSettings = loadRealtimeTranscribeSettings();
+  const subNorm = normalizeEditorSubtitleSettings(target.subtitleSettings);
+  const nl = subNorm.transcribeNewsLocales;
+  const rootTranscribe = target.subtitleMode
+    ? {
+        transcribeSpeakerDiarization: subNorm.transcribeSpeakerDiarization,
+        transcribeGenerateNews: Boolean(nl.en || nl.es || nl.he),
+        transcribeNewsLocales: { en: nl.en, es: nl.es, he: nl.he },
+        transcribeInferSpeakerNames: subNorm.transcribeInferSpeakerNames,
+      }
+    : {
+        transcribeSpeakerDiarization: transcribeSettings.speakerDiarization,
+        transcribeGenerateNews: transcribeSettings.generateNews,
+      };
+
   return {
     clipUrl: parentClipUrl,
     sourceM3u8: clipState.sourceM3u8,
@@ -239,6 +262,7 @@ function buildSingleClipEditorStateJson(
     posters: [],
     clips: [{ ...editorSubClipToStateJsonClip(target), order: 1 }],
     ads: adsOut,
+    ...rootTranscribe,
   };
 }
 
@@ -564,8 +588,9 @@ export function EditorPage() {
     currentTime,
   ]);
   const subtitleOverlayActive = !!(selectedEncodeClip?.subtitleMode);
-  const subtitleSettingsForPlayer =
-    selectedEncodeClip?.subtitleSettings ?? DEFAULT_EDITOR_SUBTITLE_SETTINGS;
+  const subtitleSettingsForPlayer = normalizeEditorSubtitleSettings(
+    selectedEncodeClip?.subtitleSettings ?? DEFAULT_EDITOR_SUBTITLE_SETTINGS,
+  );
 
   const [realtimeTick, setRealtimeTick] = useState(0);
   useEffect(() => {
@@ -1163,10 +1188,7 @@ export function EditorPage() {
         return {
           ...c,
           subtitleMode: true,
-          subtitleSettings: c.subtitleSettings ?? {
-            ...DEFAULT_EDITOR_SUBTITLE_SETTINGS,
-            style: { ...DEFAULT_EDITOR_SUBTITLE_SETTINGS.style },
-          },
+          subtitleSettings: normalizeEditorSubtitleSettings(c.subtitleSettings),
         };
       });
     });
@@ -1217,8 +1239,9 @@ export function EditorPage() {
   const handleSelectedClipSubtitleSettingsChange = useCallback(
     (settings: EditorSubtitleSettings) => {
       if (!selectedClipId) return;
+      const next = normalizeEditorSubtitleSettings(settings);
       setClips((prev) =>
-        prev.map((c) => (c.id === selectedClipId ? { ...c, subtitleSettings: settings } : c)),
+        prev.map((c) => (c.id === selectedClipId ? { ...c, subtitleSettings: next } : c)),
       );
     },
     [selectedClipId],

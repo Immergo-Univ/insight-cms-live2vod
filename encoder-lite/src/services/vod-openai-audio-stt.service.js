@@ -1,5 +1,5 @@
 /**
- * Speech-to-text via OpenAI Audio API (hosted whisper / compatible models).
+ * Speech-to-text via OpenAI Audio / transcription APIs (e.g. gpt-4o-transcribe-diarize, gpt-4o-mini-transcribe).
  * Extracts lightweight mono audio with ffmpeg (never sends m3u8 URLs to OpenAI),
  * chunks long files under a byte budget using silence-based cuts (ffmpeg silencedetect),
  * then merges transcripts. Used for realtime transcribe and VOD burned subtitles.
@@ -17,6 +17,9 @@ import {
   inferSpeakerLabelsFromSegmentSamples,
   formatTranscriptDashLines,
   diarizedSegmentsToSrt,
+  wrapSubtitleCuePlainText,
+  translateSubtitleCueTextsViaChat,
+  translatePlainTextViaChat,
 } from "./openai-stt-diarize.service.js";
 import {
   buildOpenAiClipUsageReport,
@@ -158,12 +161,20 @@ function legacyLanguageModeToPair(lm) {
 }
 
 /**
+ * Maps editor subtitle languages → OpenAI STT `language` hint and optional Chat translation to the output locale.
+ *
  * @param {unknown} subtitles
- * @returns {{ source: string, output: string, translateToEnglish: boolean, openaiLanguage: string | null }}
+ * @returns {{ source: string, output: string, openaiLanguage: string | null, postTranslateTarget: string | null }}
  */
 export function resolveOpenAiSttLanguages(subtitles) {
+  const base = {
+    source: "auto",
+    output: "same",
+    openaiLanguage: null,
+    postTranslateTarget: null,
+  };
   if (!subtitles || typeof subtitles !== "object") {
-    return { source: "auto", output: "same", translateToEnglish: false, openaiLanguage: null };
+    return base;
   }
   const s = /** @type {{ whisperSourceLanguage?: unknown, whisperOutputLanguage?: unknown, languageMode?: unknown }} */ (
     subtitles
@@ -182,14 +193,31 @@ export function resolveOpenAiSttLanguages(subtitles) {
     source = p.source;
     output = p.output;
   }
-  const translateToEnglish = output === "en" && source !== "en";
+
   /** @type {string | null} */
   let openaiLanguage = null;
-  if (!translateToEnglish) {
+  /** @type {string | null} */
+  let postTranslateTarget = null;
+
+  if (output === "same") {
     if (source !== "auto") openaiLanguage = source;
-    else if (output !== "same" && output !== "auto") openaiLanguage = output;
+  } else if (source !== "auto" && output === source) {
+    openaiLanguage = output;
+  } else if (output !== "same" && STT_LANGS.has(output) && output !== "auto") {
+    postTranslateTarget = output;
+    if (source !== "auto") openaiLanguage = source;
   }
-  return { source, output, translateToEnglish, openaiLanguage };
+
+  return { source, output, openaiLanguage, postTranslateTarget };
+}
+
+/**
+ * When true, use OpenAI `audio/translations` (English only) for non-diarized STT.
+ *
+ * @param {{ postTranslateTarget: string | null }} resolved
+ */
+function useWhisperAudioTranslationEndpoint(resolved) {
+  return resolved.postTranslateTarget === "en";
 }
 
 /**
@@ -282,7 +310,7 @@ async function extractOpusSegmentFromFile(opts) {
  * @param {string} inputPath
  * @returns {Promise<number>}
  */
-async function ffprobeDurationSec(inputPath) {
+export async function ffprobeDurationSec(inputPath) {
   const args = [
     "-v",
     "error",
@@ -313,6 +341,94 @@ async function ffprobeDurationSec(inputPath) {
       resolve(v);
     });
   });
+}
+
+/**
+ * First video stream width/height (pixels). Used to match editor preview font scaling on burn-in.
+ *
+ * @param {string} inputPath
+ * @returns {Promise<{ width: number; height: number }>}
+ */
+export async function ffprobeVideoDimensionsPx(inputPath) {
+  const args = [
+    "-v",
+    "error",
+    "-select_streams",
+    "v:0",
+    "-show_entries",
+    "stream=width,height",
+    "-of",
+    "json",
+    inputPath,
+  ];
+  return new Promise((resolve, reject) => {
+    const proc = spawn("ffprobe", args, { stdio: ["ignore", "pipe", "pipe"] });
+    let out = "";
+    proc.stdout?.on("data", (c) => {
+      out += c.toString();
+    });
+    proc.stderr?.on("data", () => {});
+    proc.on("error", reject);
+    proc.on("close", (code) => {
+      if (code !== 0) {
+        reject(new Error(`ffprobe size failed code=${code}`));
+        return;
+      }
+      try {
+        /** @type {{ streams?: Array<{ width?: number; height?: number }> }} */
+        const data = JSON.parse(out);
+        const st = Array.isArray(data?.streams) ? data.streams[0] : null;
+        const width = Math.floor(Number(st?.width));
+        const height = Math.floor(Number(st?.height));
+        if (!Number.isFinite(width) || width <= 0 || !Number.isFinite(height) || height <= 0) {
+          reject(new Error("ffprobe could not read video width/height"));
+          return;
+        }
+        resolve({ width, height });
+      } catch {
+        reject(new Error("ffprobe JSON parse failed"));
+      }
+    });
+  });
+}
+
+/**
+ * ASS font size for burn-in: same idea as editor preview `(stylePx * height) / 720`, then tuned down
+ * because libass + outline reads larger than browser overlay on TV-sized frames.
+ *
+ * @param {number} styleFontPx
+ * @param {number} videoHeightPx
+ */
+function assFontSizeMatchEditorPreview(styleFontPx, videoHeightPx) {
+  const refH = 720;
+  const h = Math.max(180, Math.floor(Number(videoHeightPx) || refH));
+  const base = Math.max(8, Number(styleFontPx) || 28);
+  let scaled = (base * h) / refH;
+  const burnTune = Number(process.env.VOD_SUBTITLE_BURN_FONT_SCALE);
+  const factor = Number.isFinite(burnTune) && burnTune > 0 && burnTune <= 1.5 ? burnTune : 0.52;
+  scaled *= factor;
+  const hardMax = Math.max(12, Math.min(96, Math.floor(Number(process.env.VOD_SUBTITLE_MAX_FONT_PX) || 24)));
+  return Math.round(Math.max(11, Math.min(hardMax, scaled)));
+}
+
+/**
+ * Chars per line from usable width (frame minus side margins) and ASS size — conservative for RTL / wide glyphs.
+ *
+ * @param {number} videoWidthPx
+ * @param {number} assFontSize
+ * @param {number} marginLR one side margin in px (MarginL = MarginR)
+ */
+function burnSubtitleCharsPerLineFromVideoWidth(videoWidthPx, assFontSize, marginLR) {
+  const w = Math.max(320, Math.floor(Number(videoWidthPx) || 1280));
+  const fs = Math.max(10, Math.floor(Number(assFontSize) || 22));
+  const m = Math.max(40, Math.floor(Number(marginLR) || 80));
+  const usable = Math.max(160, w - 2 * m);
+  const envBase = Math.floor(Number(process.env.VOD_SUBTITLE_MAX_CHARS_PER_LINE) || 0);
+  /** ~px per glyph incl. outline (Hebrew / RTL needs more headroom than Latin) */
+  const estGlyphPx = fs * 0.86;
+  const fromRatio = Math.floor(usable / estGlyphPx);
+  const base = envBase > 0 ? envBase : fromRatio;
+  return Math.max(12, Math.min(28, base));
 }
 
 /**
@@ -499,6 +615,38 @@ function shiftSrtContent(srt, offsetMs, firstIndex) {
  * @param {string} srtContent
  * @returns {string}
  */
+/**
+ * Re-wrap each SRT cue body to at most two on-screen lines (burn-in readability).
+ *
+ * @param {string} srt
+ * @param {{ maxCharsPerLine?: number; maxLines?: number }} [opts]
+ */
+export function applyBurnSubtitleWrappingToSrtDocument(srt, opts = {}) {
+  const maxCharsPerLine = Math.max(18, Math.floor(Number(opts.maxCharsPerLine) || 36));
+  const maxLines = Math.max(1, Math.min(2, Math.floor(Number(opts.maxLines) || 2)));
+  const blocks = String(srt || "")
+    .trim()
+    .split(/\n\s*\n/)
+    .filter(Boolean);
+  /** @type {string[]} */
+  const out = [];
+  let serial = 1;
+  for (const block of blocks) {
+    const lines = block.split(/\r?\n/).filter((l) => l.length > 0);
+    if (lines.length < 2) continue;
+    let i = 0;
+    if (/^\d+$/.test(lines[0].trim())) i = 1;
+    const timeLine = lines[i];
+    if (!timeLine?.includes("-->")) continue;
+    const textLines = lines.slice(i + 1);
+    const plain = textLines.join(" ").replace(/\s+/g, " ").trim();
+    const wrapped = wrapSubtitleCuePlainText(plain, maxCharsPerLine, maxLines);
+    out.push(`${serial}\n${timeLine}\n${wrapped}`);
+    serial += 1;
+  }
+  return out.join("\n\n") + (out.length ? "\n" : "");
+}
+
 export function parseSrtContentToPlainText(srtContent) {
   const lines = String(srtContent || "").split(/\r?\n/);
   const blocks = [];
@@ -527,6 +675,65 @@ export function parseSrtContentToPlainText(srtContent) {
   }
   if (buf.length) blocks.push(buf.join(" "));
   return blocks.join("\n\n").trim();
+}
+
+function subtitleTranslateChatModel() {
+  return (process.env.OPENAI_SUBTITLE_TRANSLATE_MODEL || config.openaiNewsModel).trim();
+}
+
+/**
+ * @param {string} srtContent
+ * @returns {Array<{ idLine: string, timeLine: string, text: string }>}
+ */
+function parseSrtDocumentToCues(srtContent) {
+  const normalized = String(srtContent || "")
+    .replace(/\r\n/g, "\n")
+    .trim();
+  const blocks = normalized.split(/\n\n+/);
+  /** @type {Array<{ idLine: string, timeLine: string, text: string }>} */
+  const cues = [];
+  for (const block of blocks) {
+    const lines = block.split("\n");
+    if (lines.length < 2) continue;
+    const idLine = lines[0].trim();
+    const timeLine = lines[1].trim();
+    if (!timeLine.includes("-->")) continue;
+    const text = lines.slice(2).join("\n");
+    cues.push({ idLine, timeLine, text });
+  }
+  return cues;
+}
+
+/**
+ * @param {Array<{ idLine: string, timeLine: string, text: string }>} cues
+ */
+function buildSrtFromCues(cues) {
+  if (!cues.length) return "";
+  return `${cues.map((c) => `${c.idLine}\n${c.timeLine}\n${c.text}`).join("\n\n")}\n`;
+}
+
+/**
+ * @param {object} opts
+ * @param {string} opts.srt
+ * @param {string} opts.targetLang
+ * @param {string} opts.apiKey
+ * @param {string} opts.chatModel
+ * @param {AbortSignal} [opts.signal]
+ */
+async function translateSrtDocumentViaChat(opts) {
+  const { srt, targetLang, apiKey, chatModel, signal } = opts;
+  const cues = parseSrtDocumentToCues(srt);
+  if (!cues.length) return { srt: String(srt || "").trim(), usage: null };
+  const items = cues.map((c, j) => ({ index: j, text: c.text }));
+  const { texts, usage } = await translateSubtitleCueTextsViaChat({
+    items,
+    targetIso639_1: targetLang,
+    apiKey,
+    chatModel,
+    signal,
+  });
+  const next = cues.map((c, j) => ({ ...c, text: texts[j] ?? c.text }));
+  return { srt: buildSrtFromCues(next).trimEnd(), usage };
 }
 
 /**
@@ -602,115 +809,167 @@ function requireOpenAiKey() {
 async function transcribeNonDiarizedToPlainText(ctx) {
   const { audioPath, workDir, subtitles, shouldCancel } = ctx;
   const apiKey = config.openaiApiKey;
-  const { translateToEnglish, openaiLanguage } = resolveOpenAiSttLanguages(subtitles);
+  const resolved = resolveOpenAiSttLanguages(subtitles);
+  const { postTranslateTarget, openaiLanguage } = resolved;
+  const useWhisperTr = useWhisperAudioTranslationEndpoint(resolved);
   const override =
     typeof ctx.sttModelOverride === "string" && ctx.sttModelOverride.trim().length > 0
       ? ctx.sttModelOverride.trim()
       : "";
-  const model = translateToEnglish
+  const model = useWhisperTr
     ? (process.env.OPENAI_STT_TRANSLATE_MODEL || "whisper-1").trim()
     : override || config.openaiSttModel;
   const st = await fs.stat(audioPath);
   const size = st.size;
   /** @type {Array<Record<string, unknown>>} */
   const usageSteps = [];
+  /** @type {string} */
+  let transcriptText = "";
   if (size <= SAFE_CHUNK_BYTES) {
     const ctrl = new AbortController();
     const r = await openaiTranscribeOneFile({
       filePath: audioPath,
       apiKey,
       model,
-      translateToEnglish,
+      translateToEnglish: useWhisperTr,
       language: openaiLanguage,
       responseFormat: "json",
       signal: ctrl.signal,
     });
     usageSteps.push(usageStepRow({ step: "stt", model, usage: r.usage }));
-    return { transcriptText: r.text, openaiClipUsage: buildOpenAiClipUsageReport(usageSteps) };
+    transcriptText = r.text;
+  } else {
+    const duration = await ffprobeDurationSec(audioPath);
+    const silences = await detectSilenceIntervals(audioPath, shouldCancel);
+    const plan = planOpusChunksBySizeAndSilence(duration, size, silences);
+    /** @type {string[]} */
+    const parts = [];
+    for (let i = 0; i < plan.length; i++) {
+      if (shouldCancel()) throw new Error("CANCELLED");
+      const { startSec, endSec } = plan[i];
+      const segPath = path.join(workDir, `stt_chunk_${i}.ogg`);
+      await extractOpusSegmentFromFile({ inputPath: audioPath, startSec, endSec, outPath: segPath, shouldCancel });
+      const ctrl = new AbortController();
+      const r = await openaiTranscribeOneFile({
+        filePath: segPath,
+        apiKey,
+        model,
+        translateToEnglish: useWhisperTr,
+        language: openaiLanguage,
+        responseFormat: "json",
+        signal: ctrl.signal,
+      });
+      usageSteps.push(usageStepRow({ step: "stt_chunk", model, chunkIndex: i, usage: r.usage }));
+      if (r.text) parts.push(r.text);
+      await fs.unlink(segPath).catch(() => {});
+    }
+    transcriptText = parts.join("\n\n").trim();
   }
-  const duration = await ffprobeDurationSec(audioPath);
-  const silences = await detectSilenceIntervals(audioPath, shouldCancel);
-  const plan = planOpusChunksBySizeAndSilence(duration, size, silences);
-  /** @type {string[]} */
-  const parts = [];
-  for (let i = 0; i < plan.length; i++) {
-    if (shouldCancel()) throw new Error("CANCELLED");
-    const { startSec, endSec } = plan[i];
-    const segPath = path.join(workDir, `stt_chunk_${i}.ogg`);
-    await extractOpusSegmentFromFile({ inputPath: audioPath, startSec, endSec, outPath: segPath, shouldCancel });
+
+  if (postTranslateTarget && postTranslateTarget !== "en" && transcriptText.trim()) {
+    const chatModel = subtitleTranslateChatModel();
     const ctrl = new AbortController();
-    const r = await openaiTranscribeOneFile({
-      filePath: segPath,
+    const { text, usage } = await translatePlainTextViaChat({
+      text: transcriptText,
+      targetIso639_1: postTranslateTarget,
       apiKey,
-      model,
-      translateToEnglish,
-      language: openaiLanguage,
-      responseFormat: "json",
+      chatModel,
       signal: ctrl.signal,
     });
-    usageSteps.push(usageStepRow({ step: "stt_chunk", model, chunkIndex: i, usage: r.usage }));
-    if (r.text) parts.push(r.text);
-    await fs.unlink(segPath).catch(() => {});
+    transcriptText = text;
+    usageSteps.push(usageStepRow({ step: "subtitle_translate_chat", model: chatModel, usage }));
   }
-  return { transcriptText: parts.join("\n\n").trim(), openaiClipUsage: buildOpenAiClipUsageReport(usageSteps) };
+
+  return { transcriptText, openaiClipUsage: buildOpenAiClipUsageReport(usageSteps) };
 }
 
 /**
  * @param {object} ctx
+ * @param {string} [ctx.sttModelOverride] non-translate STT model when skipping diarize
+ * @returns {Promise<{ srt: string, openaiClipUsage: Record<string, unknown> }>}
  */
 async function transcribeNonDiarizedToMergedSrt(ctx) {
   const { audioPath, workDir, subtitles, shouldCancel } = ctx;
   const apiKey = config.openaiApiKey;
-  const { translateToEnglish, openaiLanguage } = resolveOpenAiSttLanguages(subtitles);
-  const model = translateToEnglish
+  const resolved = resolveOpenAiSttLanguages(subtitles);
+  const { postTranslateTarget, openaiLanguage } = resolved;
+  const useWhisperTr = useWhisperAudioTranslationEndpoint(resolved);
+  const override =
+    typeof ctx.sttModelOverride === "string" && ctx.sttModelOverride.trim().length > 0
+      ? ctx.sttModelOverride.trim()
+      : "";
+  const model = useWhisperTr
     ? (process.env.OPENAI_STT_TRANSLATE_MODEL || "whisper-1").trim()
-    : config.openaiSttModel;
+    : override || config.openaiSttModel;
   const st = await fs.stat(audioPath);
   const size = st.size;
+  /** @type {Array<Record<string, unknown>>} */
+  const usageSteps = [];
+  /** @type {string} */
+  let srt = "";
   if (size <= SAFE_CHUNK_BYTES) {
     const ctrl = new AbortController();
     const r = await openaiTranscribeOneFile({
       filePath: audioPath,
       apiKey,
       model,
-      translateToEnglish,
+      translateToEnglish: useWhisperTr,
       language: openaiLanguage,
       responseFormat: "srt",
       signal: ctrl.signal,
     });
-    return r.srt;
-  }
-  const duration = await ffprobeDurationSec(audioPath);
-  const silences = await detectSilenceIntervals(audioPath, shouldCancel);
-  const plan = planOpusChunksBySizeAndSilence(duration, size, silences);
-  /** @type {string[]} */
-  const merged = [];
-  let cueIndex = 1;
-  for (let i = 0; i < plan.length; i++) {
-    if (shouldCancel()) throw new Error("CANCELLED");
-    const { startSec, endSec } = plan[i];
-    const segPath = path.join(workDir, `stt_srt_${i}.ogg`);
-    await extractOpusSegmentFromFile({ inputPath: audioPath, startSec, endSec, outPath: segPath, shouldCancel });
-    const ctrl = new AbortController();
-    const r = await openaiTranscribeOneFile({
-      filePath: segPath,
-      apiKey,
-      model,
-      translateToEnglish,
-      language: openaiLanguage,
-      responseFormat: "srt",
-      signal: ctrl.signal,
-    });
-    const offsetMs = Math.round(startSec * 1000);
-    const shifted = shiftSrtContent(r.srt, offsetMs, cueIndex);
-    if (shifted.trim()) {
-      const lines = shifted.trim().split(/\n\n+/);
-      cueIndex += lines.length;
-      merged.push(shifted.trim());
+    usageSteps.push(usageStepRow({ step: "stt", model, usage: r.usage }));
+    srt = r.srt;
+  } else {
+    const duration = await ffprobeDurationSec(audioPath);
+    const silences = await detectSilenceIntervals(audioPath, shouldCancel);
+    const plan = planOpusChunksBySizeAndSilence(duration, size, silences);
+    /** @type {string[]} */
+    const merged = [];
+    let cueIndex = 1;
+    for (let i = 0; i < plan.length; i++) {
+      if (shouldCancel()) throw new Error("CANCELLED");
+      const { startSec, endSec } = plan[i];
+      const segPath = path.join(workDir, `stt_srt_${i}.ogg`);
+      await extractOpusSegmentFromFile({ inputPath: audioPath, startSec, endSec, outPath: segPath, shouldCancel });
+      const ctrl = new AbortController();
+      const r = await openaiTranscribeOneFile({
+        filePath: segPath,
+        apiKey,
+        model,
+        translateToEnglish: useWhisperTr,
+        language: openaiLanguage,
+        responseFormat: "srt",
+        signal: ctrl.signal,
+      });
+      const chunkOffsetMs = Math.round(startSec * 1000);
+      const shifted = shiftSrtContent(r.srt, chunkOffsetMs, cueIndex);
+      usageSteps.push(usageStepRow({ step: "stt_chunk", model, chunkIndex: i, usage: r.usage }));
+      if (shifted.trim()) {
+        const lines = shifted.trim().split(/\n\n+/);
+        cueIndex += lines.length;
+        merged.push(shifted.trim());
+      }
+      await fs.unlink(segPath).catch(() => {});
     }
-    await fs.unlink(segPath).catch(() => {});
+    srt = merged.join("\n\n").trim();
   }
-  return merged.join("\n\n").trim();
+
+  if (postTranslateTarget && postTranslateTarget !== "en" && srt.trim()) {
+    const chatModel = subtitleTranslateChatModel();
+    const ctrl = new AbortController();
+    const { srt: tr, usage } = await translateSrtDocumentViaChat({
+      srt,
+      targetLang: postTranslateTarget,
+      apiKey,
+      chatModel,
+      signal: ctrl.signal,
+    });
+    srt = tr;
+    usageSteps.push(usageStepRow({ step: "subtitle_translate_chat", model: chatModel, usage }));
+  }
+
+  return { srt, openaiClipUsage: buildOpenAiClipUsageReport(usageSteps) };
 }
 
 /**
@@ -719,10 +978,10 @@ async function transcribeNonDiarizedToMergedSrt(ctx) {
  * @param {object} ctx
  */
 async function transcribeDiarizedPipeline(ctx) {
-  const { audioPath, workDir, subtitles, shouldCancel } = ctx;
+  const { audioPath, workDir, subtitles, shouldCancel, inferSpeakerNames = false } = ctx;
   const apiKey = config.openaiApiKey;
   const model = config.openaiSttModel;
-  const { openaiLanguage } = resolveOpenAiSttLanguages(subtitles);
+  const { openaiLanguage, postTranslateTarget } = resolveOpenAiSttLanguages(subtitles);
   const ctrl = new AbortController();
 
   const st = await fs.stat(audioPath);
@@ -773,24 +1032,40 @@ async function transcribeDiarizedPipeline(ctx) {
 
   /** @type {Record<string, string>} */
   let speakerLabels = {};
-  try {
-    const { speakerLabels: inferred, usage: inferUsage } = await inferSpeakerLabelsFromSegmentSamples({
-      segments: allSegments,
+  if (inferSpeakerNames) {
+    try {
+      const { speakerLabels: inferred, usage: inferUsage } = await inferSpeakerLabelsFromSegmentSamples({
+        segments: allSegments,
+        apiKey,
+        chatModel: config.openaiNewsModel,
+        signal: ctrl.signal,
+      });
+      usageSteps.push(
+        usageStepRow({ step: "speaker_infer_chat", model: config.openaiNewsModel, usage: inferUsage }),
+      );
+      speakerLabels = { ...speakerLabels, ...inferred };
+    } catch (e) {
+      console.error("[vod-stt] speaker name inference skipped:", e instanceof Error ? e.message : e);
+    }
+  }
+
+  if (postTranslateTarget) {
+    const chatModel = subtitleTranslateChatModel();
+    const items = allSegments.map((s, j) => ({ index: j, text: s.text }));
+    const { texts, usage: tu } = await translateSubtitleCueTextsViaChat({
+      items,
+      targetIso639_1: postTranslateTarget,
       apiKey,
-      chatModel: config.openaiNewsModel,
+      chatModel,
       signal: ctrl.signal,
     });
-    usageSteps.push(
-      usageStepRow({ step: "speaker_infer_chat", model: config.openaiNewsModel, usage: inferUsage }),
-    );
-    speakerLabels = { ...speakerLabels, ...inferred };
-  } catch (e) {
-    console.error("[vod-stt] speaker name inference skipped:", e instanceof Error ? e.message : e);
+    usageSteps.push(usageStepRow({ step: "subtitle_translate_chat", model: chatModel, usage: tu }));
+    allSegments = allSegments.map((s, j) => ({ ...s, text: texts[j] ?? s.text }));
   }
 
   const transcriptDiarization = { version: 1, segments: allSegments, speakerLabels };
   const transcriptText = formatTranscriptDashLines(allSegments, speakerLabels);
-  const srt = diarizedSegmentsToSrt(allSegments, speakerLabels);
+  const srt = diarizedSegmentsToSrt(allSegments, speakerLabels, { includeSpeakerLabel: inferSpeakerNames });
   const openaiClipUsage = buildOpenAiClipUsageReport(usageSteps);
   return { transcriptText, transcriptDiarization, srt, openaiClipUsage };
 }
@@ -811,14 +1086,19 @@ export async function transcribeAudioFileToPlainText(ctx) {
   const { subtitles, forceNonDiarized } = ctx;
   requireOpenAiKey();
   const model = config.openaiSttModel;
-  const { translateToEnglish } = resolveOpenAiSttLanguages(subtitles);
 
-  if (forceNonDiarized || translateToEnglish || !usesDiarizedSttModel(model)) {
+  if (forceNonDiarized || !usesDiarizedSttModel(model)) {
     const { transcriptText, openaiClipUsage } = await transcribeNonDiarizedToPlainText(ctx);
     return { transcriptText, transcriptDiarization: null, openaiClipUsage };
   }
 
-  const { transcriptText, transcriptDiarization, openaiClipUsage } = await transcribeDiarizedPipeline(ctx);
+  const inferSpeakerNames =
+    ctx.inferSpeakerNames === true ||
+    !!(subtitles && typeof subtitles === "object" && subtitles.transcribeInferSpeakerNames === true);
+  const { transcriptText, transcriptDiarization, openaiClipUsage } = await transcribeDiarizedPipeline({
+    ...ctx,
+    inferSpeakerNames,
+  });
   return { transcriptText, transcriptDiarization, openaiClipUsage };
 }
 
@@ -836,10 +1116,10 @@ export async function transcribeAudioFileToMergedSrt(ctx) {
   const { subtitles } = ctx;
   requireOpenAiKey();
   const model = config.openaiSttModel;
-  const { translateToEnglish } = resolveOpenAiSttLanguages(subtitles);
 
-  if (translateToEnglish || !usesDiarizedSttModel(model)) {
-    return transcribeNonDiarizedToMergedSrt(ctx);
+  if (!usesDiarizedSttModel(model)) {
+    const { srt } = await transcribeNonDiarizedToMergedSrt(ctx);
+    return srt;
   }
 
   const { srt } = await transcribeDiarizedPipeline(ctx);
@@ -852,7 +1132,7 @@ export async function transcribeAudioFileToMergedSrt(ctx) {
  * @param {string} opts.outPath
  * @param {() => boolean} opts.shouldCancel
  */
-async function extractAudioOpusFromMp4(opts) {
+export async function extractAudioOpusFromMp4(opts) {
   const { inputMp4, outPath, shouldCancel } = opts;
   const args = [
     "-hide_banner",
@@ -949,19 +1229,74 @@ async function burnSubtitlesFfmpeg(opts) {
  */
 
 /**
+ * One STT pass for burn-in: merged SRT plus transcript fields for job PATCH (OpenAI only; no local whisper).
+ *
+ * @param {object} ctx
+ * @param {string} ctx.audioPath extracted opus path
+ * @param {string} ctx.workDir
+ * @param {object} [ctx.subtitles]
+ * @param {boolean} [ctx.speakerDiarization] when false, use non-diarized STT even if OPENAI_STT_MODEL is diarize
+ * @param {() => boolean} ctx.shouldCancel
+ * @returns {Promise<{ srt: string, transcriptText: string, transcriptDiarization: object | null, openaiClipUsage: Record<string, unknown> | null }>}
+ */
+async function transcribeAudioForBurnInMeta(ctx) {
+  const { audioPath, workDir, subtitles, shouldCancel, speakerDiarization = true } = ctx;
+  requireOpenAiKey();
+  const model = config.openaiSttModel;
+  const nonDiarizeModel = (process.env.OPENAI_STT_NON_DIARIZE_MODEL || "gpt-4o-mini-transcribe").trim();
+  const sttModelOverride =
+    speakerDiarization === false && usesDiarizedSttModel(model) ? nonDiarizeModel : undefined;
+  const useDiarizedPipeline = speakerDiarization !== false && usesDiarizedSttModel(model);
+
+  if (!useDiarizedPipeline) {
+    const { srt, openaiClipUsage } = await transcribeNonDiarizedToMergedSrt({
+      audioPath,
+      workDir,
+      subtitles,
+      shouldCancel,
+      ...(sttModelOverride ? { sttModelOverride } : {}),
+    });
+    const transcriptText = parseSrtContentToPlainText(srt);
+    return {
+      srt,
+      transcriptText,
+      transcriptDiarization: null,
+      openaiClipUsage,
+    };
+  }
+
+  const inferSpeakerNames =
+    ctx.inferSpeakerNames === true ||
+    !!(subtitles && typeof subtitles === "object" && subtitles.transcribeInferSpeakerNames === true);
+  const { transcriptText, transcriptDiarization, srt, openaiClipUsage } = await transcribeDiarizedPipeline({
+    ...ctx,
+    inferSpeakerNames,
+  });
+  return { srt, transcriptText, transcriptDiarization, openaiClipUsage };
+}
+
+/**
  * After the main encode, transcribe audio with OpenAI STT and burn subtitles into a new MP4.
+ * Returns transcript metadata from the same STT pass used for the SRT burn-in.
  *
  * @param {object} ctx
  * @param {string} ctx.inputMp4
  * @param {string} ctx.workDir
  * @param {SubtitleBurnStyle} ctx.style
  * @param {object} [ctx.subtitles]
+ * @param {boolean} [ctx.speakerDiarization]
+ * @param {boolean} [ctx.inferSpeakerNames] optional; also read from ctx.subtitles.transcribeInferSpeakerNames
  * @param {() => boolean} ctx.shouldCancel
  * @param {(pct: number) => void} [ctx.onProgress]
- * @returns {Promise<{ localPath: string }>}
+ * @returns {Promise<{
+ *   localPath: string;
+ *   transcriptText: string;
+ *   transcriptDiarization: object | null;
+ *   openaiClipUsage: Record<string, unknown> | null;
+ * }>}
  */
 export async function transcribeAndBurnSubtitles(ctx) {
-  const { inputMp4, workDir, style, subtitles, shouldCancel, onProgress } = ctx;
+  const { inputMp4, workDir, style, subtitles, shouldCancel, onProgress, speakerDiarization = true } = ctx;
   const opusPath = path.join(workDir, "stt_input.ogg");
   const srtPath = path.join(workDir, "stt_merged.srt");
   const outPath = path.join(workDir, "output_subtitled.mp4");
@@ -970,22 +1305,37 @@ export async function transcribeAndBurnSubtitles(ctx) {
   await extractAudioOpusFromMp4({ inputMp4, outPath: opusPath, shouldCancel });
 
   onProgress?.(58);
-  const mergedSrt = await transcribeAudioFileToMergedSrt({
+  const { srt: mergedSrt, transcriptText, transcriptDiarization, openaiClipUsage } = await transcribeAudioForBurnInMeta({
     audioPath: opusPath,
     workDir,
     subtitles,
     shouldCancel,
+    speakerDiarization,
   });
-  await fs.writeFile(srtPath, mergedSrt, "utf8");
+  onProgress?.(72);
+  const { width: videoW, height: videoH } = await ffprobeVideoDimensionsPx(inputMp4).catch(() => ({
+    width: 1280,
+    height: 720,
+  }));
+  const marginPctRaw = Number(process.env.VOD_SUBTITLE_MARGIN_WIDTH_PCT);
+  const marginPct =
+    Number.isFinite(marginPctRaw) && marginPctRaw > 0.02 && marginPctRaw < 0.22 ? marginPctRaw : 0.09;
+  const marginHDefault = Math.round(videoW * marginPct);
+  const marginH = Math.max(56, Math.min(260, Math.floor(Number(process.env.VOD_SUBTITLE_MARGIN_LR) || marginHDefault)));
+  const fontSize = assFontSizeMatchEditorPreview(Number(style?.fontSizePx) || 28, videoH);
+  const maxChars = burnSubtitleCharsPerLineFromVideoWidth(videoW, fontSize, marginH);
+  const wrappedSrt = applyBurnSubtitleWrappingToSrtDocument(mergedSrt, { maxCharsPerLine: maxChars, maxLines: 2 });
+  await fs.writeFile(srtPath, wrappedSrt, "utf8");
 
   onProgress?.(76);
-  const fontSize = Math.max(8, Math.min(120, Number(style?.fontSizePx) || 28));
-  const outlineW = Math.max(0, Math.min(20, Number(style?.outlineWidthPx) || 3));
+  const styleOutline = Math.max(0, Math.min(20, Number(style?.outlineWidthPx) || 3));
+  const outlineW = Math.min(styleOutline, Math.max(1, Math.round(fontSize / 11)));
   const primary = hexToAssColor(style?.textColor);
   const outlineCol = hexToAssColor(style?.outlineColor);
 
   const fontName = (process.env.VOD_SUBTITLE_FONT_NAME || "DejaVu Sans").trim();
-  const forceStyle = `Fontname=${fontName},FontSize=${fontSize},PrimaryColour=${primary},OutlineColour=${outlineCol},Outline=${outlineW},Shadow=0,MarginV=48,Alignment=2,Bold=1`;
+  const marginV = Math.max(8, Math.min(100, Math.floor(Number(process.env.VOD_SUBTITLE_MARGIN_V) || 22)));
+  const forceStyle = `Fontname=${fontName},FontSize=${fontSize},PrimaryColour=${primary},OutlineColour=${outlineCol},Outline=${outlineW},Shadow=0,MarginL=${marginH},MarginR=${marginH},MarginV=${marginV},Alignment=2,Bold=0,WrapStyle=2`;
 
   const subsEscaped = escapeSubtitlesPath(srtPath);
   const vf = `subtitles='${subsEscaped}':force_style='${forceStyle}'`;
@@ -995,5 +1345,40 @@ export async function transcribeAndBurnSubtitles(ctx) {
 
   onProgress?.(88);
   await fs.unlink(opusPath).catch(() => {});
-  return { localPath: outPath };
+  return { localPath: outPath, transcriptText, transcriptDiarization, openaiClipUsage };
+}
+
+/**
+ * OpenAI STT on an encoded MP4 (plain transcript + optional diarization; no burn-in).
+ * Same API path as realtime transcribe-only jobs.
+ *
+ * @param {object} ctx
+ * @param {string} ctx.inputMp4
+ * @param {string} ctx.workDir
+ * @param {object} [ctx.subtitles] language hints (clip / root subtitles shape)
+ * @param {boolean} [ctx.speakerDiarization]
+ * @param {boolean} [ctx.inferSpeakerNames]
+ * @param {() => boolean} ctx.shouldCancel
+ * @returns {Promise<{ transcriptText: string, transcriptDiarization: object | null, openaiClipUsage: Record<string, unknown> }>}
+ */
+export async function postEncodeTranscribeFromEncodedMp4(ctx) {
+  const { inputMp4, workDir, subtitles, shouldCancel, speakerDiarization = true, inferSpeakerNames = false } = ctx;
+  requireOpenAiKey();
+  const opusPath = path.join(workDir, "post_encode_stt_input.ogg");
+  await extractAudioOpusFromMp4({ inputMp4, outPath: opusPath, shouldCancel });
+  const model = config.openaiSttModel;
+  const nonDiarizeModel = (process.env.OPENAI_STT_NON_DIARIZE_MODEL || "gpt-4o-mini-transcribe").trim();
+  const sttModelOverride =
+    speakerDiarization === false && usesDiarizedSttModel(model) ? nonDiarizeModel : undefined;
+  const out = await transcribeAudioFileToPlainText({
+    audioPath: opusPath,
+    workDir,
+    subtitles,
+    shouldCancel,
+    forceNonDiarized: speakerDiarization === false,
+    inferSpeakerNames,
+    ...(sttModelOverride ? { sttModelOverride } : {}),
+  });
+  await fs.unlink(opusPath).catch(() => {});
+  return out;
 }

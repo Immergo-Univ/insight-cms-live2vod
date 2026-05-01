@@ -252,3 +252,43 @@ export async function generateNewsArticlesFromTvTranscript(opts) {
     clearTimeout(timer);
   }
 }
+
+/**
+ * Drop disabled locales from a trilingual news result (same API cost; unused payloads removed before PATCH).
+ *
+ * @param {{ bundle: object, legacyPlain: { en?: string, es?: string, he?: string }, openaiClipUsage?: object }} news
+ * @param {{ en?: boolean; es?: boolean; he?: boolean }} [locales] when a key is strictly `false`, that locale is stripped
+ * @returns {typeof news}
+ */
+export function filterTrilingualNewsByLocaleFlags(news, locales) {
+  if (!news || typeof news !== "object" || !locales || typeof locales !== "object") {
+    return news;
+  }
+  const prevBundle = news.bundle && typeof news.bundle === "object" ? news.bundle : {};
+  /** @type {Record<string, unknown>} */
+  const bundle = { ...prevBundle };
+  const legacyPlain = {
+    en: String(news.legacyPlain?.en ?? ""),
+    es: String(news.legacyPlain?.es ?? ""),
+    he: String(news.legacyPlain?.he ?? ""),
+  };
+  let touched = false;
+  if (locales.en === false && bundle.en) {
+    delete bundle.en;
+    legacyPlain.en = "";
+    touched = true;
+  }
+  if (locales.es === false && bundle.es) {
+    delete bundle.es;
+    legacyPlain.es = "";
+    touched = true;
+  }
+  if (locales.he === false && bundle.he) {
+    delete bundle.he;
+    legacyPlain.he = "";
+    touched = true;
+  }
+  if (!touched) return news;
+  if (bundle.version == null) bundle.version = 1;
+  return { ...news, bundle, legacyPlain };
+}

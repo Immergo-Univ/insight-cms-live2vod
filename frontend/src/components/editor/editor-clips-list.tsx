@@ -70,6 +70,17 @@ function vodJobHasDiarizedTranscript(job: VodJobRecord): boolean {
   return Boolean(di && Array.isArray(di.segments) && di.segments.length > 0);
 }
 
+/** VOD encode row: show transcript control while job runs or when it finished with STT payload. */
+function vodEncodeJobSupportsTranscriptModal(job: VodJobRecord | undefined): boolean {
+  if (!job || job.jobKind === "realtime_transcribe") return false;
+  if (vodJobIsActive(job.status)) return true;
+  if (job.status === "failed") return true;
+  if (job.status === "completed") {
+    return Boolean(job.transcriptText?.trim() || vodJobHasDiarizedTranscript(job));
+  }
+  return false;
+}
+
 function emptyNewsBlock(): TranscriptNewsLocaleBlock {
   const d = new Date();
   return {
@@ -607,13 +618,13 @@ export function EditorClipsList({
     () => (transcriptModalClipId ? clips.find((x) => x.id === transcriptModalClipId) ?? null : null),
     [clips, transcriptModalClipId],
   );
-  const transcriptModalJob = useMemo(
-    () =>
-      transcriptModalClipId
-        ? pickLatestRealtimeTranscribeJobForEditorClip(vodJobs, transcriptModalClipId)
-        : null,
-    [vodJobs, transcriptModalClipId],
-  );
+  const transcriptModalJob = useMemo(() => {
+    if (!transcriptModalClipId) return null;
+    if (realtimeTranscriptUi) {
+      return pickLatestRealtimeTranscribeJobForEditorClip(vodJobs, transcriptModalClipId);
+    }
+    return pickLatestVodEncodeJobForEditorClip(vodJobs, transcriptModalClipId);
+  }, [vodJobs, transcriptModalClipId, realtimeTranscriptUi]);
 
   useLayoutEffect(() => {
     if (!titleEditId) return;
@@ -820,7 +831,11 @@ export function EditorClipsList({
                 </h3>
                 <div className="mt-3 text-sm text-primary">
                   {!transcriptModalJob ? (
-                    <p className="text-tertiary">No transcript job for this clip yet. Enable Transcribe on the REC bar and finish a segment.</p>
+                    <p className="text-tertiary">
+                      {realtimeTranscriptUi
+                        ? "No transcript job for this clip yet. Enable Transcribe on the REC bar and finish a segment."
+                        : "No encode job for this clip yet. Encode the clip to generate a transcript (OpenAI STT after encoding)."}
+                    </p>
                   ) : transcriptModalJob.status === "failed" ? (
                     <p className="text-error-primary">{transcriptModalJob.error ?? "Transcript failed"}</p>
                   ) : vodJobIsActive(transcriptModalJob.status) ? (
@@ -1034,7 +1049,7 @@ export function EditorClipsList({
                       </button>
                     </span>
                   ) : null}
-                  {realtimeTranscriptUi ? (
+                  {realtimeTranscriptUi || vodEncodeJobSupportsTranscriptModal(vodJob) ? (
                     <span data-no-row-select onClick={(e) => e.stopPropagation()} className="inline-flex shrink-0">
                       <button
                         type="button"
@@ -1046,8 +1061,13 @@ export function EditorClipsList({
                           "flex size-8 shrink-0 items-center justify-center rounded-full border border-secondary bg-primary text-fg-quaternary transition-colors",
                           encodeActive && "cursor-not-allowed opacity-45 hover:bg-primary",
                           !encodeActive && "hover:bg-secondary hover:text-fg-secondary",
-                          transcribeJob &&
-                            vodJobIsActive(transcribeJob.status) &&
+                          ((realtimeTranscriptUi &&
+                            transcribeJob &&
+                            vodJobIsActive(transcribeJob.status)) ||
+                            (!realtimeTranscriptUi &&
+                              vodJob &&
+                              vodJobIsActive(vodJob.status) &&
+                              (vodJob.phase === "transcribing" || vodJob.phase === "generating_news"))) &&
                             "border-amber-500/80 text-amber-700 dark:text-amber-400",
                         )}
                       >

@@ -68,12 +68,14 @@ export function whisperSubtitlePairHint(
   }
   if (output === "en") {
     if (source === "en") return "English speech → English subtitles (transcription).";
-    if (source === "auto")
-      return "Auto-detect speech language, then translate subtitles to English (-l auto -tr).";
-    return `Translate ${labelForCode(source)} speech to English subtitles (-l ${source} -tr).`;
+    if (source === "auto") return "Auto-detect speech, then English subtitles (OpenAI translation).";
+    return `Transcribe ${labelForCode(source)} audio, then English subtitles (OpenAI translation).`;
   }
-  if (source === "auto" || source === output) {
-    return `Transcription in ${labelForCode(output)} (-l ${output}).`;
+  if (source === "auto") {
+    return `Auto-detect speech, then translate subtitles to ${labelForCode(output)} (OpenAI).`;
+  }
+  if (source === output) {
+    return `Transcription in ${labelForCode(output)}.`;
   }
   return `Whisper cannot produce ${labelForCode(output)} subtitles from ${labelForCode(source)} audio. Use the same language for both, set video to Auto with one subtitle language, or choose English as subtitle language for translation.`;
 }

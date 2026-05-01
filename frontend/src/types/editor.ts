@@ -317,14 +317,30 @@ export interface EditorSubtitleStyle {
   outlineWidthPx: number;
 }
 
+/** Per-locale AI news drafts after STT (encoder may still call one trilingual model and drop disabled locales). */
+export interface EditorSubtitleTranscribeNewsLocales {
+  en: boolean;
+  es: boolean;
+  he: boolean;
+}
+
 /**
  * Editor state for subtitle preview + modal (not all fields are sent in JSON).
- * Video language → whisper -l hint; subtitle language → transcription or translate to English.
+ * Video language → STT hint; subtitle output language → same-language transcription or OpenAI translation to the selected locale.
  */
 export interface EditorSubtitleSettings {
   style: EditorSubtitleStyle;
   whisperSourceLanguage: WhisperLanguageCode;
   whisperOutputLanguage: WhisperSubtitleOutputLanguage;
+  /** OpenAI diarization for burned subs + transcript (default true when omitted). */
+  transcribeSpeakerDiarization?: boolean;
+  /**
+   * When true, run optional name inference so display names appear in burned SRT/VTT cues and transcript.
+   * Default false (speaker ids / generic labels only).
+   */
+  transcribeInferSpeakerNames?: boolean;
+  /** Which news locales to keep after STT (default all true). */
+  transcribeNewsLocales?: Partial<EditorSubtitleTranscribeNewsLocales>;
 }
 
 /** Sent in JSON when subtitle mode is on. */
@@ -335,9 +351,12 @@ export interface EditorSubtitlesConfig {
   style: EditorSubtitleStyle;
   /** @deprecated Old jobs only; backend maps to source/output if present */
   languageMode?: string;
+  transcribeSpeakerDiarization?: boolean;
+  transcribeInferSpeakerNames?: boolean;
+  transcribeNewsLocales?: Partial<EditorSubtitleTranscribeNewsLocales>;
 }
 
-/** Default subtitle / whisper options for a new sub-clip or when fields are missing. */
+/** Default subtitle / whisper options for a new sub-clip or when fields are missing (clipping / timeline encode). */
 export const DEFAULT_EDITOR_SUBTITLE_SETTINGS: EditorSubtitleSettings = {
   whisperSourceLanguage: "auto",
   whisperOutputLanguage: "same",
@@ -347,7 +366,41 @@ export const DEFAULT_EDITOR_SUBTITLE_SETTINGS: EditorSubtitleSettings = {
     outlineColor: "#000000",
     outlineWidthPx: 3,
   },
+  transcribeSpeakerDiarization: true,
+  /** Clipping default: speech-only burned cues unless the user enables name inference in Subtitle style. */
+  transcribeInferSpeakerNames: false,
 };
+
+export const DEFAULT_SUBTITLE_TRANSCRIBE_NEWS_LOCALES: EditorSubtitleTranscribeNewsLocales = {
+  en: true,
+  es: true,
+  he: true,
+};
+
+/** Normalize subtitle transcribe options for UI and export. */
+export function normalizeEditorSubtitleSettings(
+  raw: EditorSubtitleSettings | undefined,
+): EditorSubtitleSettings & {
+  transcribeSpeakerDiarization: boolean;
+  transcribeInferSpeakerNames: boolean;
+  transcribeNewsLocales: EditorSubtitleTranscribeNewsLocales;
+} {
+  const d = DEFAULT_EDITOR_SUBTITLE_SETTINGS;
+  const base = raw ?? d;
+  const style = { ...d.style, ...base.style };
+  const nl: EditorSubtitleTranscribeNewsLocales = {
+    ...DEFAULT_SUBTITLE_TRANSCRIBE_NEWS_LOCALES,
+    ...base.transcribeNewsLocales,
+  };
+  return {
+    whisperSourceLanguage: base.whisperSourceLanguage,
+    whisperOutputLanguage: base.whisperOutputLanguage,
+    style,
+    transcribeSpeakerDiarization: base.transcribeSpeakerDiarization !== false,
+    transcribeInferSpeakerNames: base.transcribeInferSpeakerNames === true,
+    transcribeNewsLocales: nl,
+  };
+}
 
 /**
  * Normalized rectangle (0–1) within the widget layout viewport:
@@ -490,6 +543,10 @@ export interface EditorStateJson {
   transcribeSpeakerDiarization?: boolean;
   /** When false, skip OpenAI news generation for this job. Default true when omitted. */
   transcribeGenerateNews?: boolean;
+  /** When set, drop disabled locales from the trilingual news result (after STT). */
+  transcribeNewsLocales?: Partial<EditorSubtitleTranscribeNewsLocales>;
+  /** When true, run speaker-name inference for diarized STT (subtitles + transcript). */
+  transcribeInferSpeakerNames?: boolean;
 }
 
 /** Defaults for encode-related fields when creating or hydrating a sub-clip. */
@@ -500,10 +557,7 @@ export function defaultEditorSubClipEncodeFields(): Required<
     verticalCropMode: false,
     cropWindow: null,
     subtitleMode: false,
-    subtitleSettings: {
-      ...DEFAULT_EDITOR_SUBTITLE_SETTINGS,
-      style: { ...DEFAULT_EDITOR_SUBTITLE_SETTINGS.style },
-    },
+    subtitleSettings: normalizeEditorSubtitleSettings(undefined),
   };
 }
 
@@ -547,9 +601,7 @@ export function normalizeEditorSubClip(c: EditorSubClip): EditorSubClip {
     verticalCropBreakpoints,
     verticalCropPanSettings,
     subtitleMode: c.subtitleMode ?? d.subtitleMode,
-    subtitleSettings: c.subtitleSettings
-      ? { ...c.subtitleSettings, style: { ...c.subtitleSettings.style } }
-      : { ...d.subtitleSettings, style: { ...d.subtitleSettings.style } },
+    subtitleSettings: normalizeEditorSubtitleSettings(c.subtitleSettings ?? d.subtitleSettings),
     tags: c.tags !== undefined ? normalizeEditorClipTagsList(c.tags) : undefined,
     posters: c.posters ? [...c.posters] : undefined,
     widgets: c.widgets?.length ? c.widgets.map(cloneEditorClipWidget) : undefined,

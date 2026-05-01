@@ -11,7 +11,10 @@ import {
 } from "./vod-openai-audio-stt.service.js";
 import { vodEncodeStdout } from "../utils/vod-encode-log.js";
 import { config } from "../config.js";
-import { generateNewsArticlesFromTvTranscript } from "./openai-news-agent.service.js";
+import {
+  generateNewsArticlesFromTvTranscript,
+  filterTrilingualNewsByLocaleFlags,
+} from "./openai-news-agent.service.js";
 import { usesDiarizedSttModel } from "./openai-stt-diarize.service.js";
 import { logRealtimeTranscribeClipOpenAiCost, mergeOpenAiClipUsageReports } from "../utils/openai-usage.js";
 
@@ -159,12 +162,13 @@ export async function runRealtimeTranscribeOnlyJob(opts) {
       });
       if (shouldCancel()) throw new Error("CANCELLED");
       try {
-        const news = await generateNewsArticlesFromTvTranscript({
+        const newsRaw = await generateNewsArticlesFromTvTranscript({
           apiKey,
           model: config.openaiNewsModel,
           transcriptText: stt.transcriptText,
           timeoutMs: config.openaiNewsTimeoutMs,
         });
+        const news = filterTrilingualNewsByLocaleFlags(newsRaw, spec?.transcribeNewsLocales);
         completionPatch.transcriptNewsBundle = news.bundle;
         completionPatch.transcriptNewsEn = news.legacyPlain.en;
         completionPatch.transcriptNewsEs = news.legacyPlain.es;

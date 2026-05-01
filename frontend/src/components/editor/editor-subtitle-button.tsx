@@ -29,7 +29,7 @@ export function EditorSubtitleButton({
           ? `size-8 rounded-full ${active ? "border-brand border-2 ring-1 ring-brand-secondary/40" : "border-secondary"}`
           : `size-10 rounded-full shadow-lg ${active ? "border-brand border-2 ring-2 ring-brand-secondary/40" : "border-secondary"}`
       }`}
-      title={active ? "Disable burned-in subtitles" : "Burned-in subtitles (whisper.cpp)"}
+      title={active ? "Disable burned-in subtitles" : "Burned-in subtitles (OpenAI STT + ffmpeg)"}
       aria-label={active ? "Disable subtitles" : "Enable subtitles"}
       aria-pressed={active}
     >
