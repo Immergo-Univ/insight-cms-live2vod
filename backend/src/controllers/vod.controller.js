@@ -31,7 +31,7 @@ vodRouter.post("/jobs", async (req, res) => {
     const editorClipId =
       typeof rawClipId === "string" && rawClipId.trim().length > 0 ? rawClipId.trim() : undefined;
 
-    const jobId = startBackgroundVodJob({
+    const jobId = await startBackgroundVodJob({
       tenantId,
       spec,
       clipUrlPreview: spec.clipUrl,
@@ -52,7 +52,7 @@ vodRouter.get("/jobs", async (req, res) => {
       return res.status(400).json({ error: "Missing tenantId" });
     }
     await resolveTenant(tenantId);
-    res.json({ jobs: listJobsForTenant(tenantId) });
+    res.json({ jobs: await listJobsForTenant(tenantId) });
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
     res.status(400).json({ error: message });
@@ -94,7 +94,7 @@ vodRouter.patch("/jobs/:jobId", async (req, res) => {
     }
     await resolveTenant(tenantId);
     const { jobId } = req.params;
-    const job = getJob(jobId);
+    const job = await getJob(jobId);
     if (!job || job.tenantId !== tenantId) {
       return res.status(404).json({ error: "Job not found" });
     }
@@ -137,8 +137,8 @@ vodRouter.patch("/jobs/:jobId", async (req, res) => {
       patch.transcriptNewsBundle = body.transcriptNewsBundle;
     }
 
-    updateJob(jobId, patch);
-    res.json({ ok: true, job: getJob(jobId) });
+    await updateJob(jobId, patch);
+    res.json({ ok: true, job: await getJob(jobId) });
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
     res.status(400).json({ error: message });
@@ -153,7 +153,7 @@ vodRouter.post("/jobs/:jobId/cancel", async (req, res) => {
     }
     await resolveTenant(tenantId);
     const { jobId } = req.params;
-    const job = getJob(jobId);
+    const job = await getJob(jobId);
     if (!job || job.tenantId !== tenantId) {
       return res.status(404).json({ error: "Job not found" });
     }
@@ -161,7 +161,7 @@ vodRouter.post("/jobs/:jobId/cancel", async (req, res) => {
       return res.json({ ok: true, job });
     }
     requestCancelJob(jobId);
-    updateJob(jobId, {
+    await updateJob(jobId, {
       message: "Cancelling…",
       phase: "cancelling",
     });

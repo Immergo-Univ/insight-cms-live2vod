@@ -58,7 +58,7 @@ publicTranscriptNewsRouter.get("/transcript-news/:tenantId/:jobId", async (req, 
       return res.status(400).type("text/plain").send("Missing tenantId or jobId");
     }
     await resolveTenant(tenantId);
-    const job = getJob(jobId);
+    const job = await getJob(jobId);
     if (!job || job.tenantId !== tenantId) {
       return res.status(404).type("text/plain").send("Not found");
     }

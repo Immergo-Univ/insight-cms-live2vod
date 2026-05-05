@@ -42,10 +42,10 @@ function requireEncoderSecret(req, res, next) {
   next();
 }
 
-encoderCallbackRouter.patch("/jobs/:jobId", requireEncoderSecret, (req, res) => {
+encoderCallbackRouter.patch("/jobs/:jobId", requireEncoderSecret, async (req, res) => {
   const { jobId } = req.params;
   if (!jobId) return res.status(400).json({ error: "Missing jobId" });
-  const job = getJob(jobId);
+  const job = await getJob(jobId);
   if (!job) return res.status(404).json({ error: "Job not found" });
 
   const body = req.body && typeof req.body === "object" ? req.body : {};
@@ -59,6 +59,6 @@ encoderCallbackRouter.patch("/jobs/:jobId", requireEncoderSecret, (req, res) => 
   if (Object.keys(patch).length === 0) {
     return res.status(400).json({ error: "No valid fields to patch" });
   }
-  updateJob(jobId, patch);
+  await updateJob(jobId, patch);
   res.json({ ok: true });
 });

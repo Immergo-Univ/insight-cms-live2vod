@@ -39,11 +39,11 @@ export function requestCancelJob(jobId) {
  * @param {string} [opts.editorClipId]
  * @returns {string} jobId
  */
-export function startBackgroundVodJob(opts) {
+export async function startBackgroundVodJob(opts) {
   const jobId = randomUUID();
   const { tenantId, spec, clipUrlPreview, editorClipId } = opts;
 
-  createJob({
+  await createJob({
     id: jobId,
     tenantId,
     status: "queued",
@@ -62,7 +62,7 @@ export function startBackgroundVodJob(opts) {
 
   const { serviceUrl, secret } = config.encoder;
   if (!serviceUrl || !secret) {
-    updateJob(jobId, {
+    await updateJob(jobId, {
       status: "failed",
       progress: 0,
       phase: "failed",
@@ -91,7 +91,7 @@ export function startBackgroundVodJob(opts) {
         const t = await res.text();
         const msg = `Encoder rejected job (${res.status}): ${t.slice(0, 400)}`;
         console.error(`[vod] dispatch job=${jobId}`, msg);
-        updateJob(jobId, {
+        await updateJob(jobId, {
           status: "failed",
           progress: 0,
           phase: "failed",
@@ -102,7 +102,7 @@ export function startBackgroundVodJob(opts) {
     } catch (e) {
       const m = e instanceof Error ? e.message : String(e);
       console.error(`[vod] dispatch job=${jobId} network error`, m);
-      updateJob(jobId, {
+      await updateJob(jobId, {
         status: "failed",
         progress: 0,
         phase: "failed",

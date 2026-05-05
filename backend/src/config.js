@@ -159,6 +159,29 @@ export const config = {
   },
 
   /**
+   * VOD / clip jobs (`vod_jobs` via Sequelize). Enabled when POSTGRES_HOST and POSTGRES_DB are set.
+   * Schema: `sequelize.sync()` on startup; optional `POSTGRES_SYNC_ALTER=true` for `sync({ alter: true })`.
+   * Optional TLS: POSTGRES_SSL=true (rejectUnauthorized only if POSTGRES_SSL_REJECT_UNAUTHORIZED=true).
+   */
+  postgres: (() => {
+    const host = (process.env.POSTGRES_HOST || "").trim();
+    const database = (process.env.POSTGRES_DB || "").trim();
+    const sslOn = process.env.POSTGRES_SSL === "true";
+    return {
+      enabled: Boolean(host && database),
+      host,
+      port: parseInt(process.env.POSTGRES_PORT || "5432", 10),
+      database,
+      user: (process.env.POSTGRES_USER || "postgres").trim(),
+      password: (process.env.POSTGRES_PASSWORD || "").trim(),
+      poolMax: parseInt(process.env.POSTGRES_POOL_MAX || "10", 10),
+      ssl: sslOn ? { rejectUnauthorized: process.env.POSTGRES_SSL_REJECT_UNAUTHORIZED === "true" } : undefined,
+      /** When true, `sequelize.sync({ alter: true })` — can rewrite columns; use only in dev. */
+      syncAlter: process.env.POSTGRES_SYNC_ALTER === "true",
+    };
+  })(),
+
+  /**
    * Optional archive window probe: logo-detector on DVR m3u8 per channel (same env as legacy LOGO_SCAN_*).
    * Skips channels with no uploaded logos. Re-evaluates every cycle when logos appear later.
    */

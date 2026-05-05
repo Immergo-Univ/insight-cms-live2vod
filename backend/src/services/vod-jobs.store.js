@@ -1,8 +1,18 @@
 /**
- * In-memory VOD job registry + WebSocket fan-out per tenant.
+ * VOD job registry: PostgreSQL when POSTGRES_HOST + POSTGRES_DB are set, otherwise in-memory.
+ * WebSocket fan-out stays in-memory per process.
  */
 
 import { vodEncodeStdout } from "../utils/vod-encode-log.js";
+import {
+  isVodJobsPostgresEnabled,
+  initVodJobsPostgres,
+  pgInsertJob,
+  pgGetJob,
+  pgListJobsForTenant,
+  pgCountActiveJobsForTenant,
+  pgUpdateJob,
+} from "./vod-jobs-pg.repository.js";
 
 /** @typedef {'queued' | 'processing' | 'uploading' | 'completed' | 'cancelled' | 'failed'} VodJobStatus */
 
@@ -40,11 +50,21 @@ const jobsById = new Map();
 /** @type {Map<string, Set<import('ws').WebSocket>>} */
 const subscribersByTenant = new Map();
 
+function usePg() {
+  return isVodJobsPostgresEnabled();
+}
+
+/** Connect and create `vod_jobs` table when Postgres is configured. */
+export async function initVodJobsPersistence() {
+  await initVodJobsPostgres();
+}
+
 /**
  * @param {string} tenantId
- * @returns {VodJob[]}
+ * @returns {Promise<VodJob[]>}
  */
-export function listJobsForTenant(tenantId) {
+export async function listJobsForTenant(tenantId) {
+  if (usePg()) return /** @type {Promise<VodJob[]>} */ (pgListJobsForTenant(tenantId));
   const list = [];
   for (const job of jobsById.values()) {
     if (job.tenantId === tenantId) list.push(job);
@@ -55,8 +75,10 @@ export function listJobsForTenant(tenantId) {
 
 /**
  * @param {string} tenantId
+ * @returns {Promise<number>}
  */
-export function countActiveJobsForTenant(tenantId) {
+export async function countActiveJobsForTenant(tenantId) {
+  if (usePg()) return pgCountActiveJobsForTenant(tenantId);
   let n = 0;
   for (const job of jobsById.values()) {
     if (job.tenantId !== tenantId) continue;
@@ -67,16 +89,18 @@ export function countActiveJobsForTenant(tenantId) {
 
 /**
  * @param {string} id
- * @returns {VodJob | undefined}
+ * @returns {Promise<VodJob | undefined>}
  */
-export function getJob(id) {
+export async function getJob(id) {
+  if (usePg()) return /** @type {Promise<VodJob | undefined>} */ (pgGetJob(id));
   return jobsById.get(id);
 }
 
 /**
  * @param {Omit<VodJob, 'createdAt' | 'updatedAt'> & Partial<Pick<VodJob, 'createdAt'>>} partial
+ * @returns {Promise<VodJob>}
  */
-export function createJob(partial) {
+export async function createJob(partial) {
   const now = new Date().toISOString();
   /** @type {VodJob} */
   const job = {
@@ -84,7 +108,8 @@ export function createJob(partial) {
     createdAt: partial.createdAt || now,
     updatedAt: now,
   };
-  jobsById.set(job.id, job);
+  if (usePg()) await pgInsertJob(job);
+  else jobsById.set(job.id, job);
   logVodEncodeJobLine(job, "(created)");
   broadcastTenant(job.tenantId, { type: "job_update", job: serializeJob(job) });
   return job;
@@ -112,8 +137,16 @@ function logVodEncodeJobLine(job, suffix) {
 /**
  * @param {string} id
  * @param {Partial<Pick<VodJob, 'status' | 'progress' | 'phase' | 'message' | 'error' | 's3Key' | 's3Keys' | 'outputUrl' | 'outputUrls' | 'transcriptText' | 'transcriptDiarization' | 'transcriptNewsEn' | 'transcriptNewsEs' | 'transcriptNewsHe' | 'transcriptNewsError' | 'openaiClipUsage' | 'transcriptNewsBundle' | 'jobKind'>>} patch
+ * @returns {Promise<VodJob | null>}
  */
-export function updateJob(id, patch) {
+export async function updateJob(id, patch) {
+  if (usePg()) {
+    const job = await pgUpdateJob(id, /** @type {Record<string, unknown>} */ (patch));
+    if (!job) return null;
+    logVodEncodeJobLine(/** @type {VodJob} */ (job));
+    broadcastTenant(job.tenantId, { type: "job_update", job: serializeJob(/** @type {VodJob} */ (job)) });
+    return /** @type {VodJob} */ (job);
+  }
   const job = jobsById.get(id);
   if (!job) return null;
   Object.assign(job, patch, { updatedAt: new Date().toISOString() });
@@ -152,18 +185,20 @@ function broadcastTenant(tenantId, payload) {
  * @param {string} tenantId
  * @param {import('ws').WebSocket} ws
  */
-export function subscribeTenant(tenantId, ws) {
+export async function subscribeTenant(tenantId, ws) {
   let set = subscribersByTenant.get(tenantId);
   if (!set) {
     set = new Set();
     subscribersByTenant.set(tenantId, set);
   }
   set.add(ws);
+  const jobs = await listJobsForTenant(tenantId);
+  const activeCount = await countActiveJobsForTenant(tenantId);
   ws.send(
     JSON.stringify({
       type: "snapshot",
-      jobs: listJobsForTenant(tenantId).map(serializeJob),
-      activeCount: countActiveJobsForTenant(tenantId),
+      jobs: jobs.map(serializeJob),
+      activeCount,
     }),
   );
 }

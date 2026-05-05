@@ -21,7 +21,7 @@ import { isS3LogosEnabled, logS3LogosStartup } from "./services/s3-logos.service
 import { syncAllChannelLogosFromS3, startChannelLogosS3Sync } from "./services/channel-logos-sync.service.js";
 import { syncChannelAdsSnapshotsFromS3OnStartup } from "./services/channel-ads-s3-backup.service.js";
 import { resolveTenant } from "./services/auth.service.js";
-import { subscribeTenant, unsubscribeTenant } from "./services/vod-jobs.store.js";
+import { initVodJobsPersistence, subscribeTenant, unsubscribeTenant } from "./services/vod-jobs.store.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -64,8 +64,8 @@ vodWss.on("connection", (ws, req) => {
     return;
   }
   resolveTenant(tenantId)
-    .then(() => {
-      subscribeTenant(tenantId, ws);
+    .then(async () => {
+      await subscribeTenant(tenantId, ws);
       ws.on("close", () => unsubscribeTenant(tenantId, ws));
       ws.on("error", () => unsubscribeTenant(tenantId, ws));
     })
@@ -91,14 +91,24 @@ server.on("upgrade", (request, socket, head) => {
   }
 });
 
-server.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-  logS3LogosStartup();
-  if (isS3LogosEnabled()) {
-    syncChannelAdsSnapshotsFromS3OnStartup().catch((e) => console.warn("[channel-ads-s3] startup:", e.message));
-    syncAllChannelLogosFromS3().catch(() => {});
-    startChannelLogosS3Sync();
-  }
-  startLogoScanScheduler();
-  startLogoLiveMatchingService();
-});
+initVodJobsPersistence()
+  .then(() => {
+    server.listen(PORT, () => {
+      console.log(`Server running on port ${PORT}`);
+      if (config.postgres?.enabled) {
+        console.log("[vod-jobs] PostgreSQL persistence enabled");
+      }
+      logS3LogosStartup();
+      if (isS3LogosEnabled()) {
+        syncChannelAdsSnapshotsFromS3OnStartup().catch((e) => console.warn("[channel-ads-s3] startup:", e.message));
+        syncAllChannelLogosFromS3().catch(() => {});
+        startChannelLogosS3Sync();
+      }
+      startLogoScanScheduler();
+      startLogoLiveMatchingService();
+    });
+  })
+  .catch((err) => {
+    console.error("[vod-jobs] Persistence init failed:", err);
+    process.exit(1);
+  });
