@@ -7,6 +7,7 @@ import * as users from "../services/admin-user.service.js";
 import * as roles from "../services/admin-role.service.js";
 import * as matrix from "../services/admin-matrix.service.js";
 import * as clips from "../services/admin-clip.service.js";
+import * as adminTenants from "../services/admin-tenant.service.js";
 import { isSequelizeReady } from "../db/sequelize.js";
 
 export const adminRouter = Router();
@@ -169,6 +170,34 @@ adminSecured.put("/permissions/matrix", requireAdminPermission("permissions", "e
     res.json(await matrix.adminSavePermissionMatrix(roleId, m));
   } catch (e) {
     res.status(500).json({ error: e instanceof Error ? e.message : String(e) });
+  }
+});
+
+adminSecured.get("/tenants", requireAdminPermission("tenants", "view"), async (_req, res) => {
+  try {
+    res.json({ tenants: await adminTenants.adminListTenants() });
+  } catch (e) {
+    res.status(500).json({ error: e instanceof Error ? e.message : String(e) });
+  }
+});
+
+adminSecured.get("/tenants/:tenantId", requireAdminPermission("tenants", "view"), async (req, res) => {
+  try {
+    const row = await adminTenants.adminGetTenant(req.params.tenantId);
+    if (!row) return res.status(404).json({ error: "Not found" });
+    res.json(row);
+  } catch (e) {
+    res.status(500).json({ error: e instanceof Error ? e.message : String(e) });
+  }
+});
+
+adminSecured.patch("/tenants/:tenantId", requireAdminPermission("tenants", "edit"), async (req, res) => {
+  try {
+    const row = await adminTenants.adminUpdateTenant(req.params.tenantId, req.body || {});
+    if (!row) return res.status(404).json({ error: "Not found" });
+    res.json(row);
+  } catch (e) {
+    res.status(400).json({ error: e instanceof Error ? e.message : String(e) });
   }
 });
 

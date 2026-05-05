@@ -22,6 +22,16 @@ export async function seedAdminIfNeeded(sequelize) {
       }
     }
     await AdminRolePermission.bulkCreate(rows);
+  } else {
+    for (const entity of ADMIN_ENTITIES) {
+      for (const action of ADMIN_ACTIONS) {
+        const [perm] = await AdminRolePermission.findOrCreate({
+          where: { roleId: role.id, entity, action },
+          defaults: { roleId: role.id, entity, action, allowed: true },
+        });
+        if (!perm.allowed) await perm.update({ allowed: true });
+      }
+    }
   }
 
   let user = await AdminUser.findOne({ where: { email: config.admin.adminEmail } });

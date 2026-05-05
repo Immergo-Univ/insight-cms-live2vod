@@ -9,11 +9,30 @@
   },
   "nav": {
     "clips": "Clips",
+    "tenants": "Tenants",
     "users": "Users",
     "roles": "Roles",
     "permissions": "Permissions",
     "profile": "Profile",
     "logout": "Logout"
+  },
+  "tenants": {
+    "title": "Tenants",
+    "tenantId": "Tenant ID",
+    "subtitles": "Subtitles",
+    "on": "On",
+    "off": "Off",
+    "timezone": "Timezone (last seen)",
+    "lastSeen": "Last seen",
+    "actions": "Actions",
+    "options": "Options",
+    "optionsTitle": "Tenant options — {{id}}",
+    "subtitlesEnabledLabel": "Enable subtitling (clip subtitles + realtime transcribe UI)",
+    "metadataJson": "Metadata (JSON object)",
+    "metadataHint": "Optional. Shallow-merged on editor visits. Leave empty to clear.",
+    "metadataInvalid": "Metadata must be valid JSON object.",
+    "saved": "Tenant updated",
+    "close": "Close"
   },
   "clips": {
     "title": "Generated clips",

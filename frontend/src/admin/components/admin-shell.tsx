@@ -16,6 +16,7 @@ export function AdminShell() {
   const menuItems = useMemo(() => {
     const items: { key: string; label: ReactNode }[] = [];
     if (can("clips", "view_item")) items.push({ key: "/admin/clips", label: <Link to="/admin/clips">{t("nav.clips")}</Link> });
+    if (can("tenants", "view")) items.push({ key: "/admin/tenants", label: <Link to="/admin/tenants">{t("nav.tenants")}</Link> });
     if (can("users", "view_item")) items.push({ key: "/admin/users", label: <Link to="/admin/users">{t("nav.users")}</Link> });
     if (can("roles", "view_item")) items.push({ key: "/admin/roles", label: <Link to="/admin/roles">{t("nav.roles")}</Link> });
     if (can("permissions", "view_item"))
@@ -27,6 +28,7 @@ export function AdminShell() {
   const selected = useMemo(() => {
     const p = location.pathname;
     if (p.startsWith("/admin/clips")) return ["/admin/clips"];
+    if (p.startsWith("/admin/tenants")) return ["/admin/tenants"];
     if (p.startsWith("/admin/users")) return ["/admin/users"];
     if (p.startsWith("/admin/roles")) return ["/admin/roles"];
     if (p.startsWith("/admin/permissions")) return ["/admin/permissions"];

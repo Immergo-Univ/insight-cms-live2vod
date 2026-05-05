@@ -19,6 +19,7 @@ import { httpClient } from "@/services/http-client";
 import { uploadEditorWidgetImages } from "@/services/editor-widget-images.service";
 import { cancelVodJob, startVodJob } from "@/services/vod.service";
 import { useVodProcessing } from "@/providers/vod-processing-provider";
+import { useTenantSettings } from "@/providers/tenant-settings-provider";
 import type { VodJobRecord } from "@/types/vod-job";
 import { pickLatestVodEncodeJobForEditorClip } from "@/types/vod-job";
 import {
@@ -541,6 +542,7 @@ export function EditorPage() {
 
   const selectionMode = clipState?.selectionMode ?? "epg";
   const isRealtime = selectionMode === "realtime";
+  const { subtitlesEnabled: tenantSubtitlesEnabled } = useTenantSettings();
 
   const selectedEncodeClip = useMemo(
     () => (selectedClipId ? clips.find((c) => c.id === selectedClipId) ?? null : null),
@@ -587,7 +589,8 @@ export function EditorPage() {
     selectedEncodeClip?.endTime,
     currentTime,
   ]);
-  const subtitleOverlayActive = !!(selectedEncodeClip?.subtitleMode);
+  const subtitleOverlayActive =
+    tenantSubtitlesEnabled && !!(selectedEncodeClip?.subtitleMode);
   const subtitleSettingsForPlayer = normalizeEditorSubtitleSettings(
     selectedEncodeClip?.subtitleSettings ?? DEFAULT_EDITOR_SUBTITLE_SETTINGS,
   );
@@ -598,6 +601,10 @@ export function EditorPage() {
     const id = window.setInterval(() => setRealtimeTick((n) => n + 1), 1000);
     return () => clearInterval(id);
   }, [isRealtime]);
+
+  useEffect(() => {
+    if (!tenantSubtitlesEnabled) setRealtimeTranscribeOnRec(false);
+  }, [tenantSubtitlesEnabled]);
 
   useEffect(() => {
     if (!clipState?.clipUrl) return;
@@ -1491,7 +1498,9 @@ export function EditorPage() {
                 onVerticalCropCenterXChange={handleVerticalCropCenterX}
                 subtitleOverlayActive={subtitleOverlayActive}
                 subtitleSettings={subtitleSettingsForPlayer}
-                onSubtitleSettingsChange={handleSelectedClipSubtitleSettingsChange}
+                onSubtitleSettingsChange={
+                  tenantSubtitlesEnabled ? handleSelectedClipSubtitleSettingsChange : undefined
+                }
               clipWidgets={selectedEncodeClip?.widgets ?? []}
               onClipWidgetsChange={handleClipWidgetsChange}
               clipWidgetFocusRequestId={clipWidgetFocusRequestId}
@@ -1537,11 +1546,13 @@ export function EditorPage() {
               onRemoveAd={handleRemoveAd}
             onAdOrderChange={handleAdOrderChange}
               onSaveVerticalCropFromModal={handleSaveVerticalCropFromModal}
-              onToggleClipSubtitle={handleToggleClipSubtitle}
+              onToggleClipSubtitle={
+                tenantSubtitlesEnabled ? handleToggleClipSubtitle : undefined
+              }
               onCaptureClipPoster={handleCaptureClipPoster}
               onAddTextWidget={handleAddTextWidget}
               onAddImageWidgetFromFile={handleAddImageWidgetFromFile}
-              realtimeTranscriptUi={isRealtime}
+              realtimeTranscriptUi={isRealtime && tenantSubtitlesEnabled}
               onVodJobsRefresh={refreshVodJobs}
           />
           </aside>
@@ -1560,6 +1571,7 @@ export function EditorPage() {
               onTranscribeOnRecChange={setRealtimeTranscribeOnRec}
               transcribeSettings={realtimeTranscribeSettings}
               onTranscribeSettingsChange={setRealtimeTranscribeSettings}
+              transcribeControlsEnabled={tenantSubtitlesEnabled}
             />
           ) : (
             <EditorTimeline

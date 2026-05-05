@@ -23,6 +23,8 @@ interface EditorRealtimeRecBarProps {
   onTranscribeOnRecChange: (next: boolean) => void;
   transcribeSettings: RealtimeTranscribeSettings;
   onTranscribeSettingsChange: (next: RealtimeTranscribeSettings) => void;
+  /** When false, hide transcribe queue UI (tenant disables subtitles / STT for realtime). */
+  transcribeControlsEnabled?: boolean;
 }
 
 export function EditorRealtimeRecBar({
@@ -36,6 +38,7 @@ export function EditorRealtimeRecBar({
   onTranscribeOnRecChange,
   transcribeSettings,
   onTranscribeSettingsChange,
+  transcribeControlsEnabled = true,
 }: EditorRealtimeRecBarProps) {
   const transcribeBoxRef = useRef<HTMLDivElement>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -83,45 +86,47 @@ export function EditorRealtimeRecBar({
           )}
         </div>
         <div className="flex min-w-0 flex-1 flex-wrap items-center justify-end gap-3 sm:flex-none sm:max-w-none">
-          <div
-            ref={transcribeBoxRef}
-            className={cx(
-              "flex min-w-0 max-w-full flex-1 rounded-lg border border-secondary bg-primary/40 px-3 py-2.5 sm:min-w-[20rem] sm:max-w-[26rem] sm:flex-none",
-              isDisabled && "pointer-events-none opacity-50",
-            )}
-            data-no-row-select
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex min-w-0 flex-1 items-start gap-2">
-              <div className="min-w-0 flex-1">
-                <Checkbox
-                  size="sm"
-                  className="min-w-0 w-full max-w-full gap-3 sm:gap-4"
-                  isSelected={transcribeOnRec}
-                  onChange={(next) => {
-                    onTranscribeOnRecChange(next);
-                    releaseTranscribeControlFocus();
-                  }}
-                  isDisabled={isDisabled}
-                  label="Transcribe"
-                  hint="After each clip, transcribe audio from the live stream (no video encode)."
-                />
+          {transcribeControlsEnabled ? (
+            <div
+              ref={transcribeBoxRef}
+              className={cx(
+                "flex min-w-0 max-w-full flex-1 rounded-lg border border-secondary bg-primary/40 px-3 py-2.5 sm:min-w-[20rem] sm:max-w-[26rem] sm:flex-none",
+                isDisabled && "pointer-events-none opacity-50",
+              )}
+              data-no-row-select
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex min-w-0 flex-1 items-start gap-2">
+                <div className="min-w-0 flex-1">
+                  <Checkbox
+                    size="sm"
+                    className="min-w-0 w-full max-w-full gap-3 sm:gap-4"
+                    isSelected={transcribeOnRec}
+                    onChange={(next) => {
+                      onTranscribeOnRecChange(next);
+                      releaseTranscribeControlFocus();
+                    }}
+                    isDisabled={isDisabled}
+                    label="Transcribe"
+                    hint="After each clip, transcribe audio from the live stream (no video encode)."
+                  />
+                </div>
+                {transcribeOnRec ? (
+                  <button
+                    type="button"
+                    data-no-row-select
+                    title="Transcribe options"
+                    aria-label="Transcribe options"
+                    disabled={isDisabled}
+                    onClick={() => setSettingsOpen(true)}
+                    className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-full border border-secondary bg-primary text-fg-quaternary transition-colors hover:bg-secondary hover:text-fg-secondary disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <Settings01 className="size-4" aria-hidden />
+                  </button>
+                ) : null}
               </div>
-              {transcribeOnRec ? (
-                <button
-                  type="button"
-                  data-no-row-select
-                  title="Transcribe options"
-                  aria-label="Transcribe options"
-                  disabled={isDisabled}
-                  onClick={() => setSettingsOpen(true)}
-                  className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-full border border-secondary bg-primary text-fg-quaternary transition-colors hover:bg-secondary hover:text-fg-secondary disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  <Settings01 className="size-4" aria-hidden />
-                </button>
-              ) : null}
             </div>
-          </div>
+          ) : null}
           <button
             type="button"
             onClick={onRecPress}
@@ -140,12 +145,14 @@ export function EditorRealtimeRecBar({
         </div>
       </div>
     </div>
-    <EditorTranscribeSettingsModal
-      isOpen={settingsOpen}
-      onOpenChange={setSettingsOpen}
-      value={transcribeSettings}
-      onSave={onTranscribeSettingsChange}
-    />
+    {transcribeControlsEnabled ? (
+      <EditorTranscribeSettingsModal
+        isOpen={settingsOpen}
+        onOpenChange={setSettingsOpen}
+        value={transcribeSettings}
+        onSave={onTranscribeSettingsChange}
+      />
+    ) : null}
     </>
   );
 }

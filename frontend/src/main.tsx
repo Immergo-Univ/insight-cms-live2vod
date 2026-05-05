@@ -6,6 +6,7 @@ import { Live2VodPage } from "@/pages/live2vod";
 import { NotFound } from "@/pages/not-found";
 import { ProcessingClipsPage } from "@/pages/processing-clips";
 import { AdminApp } from "@/admin/admin-app";
+import { TenantSettingsProvider } from "@/providers/tenant-settings-provider";
 import { RouteProvider } from "@/providers/router-provider";
 import { VodProcessingProvider } from "@/providers/vod-processing-provider";
 import { ThemeProvider } from "@/providers/theme-provider";
@@ -17,6 +18,7 @@ createRoot(document.getElementById("root")!).render(
         <ThemeProvider>
             <AccountSettingsProvider>
                 <BrowserRouter>
+                    <TenantSettingsProvider>
                     <RouteProvider>
                         <VodProcessingProvider>
                             <Routes>
@@ -28,6 +30,7 @@ createRoot(document.getElementById("root")!).render(
                             </Routes>
                         </VodProcessingProvider>
                     </RouteProvider>
+                    </TenantSettingsProvider>
                 </BrowserRouter>
             </AccountSettingsProvider>
         </ThemeProvider>
