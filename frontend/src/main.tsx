@@ -5,6 +5,7 @@ import { EditorPage } from "@/pages/editor";
 import { Live2VodPage } from "@/pages/live2vod";
 import { NotFound } from "@/pages/not-found";
 import { ProcessingClipsPage } from "@/pages/processing-clips";
+import { AdminApp } from "@/admin/admin-app";
 import { RouteProvider } from "@/providers/router-provider";
 import { VodProcessingProvider } from "@/providers/vod-processing-provider";
 import { ThemeProvider } from "@/providers/theme-provider";
@@ -22,6 +23,7 @@ createRoot(document.getElementById("root")!).render(
                                 <Route path="/" element={<Live2VodPage />} />
                                 <Route path="/editor" element={<EditorPage />} />
                                 <Route path="/processing-clips" element={<ProcessingClipsPage />} />
+                                <Route path="/admin/*" element={<AdminApp />} />
                                 <Route path="*" element={<NotFound />} />
                             </Routes>
                         </VodProcessingProvider>

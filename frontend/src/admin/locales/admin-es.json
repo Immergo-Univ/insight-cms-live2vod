@@ -1,0 +1,75 @@
+{
+  "login": {
+    "title": "Administración",
+    "subtitle": "Ingresá con email y contraseña",
+    "email": "Email",
+    "password": "Contraseña",
+    "submit": "Entrar",
+    "error": "Error al iniciar sesión"
+  },
+  "nav": {
+    "clips": "Clips",
+    "users": "Usuarios",
+    "roles": "Roles",
+    "permissions": "Permisos",
+    "profile": "Perfil",
+    "logout": "Salir"
+  },
+  "clips": {
+    "title": "Clips generados",
+    "tenant": "Tenant",
+    "status": "Estado",
+    "phase": "Fase",
+    "kind": "Tipo",
+    "created": "Creado",
+    "actions": "Acciones",
+    "view": "Ver",
+    "modalTitle": "Detalle del clip",
+    "tabPlayer": "Reproductor",
+    "tabMetadata": "Metadatos",
+    "tabTranscript": "Transcripción",
+    "noVideo": "No hay URL de salida HTTP(S) para reproducir."
+  },
+  "users": {
+    "title": "Usuarios",
+    "email": "Email",
+    "roles": "Roles",
+    "actions": "Acciones",
+    "view": "Ver",
+    "edit": "Editar",
+    "delete": "Eliminar",
+    "create": "Crear usuario",
+    "password": "Contraseña",
+    "displayName": "Nombre"
+  },
+  "roles": {
+    "title": "Roles",
+    "name": "Nombre",
+    "slug": "Slug",
+    "actions": "Acciones",
+    "edit": "Editar",
+    "delete": "Eliminar",
+    "create": "Crear rol"
+  },
+  "permissions": {
+    "title": "Matriz de permisos",
+    "role": "Rol",
+    "save": "Guardar",
+    "saved": "Permisos actualizados"
+  },
+  "profile": {
+    "title": "Perfil",
+    "displayName": "Nombre visible",
+    "language": "Idioma",
+    "avatarUrl": "URL del avatar",
+    "password": "Nueva contraseña",
+    "save": "Guardar"
+  },
+  "common": {
+    "loading": "Cargando…",
+    "cancel": "Cancelar",
+    "save": "Guardar",
+    "delete": "Eliminar",
+    "confirmDelete": "¿Eliminar este registro?"
+  }
+}

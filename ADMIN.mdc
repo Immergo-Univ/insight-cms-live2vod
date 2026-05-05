@@ -1,0 +1,232 @@
+
+# Important Style Rules
+
+* Do not use gradients in styles
+* Do not use rounded borders
+* Do not use animated transformations on hover
+* Use legible typography
+* Clear and visible styles. Professional.
+* Use the Primary and Secondary colors described in the idea.mdc definition
+* The platform logo is located at frontend/public/logo.png
+
+# Frontend Admin Panel Standards
+
+Complete guidelines for building admin panels with React + Ant Design. Follow these patterns exactly for consistent UI/UX.
+
+## Tech Stack
+
+```json
+{
+  "react": "^18.2.0",
+  "react-dom": "^18.2.0",
+  "react-router-dom": "^6.21.0",
+  "antd": "^5.12.8",
+  "i18next": "^23.7.11",
+  "react-i18next": "^14.0.0",
+  "@ant-design/charts": "^2.0.3",
+  "dayjs": "^1.11.10",
+  "leaflet": "^1.9.4",
+  "vite": "^5.0.8"
+}
+```
+
+
+### Backend
+
+```json
+{
+  "express": "^4.18.2",
+  "sequelize": "^6.37.7",
+  "pg": "^8.16.3",
+  "jsonwebtoken": "^9.0.3",
+  "bcryptjs": "^3.0.3",
+  "cors": "^2.8.5",
+  "dotenv": "^17.2.3"
+}
+```
+
+## File Structure
+
+/frontend
+  /public         - Static assets (logos, favicon, images)
+/backend
+  /src
+    /controllers  - HTTP request handlers, input validation, response formatting
+    /models       - Sequelize model definitions and database schema
+    /services     - Business logic, reusable operations, external integrations
+    /routes       - Express route definitions
+    /middleware   - Authentication, authorization, error handling middleware
+/docs
+.env
+.gitignore
+README.md
+Dockerfile
+
+### Assets
+
+Logos and static images are located in `frontend/public/` (e.g., `frontend/public/logo.png`).
+
+### Git
+
+A `.gitignore` file must be created at the project root. It should ignore:
+- node_modules/
+- .env
+- dist/
+- build/
+- *.log
+
+### Backend Architecture
+
+The backend must follow separation of concerns with distinct layers:
+- **Controllers:** Handle HTTP requests/responses, validate input, call services
+- **Services:** Contain business logic, interact with models, reusable across controllers
+- **Models:** Define database schema and relationships using Sequelize
+
+## Deployment
+
+Start this project from the root by running npm run dev:frontend
+npm run dev:backend to start frontend and backend.
+The .env file with the DB connection data will be in the root.
+
+You must create a Dockerfile in the root of the project with a single stage, DO NOT use docker-compose, only Dockerfile.
+The Dockerfile must use an alpine image, the smallest possible.
+
+
+## Datatables
+
+* Each entity, when indicated, should have a Datatables page. These pages must use datatables with an actions column, which is a vertical three-dot icon where the possible actions are displayed.
+
+Datatables must be a component as reusable as possible since its use will be repeated in many places throughout the project.
+
+But it must be flexible enough to be easily configurable to do things like:
+
+- Configure which columns sort the results
+- Items per page
+- Pagination enabled or not (Default is yes)
+- Actions (Can be very varied, so they should be configurable eventually)
+
+## Login
+
+* Login is by email and password
+* Entity User
+* Optional: Microsoft OAuth (Outlook) login as additional method
+
+### Microsoft OAuth Login (Optional)
+
+Additional login method using Microsoft/Outlook OAuth 2.0:
+- Button displayed below the traditional email/password form
+- Uses Azure AD OAuth flow with User.Read scope
+- Auto-creates user on first OAuth login with Admin role
+- Environment variables required:
+  - `OUTLOOK_TENANT` - Azure AD tenant ID
+  - `OUTLOOK_CLIENT` - Azure AD application client ID
+  - `OUTLOOK_SECRET` - Azure AD application client secret
+  - `REDIRECT_URL` - OAuth callback URL (e.g., https://your-app.com/auth/callback)
+
+Backend structure:
+- `config/oauth.js` - OAuth configuration and Microsoft Graph API calls
+- Routes: `GET /auth/oauth/url`, `GET /auth/oauth/configured`, `POST /auth/oauth/callback`
+
+Frontend structure:
+- `pages/AuthCallback.jsx` - Handles OAuth redirect and token exchange
+- Route: `/auth/callback`
+- `AuthContext` includes `loginWithToken()` for OAuth flow
+
+### Login Layout & Styles
+
+Split-screen layout (two-panel design):
+- **Left panel (branding):** Dark background (#000), displays brand icon, title, subtitle, description and feature list with checkmarks. Uses subtle decorative shapes with primary color at low opacity for visual interest.
+- **Right panel (form):** Light background (#fff), contains centered form with logo, welcome title, subtitle, email/password fields, and submit button.
+
+Style principles:
+- No border-radius (sharp corners throughout)
+- Inputs with thick border (2px), hover darkens border, focus shows primary color with subtle glow
+- Submit button full-width, tall (52px), bold text
+- Typography: Large bold titles, lighter subtitles, readable body text
+- Feature list items with square icon badges using primary color
+- Divider with uppercase text below form
+- Footer with subtle branding
+
+Responsive:
+- On tablets (≤992px): Hide left panel, form takes full width
+- On mobile (≤576px): Reduce padding and font sizes
+
+## Toast Messages
+
+Use Ant Design's `message` API for user feedback notifications:
+- `message.success()` - Successful operations (create, update, delete, upload)
+- `message.error()` - Failed operations or validation errors
+- `message.warning()` - Warnings or caution alerts
+- `message.info()` - Informational messages
+
+Usage patterns:
+- Show success toast after CRUD operations complete successfully
+- Show error toast on API failures or validation errors
+- Use i18n translations for messages: `message.success(t('entity.entityCreated'))`
+- For API errors, fallback to raw error: `message.error(error.response?.data?.error || 'Operation failed')`
+
+# Basic Entities That Must Always Exist
+
+* Users
+- email 
+- password
+
+* roles
+* permissions
+
+# Permissions
+
+For each entity, a role-based permissions matrix must be established:
+- On the permissions page, instead of a datatable, there is a checkbox matrix where at the top of the matrix there is a select dropdown with the roles.
+When a role is selected, the permissions for each entity (Rows) and their actions (Columns) are activated or deactivated.
+- The possible actions on entities are:
+
+-- View
+-- Create
+-- Edit
+-- View Item (This means whether the entity item is even visible in the sidebar)
+-- Delete
+-- Edit Own
+-- Delete Own
+
+Because of this "own" characteristic, each entity in the system must ALWAYS have the created_by pointing to the user who created the record.
+
+# Env
+
+The environment variables present and to be used in the project are:
+
+
+PORT=3000
+NODE_ENV=development
+
+# Database
+POSTGRES_HOST
+POSTGRES_PORT
+POSTGRES_DB
+POSTGRES_USER
+POSTGRES_PASSWORD
+
+# Authentication
+JWT_SECRET
+
+# Initial Admin (created automatically on startup)
+ADMIN_PASSWORD=admin123
+ADMIN_EMAIL=admin@affiliates.local
+
+# Profile
+
+* There must be a topnav bar where on the right we have the user avatar with a dropdown that allows:
+- Logout
+- View profile
+
+On the profile page we can update the avatar, change data (but not email), and configure language.
+
+# Admin Layout
+
+- Sidebar on the left, where the system entities are located and through these items you access the datatables (or custom pages if specified)
+- Topnav bar: Where the user profile access is located
+- Login (Login box, Email and Password.) Do not include password recovery or remember password links.
+
+# Importante 
+Es muy importante tener separados los endpoints de API de los de frontend, todos los endpoints de API tienen /api/ al comienzo, mientras que los de frontend no. Esto es asi para poder gestionar correctamente los routes del frontend
+

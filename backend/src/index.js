@@ -14,6 +14,7 @@ import { authRouter } from "./controllers/auth.controller.js";
 import { vodRouter } from "./controllers/vod.controller.js";
 import { publicTranscriptNewsRouter } from "./controllers/public-transcript-news.controller.js";
 import { encoderCallbackRouter } from "./controllers/encoder-callback.controller.js";
+import { adminRouter } from "./routes/admin.routes.js";
 import { config } from "./config.js";
 import { startLogoScanScheduler } from "./services/logo-scheduler.service.js";
 import { startLogoLiveMatchingService } from "./services/logo-live-matching.service.js";
@@ -39,6 +40,7 @@ app.use("/api/ads", adsRouter);
 app.use("/api/vod", vodRouter);
 app.use("/api/public", publicTranscriptNewsRouter);
 app.use("/api/encoder", encoderCallbackRouter);
+app.use("/api/admin", adminRouter);
 
 const frontendBuildPath = path.join(__dirname, "../../frontend/dist");
 app.use(express.static(frontendBuildPath));

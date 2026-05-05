@@ -1,0 +1,75 @@
+{
+  "login": {
+    "title": "Admin",
+    "subtitle": "Sign in with your credentials",
+    "email": "Email",
+    "password": "Password",
+    "submit": "Sign in",
+    "error": "Login failed"
+  },
+  "nav": {
+    "clips": "Clips",
+    "users": "Users",
+    "roles": "Roles",
+    "permissions": "Permissions",
+    "profile": "Profile",
+    "logout": "Logout"
+  },
+  "clips": {
+    "title": "Generated clips",
+    "tenant": "Tenant",
+    "status": "Status",
+    "phase": "Phase",
+    "kind": "Kind",
+    "created": "Created",
+    "actions": "Actions",
+    "view": "View",
+    "modalTitle": "Clip detail",
+    "tabPlayer": "Player",
+    "tabMetadata": "Metadata",
+    "tabTranscript": "Transcript",
+    "noVideo": "No HTTP(S) output URL available for playback."
+  },
+  "users": {
+    "title": "Users",
+    "email": "Email",
+    "roles": "Roles",
+    "actions": "Actions",
+    "view": "View",
+    "edit": "Edit",
+    "delete": "Delete",
+    "create": "Create user",
+    "password": "Password",
+    "displayName": "Display name"
+  },
+  "roles": {
+    "title": "Roles",
+    "name": "Name",
+    "slug": "Slug",
+    "actions": "Actions",
+    "edit": "Edit",
+    "delete": "Delete",
+    "create": "Create role"
+  },
+  "permissions": {
+    "title": "Permissions matrix",
+    "role": "Role",
+    "save": "Save",
+    "saved": "Permissions updated"
+  },
+  "profile": {
+    "title": "Profile",
+    "displayName": "Display name",
+    "language": "Language",
+    "avatarUrl": "Avatar URL",
+    "password": "New password",
+    "save": "Save"
+  },
+  "common": {
+    "loading": "Loading…",
+    "cancel": "Cancel",
+    "save": "Save",
+    "delete": "Delete",
+    "confirmDelete": "Delete this record?"
+  }
+}

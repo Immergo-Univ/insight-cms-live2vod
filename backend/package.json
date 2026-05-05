@@ -5,13 +5,16 @@
   "private": true,
   "scripts": {
     "dev": "NODE_ENV=development node --env-file=.env --watch src/index.js",
-    "start": "node --env-file=.env src/index.js"
+    "start": "node --env-file=.env src/index.js",
+    "db:migrate": "node --env-file=.env src/db/migrate-cli.js"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1023.0",
     "axios": "^1.13.5",
+    "bcryptjs": "^3.0.3",
     "cors": "^2.8.5",
     "express": "^5.1.0",
+    "jsonwebtoken": "^9.0.3",
     "multer": "^2.0.2",
     "pg": "^8.20.0",
     "sequelize": "^6.37.8",

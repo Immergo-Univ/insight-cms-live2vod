@@ -159,6 +159,16 @@ export const config = {
   },
 
   /**
+   * Admin panel (`/admin`). Requires Postgres + `JWT_SECRET`.
+   * Env: `ADMIN_EMAIL`, `ADMIN_PASSWORD` (seeded on first sync if user missing).
+   */
+  admin: {
+    jwtSecret: (process.env.JWT_SECRET || "").trim(),
+    adminEmail: (process.env.ADMIN_EMAIL || "admin@affiliates.local").trim().toLowerCase(),
+    adminPassword: process.env.ADMIN_PASSWORD || "admin123",
+  },
+
+  /**
    * VOD / clip jobs (`vod_jobs` via Sequelize). Enabled when POSTGRES_HOST and POSTGRES_DB are set.
    * Schema: `sequelize.sync()` on startup; optional `POSTGRES_SYNC_ALTER=true` for `sync({ alter: true })`.
    * Optional TLS: POSTGRES_SSL=true (rejectUnauthorized only if POSTGRES_SSL_REJECT_UNAUTHORIZED=true).

@@ -1,9 +1,44 @@
 import { Sequelize } from "sequelize";
 import { config } from "../config.js";
 import { registerVodJobModel } from "../models/vod-job.model.js";
+import { registerAdminModels } from "../models/register-admin-models.js";
+import { seedAdminIfNeeded } from "../services/admin-seed.service.js";
+import { runPendingMigrations } from "./migration-runner.js";
 
 /** @type {Sequelize | null} */
 let sequelize = null;
+
+/**
+ * New Sequelize instance (not assigned to module singleton). Used by CLI migrate.
+ * @returns {Sequelize | null}
+ */
+export function createPostgresSequelize() {
+  if (!config.postgres.enabled) return null;
+  const ssl = config.postgres.ssl;
+  return new Sequelize(config.postgres.database, config.postgres.user, config.postgres.password, {
+    host: config.postgres.host,
+    port: config.postgres.port,
+    dialect: "postgres",
+    logging: false,
+    pool: { max: config.postgres.poolMax, min: 0, idle: 10_000, acquire: 15_000 },
+    dialectOptions: ssl
+      ? {
+          ssl: {
+            require: true,
+            rejectUnauthorized: Boolean(ssl.rejectUnauthorized),
+          },
+        }
+      : {},
+  });
+}
+
+/**
+ * @param {Sequelize} sq
+ */
+export function registerAllModels(sq) {
+  registerVodJobModel(sq);
+  registerAdminModels(sq);
+}
 
 export function getSequelize() {
   return sequelize;
@@ -24,35 +59,18 @@ export function getVodJobModel() {
 }
 
 /**
- * Authenticate, register models, and sync schema to the database.
+ * Authenticate, register models, sync schema, run `migrations/*.js`, then seed admin.
  * @returns {Promise<Sequelize | null>}
  */
 export async function initSequelizeAndSync() {
   if (!config.postgres.enabled) return null;
 
-  const ssl = config.postgres.ssl;
-  sequelize = new Sequelize(config.postgres.database, config.postgres.user, config.postgres.password, {
-    host: config.postgres.host,
-    port: config.postgres.port,
-    dialect: "postgres",
-    logging: false,
-    pool: { max: config.postgres.poolMax, min: 0, idle: 10_000, acquire: 15_000 },
-    dialectOptions: ssl
-      ? {
-          ssl: {
-            require: true,
-            rejectUnauthorized: Boolean(ssl.rejectUnauthorized),
-          },
-        }
-      : {},
-  });
-
-  registerVodJobModel(sequelize);
+  sequelize = createPostgresSequelize();
+  registerAllModels(sequelize);
   await sequelize.authenticate();
   await sequelize.sync(config.postgres.syncAlter ? { alter: true } : {});
-  await sequelize.query(
-    "CREATE INDEX IF NOT EXISTS idx_vod_jobs_tenant_created ON vod_jobs (tenant_id, created_at DESC)",
-  );
+  await runPendingMigrations(sequelize);
+  await seedAdminIfNeeded(sequelize);
   return sequelize;
 }
 
