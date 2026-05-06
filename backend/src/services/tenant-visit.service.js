@@ -54,6 +54,8 @@ export function tenantRowToApi(plain) {
   return {
     tenantId: plain.tenantId,
     subtitlesEnabled: plain.subtitlesEnabled !== false,
+    syndicationYoutubeEnabled: plain.syndicationYoutubeEnabled === true,
+    syndicationYoutubeConnected: plain.syndicationYoutubeConnected === true,
     timezoneLastSeen: plain.timezoneLastSeen ?? null,
     metadata: plain.metadata ?? null,
     firstSeenAt: plain.firstSeenAt,

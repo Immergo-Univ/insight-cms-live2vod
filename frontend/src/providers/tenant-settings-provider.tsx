@@ -8,6 +8,8 @@ type TenantSettingsContextValue = {
   loading: boolean;
   /** When false, hide subtitle / realtime transcribe controls for this tenant. */
   subtitlesEnabled: boolean;
+  /** When true, show per-clip syndication UI (YouTube first). */
+  syndicationYoutubeEnabled: boolean;
   refresh: () => Promise<void>;
 };
 
@@ -63,6 +65,7 @@ export function TenantSettingsProvider({ children }: { children: ReactNode }) {
   }, [refresh]);
 
   const subtitlesEnabled = !tenantId || tenant?.subtitlesEnabled !== false;
+  const syndicationYoutubeEnabled = Boolean(tenantId && tenant?.syndicationYoutubeEnabled === true);
 
   const value = useMemo(
     () => ({
@@ -70,9 +73,10 @@ export function TenantSettingsProvider({ children }: { children: ReactNode }) {
       tenant,
       loading,
       subtitlesEnabled,
+      syndicationYoutubeEnabled,
       refresh,
     }),
-    [tenantId, tenant, loading, subtitlesEnabled, refresh],
+    [tenantId, tenant, loading, subtitlesEnabled, syndicationYoutubeEnabled, refresh],
   );
 
   return <TenantSettingsContext.Provider value={value}>{children}</TenantSettingsContext.Provider>;

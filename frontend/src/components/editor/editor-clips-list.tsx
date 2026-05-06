@@ -6,6 +6,7 @@ import {
   Clipboard,
   Edit01,
   Play,
+  Share01,
   StopCircle,
   Trash01,
 } from "@untitledui/icons";
@@ -534,6 +535,8 @@ interface EditorClipsListProps {
   onPause: () => void;
   onRemove: (id: string) => void;
   onEditMetadata?: (clip: EditorSubClip) => void;
+  /** When set, show Syndication control next to metadata (tenant must allow YouTube syndication). */
+  onOpenSyndication?: (clip: EditorSubClip) => void;
   onSeek?: (timeSeconds: number) => void;
   /** When false, skip VOD thumbnail URLs (e.g. live / realtime session offsets). */
   thumbnailsEnabled?: boolean;
@@ -579,6 +582,7 @@ export function EditorClipsList({
   onPause,
   onRemove,
   onEditMetadata,
+  onOpenSyndication,
   onSeek,
   thumbnailsEnabled = true,
   emptyHint = "Use Mark In / Mark Out to add ranges.",
@@ -958,7 +962,7 @@ export function EditorClipsList({
                   "flex shrink-0 items-center justify-center rounded-lg border border-secondary bg-primary text-fg-secondary transition-colors",
                   encodeActive
                     ? "cursor-not-allowed opacity-45"
-                    : "hover:bg-secondary",
+                    : "cursor-pointer hover:bg-secondary",
                   compact ? "size-7" : "size-8",
                 )}
                 aria-label={isThisPlaying ? "Stop" : "Play"}
@@ -1043,7 +1047,7 @@ export function EditorClipsList({
                         }
                         title="Play encoded output"
                         aria-label="Play encoded output in a dialog"
-                        className="flex size-8 shrink-0 items-center justify-center rounded-full border-2 border-utility-success-300 bg-utility-success-100 text-utility-success-800 shadow-sm transition-colors hover:bg-utility-success-200 hover:border-utility-success-400"
+                        className="flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-full border-2 border-utility-success-300 bg-utility-success-100 text-utility-success-800 shadow-sm transition-colors hover:bg-utility-success-200 hover:border-utility-success-400"
                       >
                         <Play className="size-3.5" aria-hidden />
                       </button>
@@ -1060,7 +1064,7 @@ export function EditorClipsList({
                         className={cx(
                           "flex size-8 shrink-0 items-center justify-center rounded-full border border-secondary bg-primary text-fg-quaternary transition-colors",
                           encodeActive && "cursor-not-allowed opacity-45 hover:bg-primary",
-                          !encodeActive && "hover:bg-secondary hover:text-fg-secondary",
+                          !encodeActive && "cursor-pointer hover:bg-secondary hover:text-fg-secondary",
                           ((realtimeTranscriptUi &&
                             transcribeJob &&
                             vodJobIsActive(transcribeJob.status)) ||
@@ -1092,7 +1096,9 @@ export function EditorClipsList({
                         }
                         className={cx(
                           "flex size-8 shrink-0 items-center justify-center rounded-full border border-secondary bg-primary text-fg-quaternary transition-colors hover:bg-secondary hover:text-fg-secondary",
-                          encodeActive && "cursor-not-allowed opacity-45 hover:bg-primary",
+                          encodeActive
+                            ? "cursor-not-allowed opacity-45 hover:bg-primary"
+                            : "cursor-pointer",
                         )}
                         aria-label="Edit clip metadata"
                       >
@@ -1294,6 +1300,31 @@ export function EditorClipsList({
                         </Menu>
                       </AriaPopover>
                     </MenuTrigger>
+                    {onOpenSyndication ? (
+                      <button
+                        type="button"
+                        disabled={encodeActive}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (encodeActive) return;
+                          onOpenSyndication(c);
+                        }}
+                        title={
+                          encodeActive
+                            ? "Syndication locked while encoding. Use Stop to cancel."
+                            : "Syndication"
+                        }
+                        className={cx(
+                          "flex size-8 shrink-0 items-center justify-center rounded-full border border-secondary bg-primary text-fg-quaternary transition-colors hover:bg-secondary hover:text-fg-secondary",
+                          encodeActive
+                            ? "cursor-not-allowed opacity-45 hover:bg-primary"
+                            : "cursor-pointer",
+                        )}
+                        aria-label="Syndication"
+                      >
+                        <Share01 className="size-3.5" />
+                      </button>
+                    ) : null}
                     <button
                       type="button"
                       disabled={encodeActive}
@@ -1307,7 +1338,7 @@ export function EditorClipsList({
                         "flex size-8 shrink-0 items-center justify-center rounded-full border border-secondary bg-primary text-error-primary transition-colors",
                         encodeActive
                           ? "cursor-not-allowed opacity-45"
-                          : "hover:bg-error-secondary hover:text-error-primary",
+                          : "cursor-pointer hover:bg-error-secondary hover:text-error-primary",
                       )}
                       aria-label="Remove sub-clip"
                     >

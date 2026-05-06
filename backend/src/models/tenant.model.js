@@ -13,6 +13,8 @@ export function registerTenantModel(sequelize) {
     {
       tenantId: { type: DataTypes.STRING(128), primaryKey: true },
       subtitlesEnabled: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
+      syndicationYoutubeEnabled: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
+      syndicationYoutubeConnected: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
       timezoneLastSeen: { type: DataTypes.STRING(128), allowNull: true },
       metadata: { type: DataTypes.JSONB, allowNull: true },
       firstSeenAt: { type: DataTypes.DATE, allowNull: true },

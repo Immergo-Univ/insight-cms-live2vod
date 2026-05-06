@@ -9,6 +9,7 @@ import { useAdminAuth } from "@/admin/admin-auth-context";
 type TenantRow = {
   tenantId: string;
   subtitlesEnabled: boolean;
+  syndicationYoutubeEnabled: boolean;
   timezoneLastSeen: string | null;
   metadata: Record<string, unknown> | null;
   firstSeenAt?: string;
@@ -25,7 +26,11 @@ export function AdminTenantsPage() {
   const [optionsLoading, setOptionsLoading] = useState(false);
   const [saveLoading, setSaveLoading] = useState(false);
   const [optionsTenantId, setOptionsTenantId] = useState<string | null>(null);
-  const [form] = Form.useForm<{ subtitlesEnabled: boolean; metadataJson: string }>();
+  const [form] = Form.useForm<{
+    subtitlesEnabled: boolean;
+    syndicationYoutubeEnabled: boolean;
+    metadataJson: string;
+  }>();
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -53,6 +58,7 @@ export function AdminTenantsPage() {
       const { data } = await getAdminClient().get<TenantRow>(`/tenants/${encodeURIComponent(tenantId)}`);
       form.setFieldsValue({
         subtitlesEnabled: data.subtitlesEnabled !== false,
+        syndicationYoutubeEnabled: data.syndicationYoutubeEnabled === true,
         metadataJson:
           data.metadata && typeof data.metadata === "object"
             ? JSON.stringify(data.metadata, null, 2)
@@ -86,10 +92,12 @@ export function AdminTenantsPage() {
       }
     }
     const subtitlesEnabled = Boolean(form.getFieldValue("subtitlesEnabled"));
+    const syndicationYoutubeEnabled = Boolean(form.getFieldValue("syndicationYoutubeEnabled"));
     setSaveLoading(true);
     try {
       await getAdminClient().patch(`/tenants/${encodeURIComponent(optionsTenantId)}`, {
         subtitlesEnabled,
+        syndicationYoutubeEnabled,
         metadata,
       });
       message.success(t("tenants.saved"));
@@ -113,6 +121,15 @@ export function AdminTenantsPage() {
       width: 140,
       render: (v: boolean) => (
         <Tag color={v !== false ? "green" : "default"}>{v !== false ? t("tenants.on") : t("tenants.off")}</Tag>
+      ),
+    },
+    {
+      title: t("tenants.syndicationYoutube"),
+      dataIndex: "syndicationYoutubeEnabled",
+      key: "syndicationYoutubeEnabled",
+      width: 120,
+      render: (v: boolean) => (
+        <Tag color={v === true ? "blue" : "default"}>{v === true ? t("tenants.on") : t("tenants.off")}</Tag>
       ),
     },
     { title: t("tenants.timezone"), dataIndex: "timezoneLastSeen", key: "timezoneLastSeen", ellipsis: true },
@@ -180,6 +197,13 @@ export function AdminTenantsPage() {
         <Spin spinning={optionsLoading}>
           <Form form={form} layout="vertical" style={{ marginTop: 8 }}>
             <Form.Item name="subtitlesEnabled" label={t("tenants.subtitlesEnabledLabel")} valuePropName="checked">
+              <Switch disabled={!can("tenants", "edit")} />
+            </Form.Item>
+            <Form.Item
+              name="syndicationYoutubeEnabled"
+              label={t("tenants.syndicationYoutubeEnabledLabel")}
+              valuePropName="checked"
+            >
               <Switch disabled={!can("tenants", "edit")} />
             </Form.Item>
             <Form.Item

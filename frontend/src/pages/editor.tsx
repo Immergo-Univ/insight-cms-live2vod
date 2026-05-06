@@ -542,7 +542,8 @@ export function EditorPage() {
 
   const selectionMode = clipState?.selectionMode ?? "epg";
   const isRealtime = selectionMode === "realtime";
-  const { subtitlesEnabled: tenantSubtitlesEnabled } = useTenantSettings();
+  const { subtitlesEnabled: tenantSubtitlesEnabled, syndicationYoutubeEnabled, tenantId: editorTenantId } =
+    useTenantSettings();
 
   const selectedEncodeClip = useMemo(
     () => (selectedClipId ? clips.find((c) => c.id === selectedClipId) ?? null : null),
@@ -1549,6 +1550,8 @@ export function EditorPage() {
               onToggleClipSubtitle={
                 tenantSubtitlesEnabled ? handleToggleClipSubtitle : undefined
               }
+              syndicationTenantId={editorTenantId}
+              syndicationYoutubeEnabled={syndicationYoutubeEnabled}
               onCaptureClipPoster={handleCaptureClipPoster}
               onAddTextWidget={handleAddTextWidget}
               onAddImageWidgetFromFile={handleAddImageWidgetFromFile}

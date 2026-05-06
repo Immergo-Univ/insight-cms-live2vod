@@ -20,6 +20,7 @@ import { cx } from "@/utils/cx";
 import { EditorAdsList } from "./editor-ads-list";
 import { EditorClipMetadataModal } from "./editor-clip-metadata-modal";
 import { EditorClipsList } from "./editor-clips-list";
+import { EditorSyndicationModal } from "./editor-syndication-modal";
 import { EditorVerticalCropBreakpointsModal } from "./editor-vertical-crop-breakpoints-modal";
 
 interface EditorRightPanelProps {
@@ -77,6 +78,10 @@ interface EditorRightPanelProps {
     },
   ) => void;
   onToggleClipSubtitle?: (clipId: string) => void;
+  /** Tenant slug from URL; required for syndication API. */
+  syndicationTenantId?: string;
+  /** When true with tenant id, show per-clip syndication entry point. */
+  syndicationYoutubeEnabled?: boolean;
   /** Append a frame bookmark at the current playhead for this sub-clip. */
   onCaptureClipPoster?: (clipId: string) => void;
   onAddTextWidget?: (clipId: string) => void;
@@ -124,6 +129,8 @@ export function EditorRightPanel({
   onAdOrderChange,
   onSaveVerticalCropFromModal,
   onToggleClipSubtitle,
+  syndicationTenantId = "",
+  syndicationYoutubeEnabled = false,
   onCaptureClipPoster,
   onAddTextWidget,
   onAddImageWidgetFromFile,
@@ -131,11 +138,17 @@ export function EditorRightPanel({
   onVodJobsRefresh,
 }: EditorRightPanelProps) {
   const [clipMetadataId, setClipMetadataId] = useState<string | null>(null);
+  const [syndicationClipId, setSyndicationClipId] = useState<string | null>(null);
   const [verticalCropModalClipId, setVerticalCropModalClipId] = useState<string | null>(null);
 
   const clipForMetadata = useMemo(
     () => (clipMetadataId ? clips.find((c) => c.id === clipMetadataId) ?? null : null),
     [clips, clipMetadataId],
+  );
+
+  const clipForSyndication = useMemo(
+    () => (syndicationClipId ? clips.find((c) => c.id === syndicationClipId) ?? null : null),
+    [clips, syndicationClipId],
   );
 
   const clipForVerticalCropModal = useMemo(
@@ -161,11 +174,34 @@ export function EditorRightPanel({
     );
   }, [clipMetadataId, vodJobs]);
 
+  const syndicationReadOnly = useMemo(() => {
+    if (!syndicationClipId) return false;
+    let best: VodJobRecord | undefined;
+    for (const j of vodJobs) {
+      if (j.editorClipId !== syndicationClipId) continue;
+      if (j.jobKind === "realtime_transcribe") continue;
+      if (!best || j.createdAt > best.createdAt) best = j;
+    }
+    if (!best) return false;
+    return (
+      best.status === "queued" ||
+      best.status === "processing" ||
+      best.status === "uploading" ||
+      best.status === "cancelling"
+    );
+  }, [syndicationClipId, vodJobs]);
+
   useEffect(() => {
     if (clipMetadataId && !clips.some((c) => c.id === clipMetadataId)) {
       setClipMetadataId(null);
     }
   }, [clips, clipMetadataId]);
+
+  useEffect(() => {
+    if (syndicationClipId && !clips.some((c) => c.id === syndicationClipId)) {
+      setSyndicationClipId(null);
+    }
+  }, [clips, syndicationClipId]);
 
   useEffect(() => {
     if (verticalCropModalClipId && !clips.some((c) => c.id === verticalCropModalClipId)) {
@@ -218,6 +254,11 @@ export function EditorRightPanel({
                 setVerticalCropModalClipId(clipId);
               }}
               onToggleClipSubtitle={onToggleClipSubtitle}
+              onOpenSyndication={
+                syndicationYoutubeEnabled && syndicationTenantId.trim()
+                  ? (c) => setSyndicationClipId(c.id)
+                  : undefined
+              }
               onUpdateClipTitle={(clipId, title) => onUpdateClipMetadata(clipId, { title })}
               onCaptureClipPoster={onCaptureClipPoster}
               onAddTextWidget={onAddTextWidget}
@@ -323,6 +364,18 @@ export function EditorRightPanel({
         onSave={onUpdateClipMetadata}
         onSeek={onSeek}
         readOnly={clipMetadataReadOnly}
+      />
+
+      <EditorSyndicationModal
+        isOpen={clipForSyndication !== null}
+        onOpenChange={(open) => {
+          if (!open) setSyndicationClipId(null);
+        }}
+        tenantId={syndicationTenantId.trim()}
+        clip={clipForSyndication}
+        clipUrl={clipUrl}
+        channelId={channelId}
+        readOnly={syndicationReadOnly}
       />
 
       {onSaveVerticalCropFromModal ? (

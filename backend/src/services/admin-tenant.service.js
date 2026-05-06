@@ -31,6 +31,9 @@ export async function adminUpdateTenant(tenantId, body) {
   const row = await Tenant.findByPk(String(tenantId || "").trim());
   if (!row) return null;
   if (body.subtitlesEnabled !== undefined) row.subtitlesEnabled = Boolean(body.subtitlesEnabled);
+  if (body.syndicationYoutubeEnabled !== undefined) {
+    row.syndicationYoutubeEnabled = Boolean(body.syndicationYoutubeEnabled);
+  }
   if (body.timezoneLastSeen !== undefined) row.timezoneLastSeen = body.timezoneLastSeen ? String(body.timezoneLastSeen).slice(0, 128) : null;
   if (body.metadata !== undefined) {
     row.metadata =

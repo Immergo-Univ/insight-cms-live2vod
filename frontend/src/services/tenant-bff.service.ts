@@ -1,6 +1,8 @@
 export type TenantDto = {
   tenantId: string;
   subtitlesEnabled: boolean;
+  syndicationYoutubeEnabled?: boolean;
+  syndicationYoutubeConnected?: boolean;
   timezoneLastSeen: string | null;
   metadata: Record<string, unknown> | null;
   firstSeenAt?: string;
