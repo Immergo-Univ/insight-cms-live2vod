@@ -343,6 +343,45 @@ export interface EditorSubtitleSettings {
   transcribeNewsLocales?: Partial<EditorSubtitleTranscribeNewsLocales>;
 }
 
+/** YouTube syndication privacy (Data API `status.privacyStatus`). */
+export type EditorYoutubePrivacyStatus = "public" | "private" | "unlisted";
+
+/** Upload lifecycle persisted on `clips[].syndication.youtube.upload` in job `editorSpec`. */
+export interface EditorClipYoutubeSyndicationUpload {
+  state?: "idle" | "pending" | "uploading" | "published" | "failed";
+  message?: string;
+  error?: string;
+  videoId?: string;
+  watchUrl?: string;
+  updatedAt?: string;
+}
+
+/** Per-clip YouTube options (subset of YouTube Data API snippet/status). */
+export interface EditorClipYoutubeSyndicationOptions {
+  titleOverride?: string;
+  descriptionOverride?: string;
+  tagsExtra?: string[];
+  categoryId?: string;
+  privacyStatus?: EditorYoutubePrivacyStatus;
+  embeddable?: boolean;
+  license?: "youtube" | "creativeCommon";
+  publicStatsViewable?: boolean;
+  selfDeclaredMadeForKids?: boolean;
+  notifySubscribers?: boolean;
+  defaultLanguage?: string;
+  defaultAudioLanguage?: string;
+}
+
+export interface EditorClipYoutubeSyndication {
+  enabled: boolean;
+  options: EditorClipYoutubeSyndicationOptions;
+  upload?: EditorClipYoutubeSyndicationUpload;
+}
+
+export interface EditorClipSyndication {
+  youtube?: EditorClipYoutubeSyndication;
+}
+
 /** Sent in JSON when subtitle mode is on. */
 export interface EditorSubtitlesConfig {
   enabled: true;
@@ -483,10 +522,14 @@ export interface EditorSubClip extends EditorSubClipEncodeOptions {
   /** Keywords for this output clip; exported under `clips[].metadata.tags`. */
   tags?: string[];
   posters?: EditorClipPoster[];
+  /** Per-clip syndication targets (YouTube first); included in VOD job `editorSpec`. */
+  syndication?: EditorClipSyndication;
 }
 
 /** Sub-clip row in exported editor JSON (Mark In/Out relative to parent window t=0). */
 export interface EditorStateJsonClip {
+  /** Stable id from the editor session; used to correlate jobs and syndication updates. */
+  editorClientClipId?: string;
   order: number;
   startTime: number;
   endTime: number;
@@ -505,6 +548,7 @@ export interface EditorStateJsonClip {
   subtitles?: EditorSubtitlesConfig;
   /** Over-video widgets for this clip (layout relative to full frame or 9:16 strip when crop is on). */
   widgets?: EditorClipWidget[];
+  syndication?: EditorClipSyndication;
 }
 
 /**
@@ -605,5 +649,6 @@ export function normalizeEditorSubClip(c: EditorSubClip): EditorSubClip {
     tags: c.tags !== undefined ? normalizeEditorClipTagsList(c.tags) : undefined,
     posters: c.posters ? [...c.posters] : undefined,
     widgets: c.widgets?.length ? c.widgets.map(cloneEditorClipWidget) : undefined,
+    syndication: c.syndication ? JSON.parse(JSON.stringify(c.syndication)) : undefined,
   };
 }

@@ -33,6 +33,7 @@ import { detectAds, getPrecalculatedAds } from "@/services/ads.service";
 import type {
   EditorAdMarker,
   EditorClipImageWidget,
+  EditorClipSyndication,
   EditorClipState,
   EditorClipTextWidget,
   EditorClipWidget,
@@ -167,6 +168,7 @@ function editorSubClipToStateJsonClip(c: EditorSubClip): EditorStateJsonClip {
         }
       : c.cropWindow;
   return {
+    editorClientClipId: c.id,
     order: c.order,
     startTime: c.startTime,
     endTime: c.endTime,
@@ -205,6 +207,7 @@ function editorSubClipToStateJsonClip(c: EditorSubClip): EditorStateJsonClip {
         }
       : {}),
     widgets: (c.widgets ?? []).map(cloneEditorClipWidget),
+    ...(c.syndication ? { syndication: JSON.parse(JSON.stringify(c.syndication)) } : {}),
   };
 }
 
@@ -1006,6 +1009,19 @@ export function EditorPage() {
     [],
   );
 
+  const handleUpdateClipSyndication = useCallback((clipId: string, syndication: EditorClipSyndication | undefined) => {
+    setClips((prev) =>
+      prev.map((c) => {
+        if (c.id !== clipId) return c;
+        if (!syndication) {
+          const { syndication: _removed, ...rest } = c;
+          return rest;
+        }
+        return { ...c, syndication };
+      }),
+    );
+  }, []);
+
   const handleResizeClip = useCallback(
     (id: string, newStartTime?: number, newEndTime?: number) => {
       setClips((prev) =>
@@ -1523,6 +1539,7 @@ export function EditorPage() {
               onPause={handlePause}
               onRemoveClip={handleRemoveClip}
               onUpdateClipMetadata={handleUpdateClipMetadata}
+              onUpdateClipSyndication={handleUpdateClipSyndication}
               onSeek={handleSeekWithTimelineScroll}
               thumbnailsEnabled={!isRealtime}
               clipsEmptyHint={

@@ -9,6 +9,7 @@ import {
 } from "react-aria-components";
 import type {
   EditorAdMarker,
+  EditorClipSyndication,
   EditorCropWindow,
   EditorSelectionMode,
   EditorSubClip,
@@ -39,6 +40,7 @@ interface EditorRightPanelProps {
     clipId: string,
     patch: Pick<EditorSubClip, "title" | "description" | "posters" | "tags">,
   ) => void;
+  onUpdateClipSyndication?: (clipId: string, syndication: EditorClipSyndication | undefined) => void;
   onSeek: (timeSeconds: number) => void;
   thumbnailsEnabled: boolean;
   clipsEmptyHint: string;
@@ -108,6 +110,7 @@ export function EditorRightPanel({
   onPause,
   onRemoveClip,
   onUpdateClipMetadata,
+  onUpdateClipSyndication,
   onSeek,
   thumbnailsEnabled,
   clipsEmptyHint,
@@ -376,6 +379,7 @@ export function EditorRightPanel({
         clipUrl={clipUrl}
         channelId={channelId}
         readOnly={syndicationReadOnly}
+        onSave={onUpdateClipSyndication}
       />
 
       {onSaveVerticalCropFromModal ? (

@@ -8,6 +8,7 @@ import * as roles from "../services/admin-role.service.js";
 import * as matrix from "../services/admin-matrix.service.js";
 import * as clips from "../services/admin-clip.service.js";
 import * as adminTenants from "../services/admin-tenant.service.js";
+import * as appSettings from "../services/admin-settings.service.js";
 import { isSequelizeReady } from "../db/sequelize.js";
 
 export const adminRouter = Router();
@@ -220,6 +221,22 @@ adminSecured.get("/clips/:id", requireAdminPermission("clips", "view"), async (r
     res.json(row);
   } catch (e) {
     res.status(500).json({ error: e instanceof Error ? e.message : String(e) });
+  }
+});
+
+adminSecured.get("/settings", requireAdminPermission("settings", "view"), async (_req, res) => {
+  try {
+    res.json(await appSettings.adminGetAppSettings());
+  } catch (e) {
+    res.status(500).json({ error: e instanceof Error ? e.message : String(e) });
+  }
+});
+
+adminSecured.patch("/settings", requireAdminPermission("settings", "edit"), async (req, res) => {
+  try {
+    res.json(await appSettings.adminPatchAppSettings(req.body || {}));
+  } catch (e) {
+    res.status(400).json({ error: e instanceof Error ? e.message : String(e) });
   }
 });
 

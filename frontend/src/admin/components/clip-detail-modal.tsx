@@ -1,8 +1,54 @@
-import { Descriptions, Modal, Tabs, Typography } from "antd";
+import { Descriptions, Empty, Modal, Tabs, Typography } from "antd";
 import { useTranslation } from "react-i18next";
 import type { TranscriptDiarizationPayload } from "@/types/vod-job";
 
 export type AdminClipDetail = Record<string, unknown>;
+
+function syndicationSummariesFromClip(clip: AdminClipDetail): { key: string; label: string; body: string }[] {
+  const spec = clip.editorSpec;
+  if (!spec || typeof spec !== "object") return [];
+  const clips = Array.isArray((spec as { clips?: unknown }).clips)
+    ? ((spec as { clips: unknown[] }).clips as Record<string, unknown>[])
+    : [];
+  const out: { key: string; label: string; body: string }[] = [];
+  let i = 0;
+  for (const c of clips) {
+    if (!c || typeof c !== "object") continue;
+    const synd = (c as { syndication?: unknown }).syndication;
+    if (!synd || typeof synd !== "object") continue;
+    const yt = (synd as { youtube?: unknown }).youtube;
+    if (!yt || typeof yt !== "object") continue;
+    const en = (yt as { enabled?: unknown }).enabled === true;
+    const up = (yt as { upload?: unknown }).upload;
+    const opt = (yt as { options?: unknown }).options;
+    const clientId = typeof (c as { editorClientClipId?: unknown }).editorClientClipId === "string"
+      ? String((c as { editorClientClipId: string }).editorClientClipId)
+      : `clip-${i + 1}`;
+    const lines: string[] = [];
+    lines.push(`Enabled: ${en ? "yes" : "no"}`);
+    if (opt && typeof opt === "object") {
+      const o = opt as Record<string, unknown>;
+      if (o.privacyStatus) lines.push(`Privacy: ${String(o.privacyStatus)}`);
+      if (o.categoryId != null) lines.push(`Category: ${String(o.categoryId)}`);
+      if (o.license) lines.push(`License: ${String(o.license)}`);
+    }
+    if (up && typeof up === "object") {
+      const u = up as Record<string, unknown>;
+      if (u.state) lines.push(`Upload state: ${String(u.state)}`);
+      if (u.message) lines.push(`Message: ${String(u.message)}`);
+      if (u.videoId) lines.push(`Video ID: ${String(u.videoId)}`);
+      if (u.watchUrl) lines.push(`URL: ${String(u.watchUrl)}`);
+      if (u.error) lines.push(`Error: ${String(u.error)}`);
+    }
+    out.push({
+      key: clientId,
+      label: `YouTube — ${clientId}`,
+      body: lines.join("\n"),
+    });
+    i += 1;
+  }
+  return out;
+}
 
 function pickVideoUrl(c: AdminClipDetail): string {
   const urls = c.outputUrls;
@@ -48,6 +94,7 @@ export function ClipDetailModal({ open, onClose, clip, loading }: Props) {
   const transcriptPlain = clip && typeof clip.transcriptText === "string" ? clip.transcriptText : "";
   const diText = clip ? formatDiarization(clip.transcriptDiarization) : "";
   const metaJson = clip ? JSON.stringify(clip, null, 2) : "";
+  const syndicationBlocks = clip ? syndicationSummariesFromClip(clip) : [];
 
   return (
     <Modal
@@ -101,6 +148,27 @@ export function ClipDetailModal({ open, onClose, clip, loading }: Props) {
                       <pre style={{ margin: 0, whiteSpace: "pre-wrap", maxHeight: 240, overflow: "auto" }}>{diText || "—"}</pre>
                     </Descriptions.Item>
                   </Descriptions>
+                </div>
+              ),
+            },
+            {
+              key: "syndication",
+              label: t("clips.tabSyndication"),
+              children: (
+                <div>
+                  {syndicationBlocks.length === 0 ? (
+                    <Empty description="No per-clip syndication in stored editor spec (encode with syndication enabled to populate)." />
+                  ) : (
+                    syndicationBlocks.map((b) => (
+                      <Descriptions key={b.key} column={1} size="small" title={b.label} style={{ marginBottom: 16 }}>
+                        <Descriptions.Item>
+                          <pre style={{ margin: 0, whiteSpace: "pre-wrap", maxHeight: 220, overflow: "auto", fontSize: 12 }}>
+                            {b.body}
+                          </pre>
+                        </Descriptions.Item>
+                      </Descriptions>
+                    ))
+                  )}
                 </div>
               ),
             },

@@ -12,6 +12,7 @@ import {
   pgListJobsForTenant,
   pgCountActiveJobsForTenant,
   pgUpdateJob,
+  pgMergeEditorSpec,
 } from "./vod-jobs-pg.repository.js";
 
 /** @typedef {'queued' | 'processing' | 'uploading' | 'completed' | 'cancelled' | 'failed'} VodJobStatus */
@@ -42,6 +43,7 @@ import {
  * @property {object} [transcriptNewsBundle] rich news fields per locale (editor PATCH + public share page)
  * @property {'vod_encode'|'realtime_transcribe'} [jobKind]
  * @property {string} [editorClipId] client sub-clip id when job was started from the editor row
+ * @property {object} [editorSpec] full editor JSON spec at job creation (syndication per clip, etc.)
  */
 
 /** @type {Map<string, VodJob>} */
@@ -135,8 +137,23 @@ function logVodEncodeJobLine(job, suffix) {
 }
 
 /**
+ * Merge-update `editorSpec` JSON (Postgres only).
+ *
+ * @param {string} jobId
+ * @param {(prev: Record<string, unknown>) => Record<string, unknown>} fn
+ */
+export async function mergeJobEditorSpec(jobId, fn) {
+  if (!usePg()) return null;
+  const job = await pgMergeEditorSpec(jobId, fn);
+  if (job) {
+    broadcastTenant(job.tenantId, { type: "job_update", job: serializeJob(/** @type {VodJob} */ (job)) });
+  }
+  return job;
+}
+
+/**
  * @param {string} id
- * @param {Partial<Pick<VodJob, 'status' | 'progress' | 'phase' | 'message' | 'error' | 's3Key' | 's3Keys' | 'outputUrl' | 'outputUrls' | 'transcriptText' | 'transcriptDiarization' | 'transcriptNewsEn' | 'transcriptNewsEs' | 'transcriptNewsHe' | 'transcriptNewsError' | 'openaiClipUsage' | 'transcriptNewsBundle' | 'jobKind'>>} patch
+ * @param {Partial<Pick<VodJob, 'status' | 'progress' | 'phase' | 'message' | 'error' | 's3Key' | 's3Keys' | 'outputUrl' | 'outputUrls' | 'transcriptText' | 'transcriptDiarization' | 'transcriptNewsEn' | 'transcriptNewsEs' | 'transcriptNewsHe' | 'transcriptNewsError' | 'openaiClipUsage' | 'transcriptNewsBundle' | 'jobKind' | 'editorSpec'>>} patch
  * @returns {Promise<VodJob | null>}
  */
 export async function updateJob(id, patch) {

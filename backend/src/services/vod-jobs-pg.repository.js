@@ -65,6 +65,7 @@ function modelToJob(instance) {
     transcriptNewsBundle: obj(o.transcriptNewsBundle),
     jobKind: str(o.jobKind),
     editorClipId: str(o.editorClipId),
+    editorSpec: obj(o.editorSpec),
   };
 }
 
@@ -98,6 +99,7 @@ export async function pgInsertJob(job) {
     transcriptNewsBundle: job.transcriptNewsBundle ?? null,
     jobKind: job.jobKind ?? null,
     editorClipId: job.editorClipId ?? null,
+    editorSpec: job.editorSpec ?? null,
   });
 }
 
@@ -157,6 +159,7 @@ const PATCH_DB_KEYS = new Set([
   "openaiClipUsage",
   "transcriptNewsBundle",
   "jobKind",
+  "editorSpec",
 ]);
 
 /**
@@ -182,6 +185,27 @@ export async function pgUpdateJob(id, patch) {
   }
 
   await row.update(updatePayload);
+  await row.reload();
+  return modelToJob(row) ?? null;
+}
+
+/**
+ * Deep-merge `editor_spec` for a job (internal; used by YouTube syndication status updates).
+ *
+ * @param {string} jobId
+ * @param {(prev: Record<string, unknown> | null) => Record<string, unknown>} fn
+ * @returns {Promise<object | null>}
+ */
+export async function pgMergeEditorSpec(jobId, fn) {
+  const VodJob = getVodJobModel();
+  const row = await VodJob.findByPk(jobId);
+  if (!row) return null;
+  const prev =
+    row.editorSpec && typeof row.editorSpec === "object" && !Array.isArray(row.editorSpec)
+      ? /** @type {Record<string, unknown>} */ (row.get("editorSpec"))
+      : {};
+  const next = fn(prev);
+  await row.update({ editorSpec: next });
   await row.reload();
   return modelToJob(row) ?? null;
 }

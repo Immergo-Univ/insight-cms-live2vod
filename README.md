@@ -55,6 +55,14 @@ Variables de entorno (opcional, recomendado):
 - **`INSIGHT_API_BASE`**: base URL de Insight API (default en código)
 - **`INSIGHT_AUTH_TOKEN`**: token Bearer para Insight API (**recomendado setearlo por env**, no hardcode)
 
+**YouTube / sindicación (OAuth)** — podés guardar **Client ID**, **client secret** y **redirect URI** en **Admin → Ajustes → Sindicación → YouTube** (tabla `app_settings` en Postgres). Si un campo queda vacío en la base, se usa el valor de entorno del backend.
+
+Alternativa / respaldo por entorno del proceso Node:
+
+- **`YOUTUBE_CLIENT_ID`**, **`YOUTUBE_CLIENT_SECRET`**, **`YOUTUBE_REDIRECT_URI`** (callback del backend, p. ej. `https://<tu-api>/api/tenants/oauth/youtube/callback`).
+
+Los scripts `npm run dev` / `npm start` del backend cargan **`backend/.env`** (`node --env-file=.env`). En producción, definí variables donde corresponda (Docker, Kubernetes, etc.); los valores en BD tienen prioridad si no están vacíos.
+
 Scripts:
 
 - `npm run dev`: inicia backend con `node --watch` (desarrollo)
@@ -170,6 +178,14 @@ Environment variables (optional, recommended):
 - **`PORT`**: backend port (default `3001`)
 - **`INSIGHT_API_BASE`**: Insight API base URL (default is in code)
 - **`INSIGHT_AUTH_TOKEN`**: Insight API Bearer token (**recommended via env**, not hardcoded)
+
+**YouTube syndication (OAuth)** — you can store **client ID**, **client secret**, and **redirect URI** in **Admin → Settings → Syndication → YouTube** (persisted in Postgres `app_settings`). If a value is empty in the database, the backend environment variable is used.
+
+Fallback / env on the Node backend process:
+
+- **`YOUTUBE_CLIENT_ID`**, **`YOUTUBE_CLIENT_SECRET`**, **`YOUTUBE_REDIRECT_URI`** (backend callback URL, e.g. `https://<your-api>/api/tenants/oauth/youtube/callback`).
+
+Backend `npm run dev` / `npm start` load **`backend/.env`** via `node --env-file=.env`. Non-empty DB fields override env at runtime.
 
 Scripts:
 

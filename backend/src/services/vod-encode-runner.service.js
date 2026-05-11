@@ -53,6 +53,7 @@ export async function startBackgroundVodJob(opts) {
     clipUrl: clipUrlPreview || spec.clipUrl,
     jobKind: spec?.realtimeTranscribeOnly === true ? "realtime_transcribe" : "vod_encode",
     ...(editorClipId ? { editorClipId } : {}),
+    editorSpec: spec && typeof spec === "object" ? JSON.parse(JSON.stringify(spec)) : null,
   });
 
   const subs = anySubtitlesEnabled(spec);

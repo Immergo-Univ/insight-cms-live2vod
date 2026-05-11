@@ -51,11 +51,12 @@ export async function ensureTenantVisited(opts) {
  * @param {object} plain
  */
 export function tenantRowToApi(plain) {
+  const hasYoutubeToken = Boolean(plain.youtubeRefreshToken && String(plain.youtubeRefreshToken).trim());
   return {
     tenantId: plain.tenantId,
     subtitlesEnabled: plain.subtitlesEnabled !== false,
     syndicationYoutubeEnabled: plain.syndicationYoutubeEnabled === true,
-    syndicationYoutubeConnected: plain.syndicationYoutubeConnected === true,
+    syndicationYoutubeConnected: hasYoutubeToken || plain.syndicationYoutubeConnected === true,
     timezoneLastSeen: plain.timezoneLastSeen ?? null,
     metadata: plain.metadata ?? null,
     firstSeenAt: plain.firstSeenAt,

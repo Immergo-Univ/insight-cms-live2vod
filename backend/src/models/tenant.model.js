@@ -15,6 +15,8 @@ export function registerTenantModel(sequelize) {
       subtitlesEnabled: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
       syndicationYoutubeEnabled: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
       syndicationYoutubeConnected: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
+      /** OAuth refresh token for YouTube Data API (never exposed on public tenant DTO). */
+      youtubeRefreshToken: { type: DataTypes.TEXT, allowNull: true },
       timezoneLastSeen: { type: DataTypes.STRING(128), allowNull: true },
       metadata: { type: DataTypes.JSONB, allowNull: true },
       firstSeenAt: { type: DataTypes.DATE, allowNull: true },

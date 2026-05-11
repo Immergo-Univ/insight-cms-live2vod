@@ -64,6 +64,20 @@ export function TenantSettingsProvider({ children }: { children: ReactNode }) {
     void refresh();
   }, [refresh]);
 
+  useEffect(() => {
+    try {
+      const q = new URLSearchParams(location.search);
+      if (q.get("youtubeConnected") === "1") {
+        q.delete("youtubeConnected");
+        const next = `${location.pathname}${q.toString() ? `?${q.toString()}` : ""}${location.hash}`;
+        window.history.replaceState({}, "", next);
+        void refresh();
+      }
+    } catch {
+      /* ignore */
+    }
+  }, [location.search, location.pathname, location.hash, refresh]);
+
   const subtitlesEnabled = !tenantId || tenant?.subtitlesEnabled !== false;
   const syndicationYoutubeEnabled = Boolean(tenantId && tenant?.syndicationYoutubeEnabled === true);
 

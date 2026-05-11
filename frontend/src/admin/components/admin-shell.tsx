@@ -21,6 +21,7 @@ export function AdminShell() {
     if (can("roles", "view_item")) items.push({ key: "/admin/roles", label: <Link to="/admin/roles">{t("nav.roles")}</Link> });
     if (can("permissions", "view_item"))
       items.push({ key: "/admin/permissions", label: <Link to="/admin/permissions">{t("nav.permissions")}</Link> });
+    if (can("settings", "view")) items.push({ key: "/admin/settings", label: <Link to="/admin/settings">{t("nav.settings")}</Link> });
     items.push({ key: "/admin/profile", label: <Link to="/admin/profile">{t("nav.profile")}</Link> });
     return items;
   }, [can, t]);
@@ -32,6 +33,7 @@ export function AdminShell() {
     if (p.startsWith("/admin/users")) return ["/admin/users"];
     if (p.startsWith("/admin/roles")) return ["/admin/roles"];
     if (p.startsWith("/admin/permissions")) return ["/admin/permissions"];
+    if (p.startsWith("/admin/settings")) return ["/admin/settings"];
     if (p.startsWith("/admin/profile")) return ["/admin/profile"];
     return [p];
   }, [location.pathname]);

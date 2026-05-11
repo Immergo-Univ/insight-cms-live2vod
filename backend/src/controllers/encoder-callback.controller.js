@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { config } from "../config.js";
 import { getJob, updateJob } from "../services/vod-jobs.store.js";
+import { tryYoutubeSyndicationAfterJobCompleted } from "../services/youtube-syndication-runner.service.js";
 
 /** Fields the encoder service may update on a job (defense in depth). */
 const ENCODER_PATCH_KEYS = new Set([
@@ -60,5 +61,11 @@ encoderCallbackRouter.patch("/jobs/:jobId", requireEncoderSecret, async (req, re
     return res.status(400).json({ error: "No valid fields to patch" });
   }
   await updateJob(jobId, patch);
+  if (patch.status === "completed") {
+    void tryYoutubeSyndicationAfterJobCompleted(jobId).catch((e) => {
+      const m = e instanceof Error ? e.message : String(e);
+      console.error(`[encoder-callback] youtube syndication job=${jobId}`, m);
+    });
+  }
   res.json({ ok: true });
 });

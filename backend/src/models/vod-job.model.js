@@ -35,6 +35,8 @@ export function registerVodJobModel(sequelize) {
       transcriptNewsBundle: DataTypes.JSONB,
       jobKind: DataTypes.STRING,
       editorClipId: DataTypes.STRING,
+      /** Full editor job spec (clips, ads, syndication per clip, etc.). */
+      editorSpec: DataTypes.JSONB,
     },
     {
       tableName: "vod_jobs",

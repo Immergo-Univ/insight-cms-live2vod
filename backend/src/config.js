@@ -159,6 +159,21 @@ export const config = {
   },
 
   /**
+   * YouTube Data API v3 (syndication). OAuth redirect must match Google Cloud console exactly.
+   * Env: YOUTUBE_CLIENT_ID, YOUTUBE_CLIENT_SECRET, YOUTUBE_REDIRECT_URI (backend callback URL).
+   * Non-empty values in `app_settings.syndication.youtube` (oauthClientId, oauthClientSecret, oauthRedirectUri) override these at runtime.
+   * Optional: YOUTUBE_OAUTH_FRONTEND_REDIRECT — browser URL after success (e.g. editor with tenantId).
+   * YOUTUBE_OAUTH_STATE_SECRET — HMAC for `state` (defaults to JWT_SECRET / SECRET).
+   */
+  youtube: {
+    clientId: (process.env.YOUTUBE_CLIENT_ID || "").trim(),
+    clientSecret: (process.env.YOUTUBE_CLIENT_SECRET || "").trim(),
+    redirectUri: (process.env.YOUTUBE_REDIRECT_URI || "").trim(),
+    oauthSuccessRedirect: (process.env.YOUTUBE_OAUTH_FRONTEND_REDIRECT || "").trim(),
+    oauthStateSecret: (process.env.YOUTUBE_OAUTH_STATE_SECRET || "").trim(),
+  },
+
+  /**
    * Admin panel (`/admin`). Requires Postgres + `JWT_SECRET`.
    * Env: `ADMIN_EMAIL`, `ADMIN_PASSWORD` (seeded on first sync if user missing).
    */

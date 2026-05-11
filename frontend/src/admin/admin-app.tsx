@@ -12,6 +12,7 @@ import { AdminRolesPage } from "@/admin/pages/admin-roles-page";
 import { AdminPermissionsPage } from "@/admin/pages/admin-permissions-page";
 import { AdminProfilePage } from "@/admin/pages/admin-profile-page";
 import { AdminTenantsPage } from "@/admin/pages/admin-tenants-page";
+import { AdminSettingsPage } from "@/admin/pages/admin-settings-page";
 
 export function AdminApp() {
   return (
@@ -37,6 +38,7 @@ export function AdminApp() {
                   <Route path="users" element={<AdminUsersPage />} />
                   <Route path="roles" element={<AdminRolesPage />} />
                   <Route path="permissions" element={<AdminPermissionsPage />} />
+                  <Route path="settings" element={<AdminSettingsPage />} />
                   <Route path="profile" element={<AdminProfilePage />} />
                 </Route>
               </Route>
