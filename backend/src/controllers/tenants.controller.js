@@ -7,8 +7,37 @@ import {
   completeYoutubeOAuthCallback,
 } from "../services/tenant-syndication.service.js";
 import { config } from "../config.js";
+import { getResolvedYoutubeOAuth } from "../services/admin-settings.service.js";
 
 export const tenantsRouter = Router();
+
+/** Express may expose duplicate query keys as arrays; Google sends single values. */
+function firstQueryString(value) {
+  if (value == null) return "";
+  if (Array.isArray(value)) return String(value[0] ?? "").trim();
+  return String(value).trim();
+}
+
+/**
+ * Read OAuth `code` and `state` from the callback request (query string).
+ *
+ * @param {import("express").Request} req
+ */
+function readGoogleOAuthCallbackQuery(req) {
+  let code = firstQueryString(req.query?.code);
+  let state = firstQueryString(req.query?.state);
+  if (code && state) return { code, state };
+
+  const rawUrl = req.originalUrl || req.url || "";
+  try {
+    const u = new URL(rawUrl, `http://${req.headers.host || "localhost"}`);
+    if (!code) code = String(u.searchParams.get("code") || "").trim();
+    if (!state) state = String(u.searchParams.get("state") || "").trim();
+  } catch {
+    /* ignore */
+  }
+  return { code, state };
+}
 
 function buildYoutubeOAuthSuccessRedirect(tenantId) {
   const tid = String(tenantId || "").trim();
@@ -48,14 +77,22 @@ tenantsRouter.post("/ensure", async (req, res) => {
 /** Google redirects here (must match YOUTUBE_REDIRECT_URI). */
 tenantsRouter.get("/oauth/youtube/callback", async (req, res) => {
   try {
-    const err = String(req.query.error || "").trim();
+    const err = firstQueryString(req.query?.error);
     if (err) {
       return res.status(400).send(`YouTube authorization was denied: ${err}`);
     }
-    const code = String(req.query.code || "").trim();
-    const state = String(req.query.state || "").trim();
+    const { code, state } = readGoogleOAuthCallbackQuery(req);
     if (!code || !state) {
-      return res.status(400).send("Missing code or state from Google OAuth callback");
+      const { redirectUri } = await getResolvedYoutubeOAuth();
+      const hint = redirectUri
+        ? `Configured redirect URI (must match Google Cloud exactly): ${redirectUri}. `
+        : "";
+      return res.status(400).send(
+        `${hint}` +
+          "Missing ?code= or ?state= on this callback URL. " +
+          "If you refreshed this page or opened the link manually, start “Authorize with Google” again (the code is one-time). " +
+          "Otherwise check that your reverse proxy forwards the full query string and that the OAuth client is a “Web application” type.",
+      );
     }
     const tenantId = await completeYoutubeOAuthCallback(code, state);
     res.redirect(302, buildYoutubeOAuthSuccessRedirect(tenantId));

@@ -97,6 +97,9 @@ export async function buildYoutubeAuthorizationUrl(tenantId) {
   return oauth2Client.generateAuthUrl({
     access_type: "offline",
     prompt: "consent",
+    /** Ensure authorization code is returned in the query string (visible to the server), not in the URL hash. */
+    response_type: "code",
+    response_mode: "query",
     scope: [
       "https://www.googleapis.com/auth/youtube.upload",
       "https://www.googleapis.com/auth/youtube.readonly",
