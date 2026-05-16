@@ -174,6 +174,60 @@ export const config = {
   },
 
   /**
+   * X (Twitter) API v2 syndication. OAuth 2.0 redirect must match the X developer portal exactly.
+   * Env: TWITTER_CLIENT_ID, TWITTER_CLIENT_SECRET, TWITTER_REDIRECT_URI (backend callback URL).
+   * Non-empty values in `app_settings.syndication.twitter` override these at runtime.
+   * Optional: TWITTER_OAUTH_FRONTEND_REDIRECT, TWITTER_OAUTH_STATE_SECRET, TWITTER_ALLOW_MOCK_AUTH.
+   */
+  twitter: {
+    clientId: (process.env.TWITTER_CLIENT_ID || "").trim(),
+    clientSecret: (process.env.TWITTER_CLIENT_SECRET || "").trim(),
+    redirectUri: (process.env.TWITTER_REDIRECT_URI || "").trim(),
+    oauthSuccessRedirect: (process.env.TWITTER_OAUTH_FRONTEND_REDIRECT || "").trim(),
+    oauthStateSecret: (process.env.TWITTER_OAUTH_STATE_SECRET || "").trim(),
+  },
+
+  /**
+   * Facebook Page syndication (Meta Graph API). OAuth redirect must match Meta app settings exactly.
+   * Env: FACEBOOK_APP_ID, FACEBOOK_APP_SECRET, FACEBOOK_REDIRECT_URI (backend callback URL).
+   * Non-empty values in `app_settings.syndication.facebook` override these at runtime.
+   * Optional: FACEBOOK_OAUTH_FRONTEND_REDIRECT, FACEBOOK_OAUTH_STATE_SECRET, FACEBOOK_ALLOW_MOCK_AUTH.
+   */
+  facebook: {
+    appId: (process.env.FACEBOOK_APP_ID || "").trim(),
+    appSecret: (process.env.FACEBOOK_APP_SECRET || "").trim(),
+    redirectUri: (process.env.FACEBOOK_REDIRECT_URI || "").trim(),
+    oauthSuccessRedirect: (process.env.FACEBOOK_OAUTH_FRONTEND_REDIRECT || "").trim(),
+    oauthStateSecret: (process.env.FACEBOOK_OAUTH_STATE_SECRET || "").trim(),
+  },
+
+  /**
+   * Instagram Business syndication (Meta Graph API). Same Meta app model as Facebook; separate env keys and callback.
+   * Env: INSTAGRAM_APP_ID, INSTAGRAM_APP_SECRET, INSTAGRAM_REDIRECT_URI.
+   * Optional: INSTAGRAM_OAUTH_FRONTEND_REDIRECT, INSTAGRAM_OAUTH_STATE_SECRET, INSTAGRAM_ALLOW_MOCK_AUTH.
+   */
+  instagram: {
+    appId: (process.env.INSTAGRAM_APP_ID || "").trim(),
+    appSecret: (process.env.INSTAGRAM_APP_SECRET || "").trim(),
+    redirectUri: (process.env.INSTAGRAM_REDIRECT_URI || "").trim(),
+    oauthSuccessRedirect: (process.env.INSTAGRAM_OAUTH_FRONTEND_REDIRECT || "").trim(),
+    oauthStateSecret: (process.env.INSTAGRAM_OAUTH_STATE_SECRET || "").trim(),
+  },
+
+  /**
+   * TikTok Direct Post (Content Posting API). OAuth redirect must match TikTok developer portal exactly.
+   * Env: TIKTOK_CLIENT_KEY, TIKTOK_CLIENT_SECRET, TIKTOK_REDIRECT_URI (backend callback URL).
+   * Optional: TIKTOK_OAUTH_FRONTEND_REDIRECT, TIKTOK_OAUTH_STATE_SECRET, TIKTOK_ALLOW_MOCK_AUTH.
+   */
+  tiktok: {
+    clientKey: (process.env.TIKTOK_CLIENT_KEY || "").trim(),
+    clientSecret: (process.env.TIKTOK_CLIENT_SECRET || "").trim(),
+    redirectUri: (process.env.TIKTOK_REDIRECT_URI || "").trim(),
+    oauthSuccessRedirect: (process.env.TIKTOK_OAUTH_FRONTEND_REDIRECT || "").trim(),
+    oauthStateSecret: (process.env.TIKTOK_OAUTH_STATE_SECRET || "").trim(),
+  },
+
+  /**
    * Admin panel (`/admin`). Requires Postgres + `JWT_SECRET`.
    * Env: `ADMIN_EMAIL`, `ADMIN_PASSWORD` (seeded on first sync if user missing).
    */

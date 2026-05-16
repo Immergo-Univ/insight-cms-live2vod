@@ -82,8 +82,16 @@ interface EditorRightPanelProps {
   onToggleClipSubtitle?: (clipId: string) => void;
   /** Tenant slug from URL; required for syndication API. */
   syndicationTenantId?: string;
-  /** When true with tenant id, show per-clip syndication entry point. */
+  /** When true with tenant id, show per-clip syndication for YouTube. */
   syndicationYoutubeEnabled?: boolean;
+  /** When true with tenant id, show per-clip syndication for X / Twitter. */
+  syndicationTwitterEnabled?: boolean;
+  /** When true with tenant id, show per-clip syndication for Facebook. */
+  syndicationFacebookEnabled?: boolean;
+  /** When true with tenant id, show per-clip syndication for Instagram. */
+  syndicationInstagramEnabled?: boolean;
+  /** When true with tenant id, show per-clip syndication for TikTok. */
+  syndicationTiktokEnabled?: boolean;
   /** Append a frame bookmark at the current playhead for this sub-clip. */
   onCaptureClipPoster?: (clipId: string) => void;
   onAddTextWidget?: (clipId: string) => void;
@@ -134,6 +142,10 @@ export function EditorRightPanel({
   onToggleClipSubtitle,
   syndicationTenantId = "",
   syndicationYoutubeEnabled = false,
+  syndicationTwitterEnabled = false,
+  syndicationFacebookEnabled = false,
+  syndicationInstagramEnabled = false,
+  syndicationTiktokEnabled = false,
   onCaptureClipPoster,
   onAddTextWidget,
   onAddImageWidgetFromFile,
@@ -258,7 +270,12 @@ export function EditorRightPanel({
               }}
               onToggleClipSubtitle={onToggleClipSubtitle}
               onOpenSyndication={
-                syndicationYoutubeEnabled && syndicationTenantId.trim()
+                (syndicationYoutubeEnabled ||
+                  syndicationTwitterEnabled ||
+                  syndicationFacebookEnabled ||
+                  syndicationInstagramEnabled ||
+                  syndicationTiktokEnabled) &&
+                syndicationTenantId.trim()
                   ? (c) => setSyndicationClipId(c.id)
                   : undefined
               }

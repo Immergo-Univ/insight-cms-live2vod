@@ -202,6 +202,76 @@ adminSecured.patch("/tenants/:tenantId", requireAdminPermission("tenants", "edit
   }
 });
 
+adminSecured.post(
+  "/tenants/:tenantId/youtube/disconnect",
+  requireAdminPermission("tenants", "edit"),
+  async (req, res) => {
+    try {
+      const row = await adminTenants.adminDisconnectTenantYoutube(req.params.tenantId);
+      if (!row) return res.status(404).json({ error: "Not found" });
+      res.json(row);
+    } catch (e) {
+      res.status(400).json({ error: e instanceof Error ? e.message : String(e) });
+    }
+  },
+);
+
+adminSecured.post(
+  "/tenants/:tenantId/twitter/disconnect",
+  requireAdminPermission("tenants", "edit"),
+  async (req, res) => {
+    try {
+      const row = await adminTenants.adminDisconnectTenantTwitter(req.params.tenantId);
+      if (!row) return res.status(404).json({ error: "Not found" });
+      res.json(row);
+    } catch (e) {
+      res.status(400).json({ error: e instanceof Error ? e.message : String(e) });
+    }
+  },
+);
+
+adminSecured.post(
+  "/tenants/:tenantId/facebook/disconnect",
+  requireAdminPermission("tenants", "edit"),
+  async (req, res) => {
+    try {
+      const row = await adminTenants.adminDisconnectTenantFacebook(req.params.tenantId);
+      if (!row) return res.status(404).json({ error: "Not found" });
+      res.json(row);
+    } catch (e) {
+      res.status(400).json({ error: e instanceof Error ? e.message : String(e) });
+    }
+  },
+);
+
+adminSecured.post(
+  "/tenants/:tenantId/instagram/disconnect",
+  requireAdminPermission("tenants", "edit"),
+  async (req, res) => {
+    try {
+      const row = await adminTenants.adminDisconnectTenantInstagram(req.params.tenantId);
+      if (!row) return res.status(404).json({ error: "Not found" });
+      res.json(row);
+    } catch (e) {
+      res.status(400).json({ error: e instanceof Error ? e.message : String(e) });
+    }
+  },
+);
+
+adminSecured.post(
+  "/tenants/:tenantId/tiktok/disconnect",
+  requireAdminPermission("tenants", "edit"),
+  async (req, res) => {
+    try {
+      const row = await adminTenants.adminDisconnectTenantTiktok(req.params.tenantId);
+      if (!row) return res.status(404).json({ error: "Not found" });
+      res.json(row);
+    } catch (e) {
+      res.status(400).json({ error: e instanceof Error ? e.message : String(e) });
+    }
+  },
+);
+
 adminSecured.get("/clips", requireAdminPermission("clips", "view"), async (req, res) => {
   try {
     const page = parseInt(String(req.query.page || "1"), 10);

@@ -535,7 +535,7 @@ interface EditorClipsListProps {
   onPause: () => void;
   onRemove: (id: string) => void;
   onEditMetadata?: (clip: EditorSubClip) => void;
-  /** When set, show Syndication control next to metadata (tenant must allow YouTube syndication). */
+  /** When set, show Syndication control next to metadata (tenant must allow YouTube and/or X syndication). */
   onOpenSyndication?: (clip: EditorSubClip) => void;
   onSeek?: (timeSeconds: number) => void;
   /** When false, skip VOD thumbnail URLs (e.g. live / realtime session offsets). */
@@ -698,9 +698,8 @@ export function EditorClipsList({
           }}
           isDismissable
           isKeyboardDismissDisabled={false}
-          className="z-[85]"
         >
-          <Modal className="z-[86]">
+          <Modal>
             <Dialog
               aria-label="Encoded clip playback"
               className="mx-4 flex w-full max-w-4xl justify-center outline-hidden sm:mx-auto"
@@ -740,9 +739,8 @@ export function EditorClipsList({
           }}
           isDismissable={!imageWidgetBusy}
           isKeyboardDismissDisabled={imageWidgetBusy}
-          className="z-[85]"
         >
-          <Modal className="z-[86]">
+          <Modal>
             <Dialog
               aria-label="Upload widget image"
               className="mx-4 flex w-full max-w-md justify-center outline-hidden sm:mx-auto"
@@ -811,9 +809,8 @@ export function EditorClipsList({
           }}
           isDismissable
           isKeyboardDismissDisabled={false}
-          className="z-[85]"
         >
-          <Modal className="z-[86]">
+          <Modal>
             <Dialog
               aria-label="Clip transcript"
               className="mx-4 flex w-full max-w-4xl justify-center outline-hidden sm:mx-auto"

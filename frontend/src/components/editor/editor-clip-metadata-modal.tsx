@@ -145,9 +145,8 @@ export function EditorClipMetadataModal({
       onOpenChange={onOpenChange}
       isDismissable
       isKeyboardDismissDisabled={false}
-      className="z-[80]"
     >
-      <Modal className="z-[81]">
+      <Modal>
         <Dialog
           aria-label="Clip metadata"
           className="mx-4 flex w-full max-w-lg justify-center outline-hidden sm:mx-auto"

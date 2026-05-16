@@ -8,11 +8,34 @@ import {
   fetchTenantSyndicationStatus,
   fetchTenantSyndicationYoutubeAuthUrl,
   postTenantSyndicationYoutubeMockAuthorize,
+  fetchTenantSyndicationTwitterAuthUrl,
+  postTenantSyndicationTwitterMockAuthorize,
+  fetchTenantSyndicationFacebookAuthUrl,
+  fetchTenantSyndicationFacebookPages,
+  postTenantSyndicationFacebookSelectPage,
+  postTenantSyndicationFacebookMockAuthorize,
+  fetchTenantSyndicationInstagramAuthUrl,
+  fetchTenantSyndicationInstagramAccounts,
+  postTenantSyndicationInstagramSelectAccount,
+  postTenantSyndicationInstagramMockAuthorize,
+  fetchTenantSyndicationTiktokAuthUrl,
+  fetchTenantSyndicationTiktokCreatorInfo,
+  postTenantSyndicationTiktokMockAuthorize,
+} from "@/services/tenant-syndication.service";
+import type {
+  FacebookPageOption,
+  InstagramAccountOption,
+  TiktokCreatorInfo,
 } from "@/services/tenant-syndication.service";
 import type {
   EditorClipSyndication,
+  EditorClipFacebookSyndication,
+  EditorClipInstagramSyndication,
+  EditorClipTiktokSyndication,
+  EditorClipTwitterSyndication,
   EditorClipYoutubeSyndication,
   EditorClipYoutubeSyndicationOptions,
+  EditorInstagramMediaType,
   EditorYoutubePrivacyStatus,
 } from "@/types/editor";
 import type { EditorSubClip } from "@/types/editor";
@@ -43,6 +66,60 @@ function defaultYoutubeBranch(clip: EditorSubClip): EditorClipYoutubeSyndication
   };
 }
 
+function defaultTwitterBranch(clip: EditorSubClip): EditorClipTwitterSyndication {
+  const existing = clip.syndication?.twitter;
+  return {
+    enabled: existing?.enabled === true,
+    options: {
+      textOverride: existing?.options?.textOverride ?? "",
+    },
+    upload: existing?.upload ? { ...existing.upload } : undefined,
+  };
+}
+
+function defaultFacebookBranch(clip: EditorSubClip): EditorClipFacebookSyndication {
+  const existing = clip.syndication?.facebook;
+  return {
+    enabled: existing?.enabled === true,
+    options: {
+      titleOverride: existing?.options?.titleOverride ?? "",
+      descriptionOverride: existing?.options?.descriptionOverride ?? "",
+    },
+    upload: existing?.upload ? { ...existing.upload } : undefined,
+  };
+}
+
+function defaultInstagramBranch(clip: EditorSubClip): EditorClipInstagramSyndication {
+  const existing = clip.syndication?.instagram;
+  const mediaTypeRaw = existing?.options?.mediaType;
+  const mediaType: EditorInstagramMediaType = mediaTypeRaw === "feed" ? "feed" : "reels";
+  return {
+    enabled: existing?.enabled === true,
+    options: {
+      captionOverride: existing?.options?.captionOverride ?? "",
+      mediaType,
+    },
+    upload: existing?.upload ? { ...existing.upload } : undefined,
+  };
+}
+
+function defaultTiktokBranch(clip: EditorSubClip): EditorClipTiktokSyndication {
+  const existing = clip.syndication?.tiktok;
+  return {
+    enabled: existing?.enabled === true,
+    options: {
+      captionOverride: existing?.options?.captionOverride ?? "",
+      privacyLevel: existing?.options?.privacyLevel ?? "",
+      disableDuet: existing?.options?.disableDuet === true,
+      disableComment: existing?.options?.disableComment === true,
+      disableStitch: existing?.options?.disableStitch === true,
+      brandContentToggle: existing?.options?.brandContentToggle === true,
+      brandOrganicToggle: existing?.options?.brandOrganicToggle === true,
+    },
+    upload: existing?.upload ? { ...existing.upload } : undefined,
+  };
+}
+
 interface EditorSyndicationModalProps {
   isOpen: boolean;
   onOpenChange: (open: boolean) => void;
@@ -67,10 +144,42 @@ export function EditorSyndicationModal({
   const [statusLoading, setStatusLoading] = useState(false);
   const [statusError, setStatusError] = useState<string | null>(null);
   const [youtubeConnected, setYoutubeConnected] = useState(false);
-  const [mockAuthAvailable, setMockAuthAvailable] = useState(false);
+  const [twitterConnected, setTwitterConnected] = useState(false);
+  const [facebookConnected, setFacebookConnected] = useState(false);
+  const [facebookPageSelected, setFacebookPageSelected] = useState(false);
+  const [facebookPageName, setFacebookPageName] = useState<string | null>(null);
+  const [youtubeMockAuthAvailable, setYoutubeMockAuthAvailable] = useState(false);
+  const [twitterMockAuthAvailable, setTwitterMockAuthAvailable] = useState(false);
+  const [facebookMockAuthAvailable, setFacebookMockAuthAvailable] = useState(false);
+  const [instagramConnected, setInstagramConnected] = useState(false);
+  const [instagramAccountSelected, setInstagramAccountSelected] = useState(false);
+  const [instagramUsername, setInstagramUsername] = useState<string | null>(null);
+  const [instagramMockAuthAvailable, setInstagramMockAuthAvailable] = useState(false);
   const [authBusy, setAuthBusy] = useState(false);
+  const [pageBusy, setPageBusy] = useState(false);
+  const [facebookPages, setFacebookPages] = useState<FacebookPageOption[]>([]);
+  const [instagramAccounts, setInstagramAccounts] = useState<InstagramAccountOption[]>([]);
+  const [selectedPageId, setSelectedPageId] = useState("");
+  const [selectedIgAccountId, setSelectedIgAccountId] = useState("");
   const [ytDraft, setYtDraft] = useState<EditorClipYoutubeSyndication>(() =>
     clip ? defaultYoutubeBranch(clip) : { enabled: false, options: {} },
+  );
+  const [twDraft, setTwDraft] = useState<EditorClipTwitterSyndication>(() =>
+    clip ? defaultTwitterBranch(clip) : { enabled: false, options: {} },
+  );
+  const [fbDraft, setFbDraft] = useState<EditorClipFacebookSyndication>(() =>
+    clip ? defaultFacebookBranch(clip) : { enabled: false, options: {} },
+  );
+  const [igDraft, setIgDraft] = useState<EditorClipInstagramSyndication>(() =>
+    clip ? defaultInstagramBranch(clip) : { enabled: false, options: { mediaType: "reels" } },
+  );
+  const [tiktokConnected, setTiktokConnected] = useState(false);
+  const [tiktokUsername, setTiktokUsername] = useState<string | null>(null);
+  const [tiktokMockAuthAvailable, setTiktokMockAuthAvailable] = useState(false);
+  const [tiktokCreatorInfo, setTiktokCreatorInfo] = useState<TiktokCreatorInfo | null>(null);
+  const [creatorInfoBusy, setCreatorInfoBusy] = useState(false);
+  const [ttDraft, setTtDraft] = useState<EditorClipTiktokSyndication>(() =>
+    clip ? defaultTiktokBranch(clip) : { enabled: false, options: {} },
   );
 
   const loadStatus = useCallback(async () => {
@@ -81,11 +190,37 @@ export function EditorSyndicationModal({
     try {
       const s = await fetchTenantSyndicationStatus(id);
       setYoutubeConnected(s.youtube.connected);
-      setMockAuthAvailable(!!s.youtube.mockAuthAvailable);
+      setTwitterConnected(s.twitter.connected);
+      setFacebookConnected(s.facebook.connected);
+      setFacebookPageSelected(s.facebook.pageSelected);
+      setFacebookPageName(s.facebook.pageName);
+      setYoutubeMockAuthAvailable(!!s.youtube.mockAuthAvailable);
+      setTwitterMockAuthAvailable(!!s.twitter.mockAuthAvailable);
+      setFacebookMockAuthAvailable(!!s.facebook.mockAuthAvailable);
+      setInstagramConnected(s.instagram.connected);
+      setInstagramAccountSelected(s.instagram.accountSelected);
+      setInstagramUsername(s.instagram.username);
+      setInstagramMockAuthAvailable(!!s.instagram.mockAuthAvailable);
+      setTiktokConnected(s.tiktok.connected);
+      setTiktokUsername(s.tiktok.username);
+      setTiktokMockAuthAvailable(!!s.tiktok.mockAuthAvailable);
     } catch (e) {
       setStatusError(e instanceof Error ? e.message : "Failed to load syndication status");
       setYoutubeConnected(false);
-      setMockAuthAvailable(false);
+      setTwitterConnected(false);
+      setFacebookConnected(false);
+      setFacebookPageSelected(false);
+      setFacebookPageName(null);
+      setInstagramConnected(false);
+      setInstagramAccountSelected(false);
+      setInstagramUsername(null);
+      setYoutubeMockAuthAvailable(false);
+      setTwitterMockAuthAvailable(false);
+      setFacebookMockAuthAvailable(false);
+      setInstagramMockAuthAvailable(false);
+      setTiktokConnected(false);
+      setTiktokUsername(null);
+      setTiktokMockAuthAvailable(false);
     } finally {
       setStatusLoading(false);
     }
@@ -97,8 +232,87 @@ export function EditorSyndicationModal({
   }, [isOpen, tenantId, loadStatus]);
 
   useEffect(() => {
-    if (isOpen && clip) setYtDraft(defaultYoutubeBranch(clip));
+    if (isOpen && clip) {
+      setYtDraft(defaultYoutubeBranch(clip));
+      setTwDraft(defaultTwitterBranch(clip));
+      setFbDraft(defaultFacebookBranch(clip));
+      setIgDraft(defaultInstagramBranch(clip));
+      setTtDraft(defaultTiktokBranch(clip));
+    }
   }, [isOpen, clip?.id, clip?.syndication]);
+
+  const loadTiktokCreatorInfo = useCallback(async () => {
+    const id = tenantId.trim();
+    if (!id || !tiktokConnected) return;
+    setCreatorInfoBusy(true);
+    setStatusError(null);
+    try {
+      const info = await fetchTenantSyndicationTiktokCreatorInfo(id);
+      setTiktokCreatorInfo(info);
+      const opts = Array.isArray(info.privacy_level_options) ? info.privacy_level_options : [];
+      if (opts.length && !ttDraft.options.privacyLevel) {
+        const preferred = opts.includes("SELF_ONLY") ? "SELF_ONLY" : opts[0];
+        setTtDraft((d) => ({
+          ...d,
+          options: { ...d.options, privacyLevel: preferred },
+        }));
+      }
+    } catch (e) {
+      setStatusError(e instanceof Error ? e.message : "Failed to load TikTok creator info");
+      setTiktokCreatorInfo(null);
+    } finally {
+      setCreatorInfoBusy(false);
+    }
+  }, [tenantId, tiktokConnected, ttDraft.options.privacyLevel]);
+
+  useEffect(() => {
+    if (!isOpen || !tiktokConnected) return;
+    void loadTiktokCreatorInfo();
+  }, [isOpen, tiktokConnected, loadTiktokCreatorInfo]);
+
+  const loadFacebookPages = useCallback(async () => {
+    const id = tenantId.trim();
+    if (!id || !facebookConnected) return;
+    setPageBusy(true);
+    setStatusError(null);
+    try {
+      const pages = await fetchTenantSyndicationFacebookPages(id);
+      setFacebookPages(pages);
+      if (pages.length === 1) setSelectedPageId(pages[0].id);
+    } catch (e) {
+      setStatusError(e instanceof Error ? e.message : "Failed to load Facebook Pages");
+      setFacebookPages([]);
+    } finally {
+      setPageBusy(false);
+    }
+  }, [tenantId, facebookConnected]);
+
+  useEffect(() => {
+    if (!isOpen || !facebookConnected || facebookPageSelected) return;
+    void loadFacebookPages();
+  }, [isOpen, facebookConnected, facebookPageSelected, loadFacebookPages]);
+
+  const loadInstagramAccounts = useCallback(async () => {
+    const id = tenantId.trim();
+    if (!id || !instagramConnected) return;
+    setPageBusy(true);
+    setStatusError(null);
+    try {
+      const accounts = await fetchTenantSyndicationInstagramAccounts(id);
+      setInstagramAccounts(accounts);
+      if (accounts.length === 1) setSelectedIgAccountId(accounts[0].id);
+    } catch (e) {
+      setStatusError(e instanceof Error ? e.message : "Failed to load Instagram accounts");
+      setInstagramAccounts([]);
+    } finally {
+      setPageBusy(false);
+    }
+  }, [tenantId, instagramConnected]);
+
+  useEffect(() => {
+    if (!isOpen || !instagramConnected || instagramAccountSelected) return;
+    void loadInstagramAccounts();
+  }, [isOpen, instagramConnected, instagramAccountSelected, loadInstagramAccounts]);
 
   const handleStartOAuth = useCallback(async () => {
     if (readOnly || !tenantId.trim()) return;
@@ -114,19 +328,161 @@ export function EditorSyndicationModal({
     }
   }, [tenantId, readOnly]);
 
-  const handleMockAuthorize = useCallback(async () => {
+  const handleMockAuthorizeYoutube = useCallback(async () => {
     if (readOnly || !tenantId.trim()) return;
     setAuthBusy(true);
     setStatusError(null);
     try {
-      const s = await postTenantSyndicationYoutubeMockAuthorize(tenantId.trim());
-      setYoutubeConnected(s.youtube.connected);
+      await postTenantSyndicationYoutubeMockAuthorize(tenantId.trim());
+      await loadStatus();
     } catch (e) {
       setStatusError(e instanceof Error ? e.message : "Authorization failed");
     } finally {
       setAuthBusy(false);
     }
+  }, [tenantId, readOnly, loadStatus]);
+
+  const handleStartTwitterOAuth = useCallback(async () => {
+    if (readOnly || !tenantId.trim()) return;
+    setAuthBusy(true);
+    setStatusError(null);
+    try {
+      const url = await fetchTenantSyndicationTwitterAuthUrl(tenantId.trim());
+      window.location.href = url;
+    } catch (e) {
+      setStatusError(e instanceof Error ? e.message : "Could not start X sign-in");
+    } finally {
+      setAuthBusy(false);
+    }
   }, [tenantId, readOnly]);
+
+  const handleMockAuthorizeTwitter = useCallback(async () => {
+    if (readOnly || !tenantId.trim()) return;
+    setAuthBusy(true);
+    setStatusError(null);
+    try {
+      await postTenantSyndicationTwitterMockAuthorize(tenantId.trim());
+      await loadStatus();
+    } catch (e) {
+      setStatusError(e instanceof Error ? e.message : "Authorization failed");
+    } finally {
+      setAuthBusy(false);
+    }
+  }, [tenantId, readOnly, loadStatus]);
+
+  const handleStartFacebookOAuth = useCallback(async () => {
+    if (readOnly || !tenantId.trim()) return;
+    setAuthBusy(true);
+    setStatusError(null);
+    try {
+      const url = await fetchTenantSyndicationFacebookAuthUrl(tenantId.trim());
+      window.location.href = url;
+    } catch (e) {
+      setStatusError(e instanceof Error ? e.message : "Could not start Facebook sign-in");
+    } finally {
+      setAuthBusy(false);
+    }
+  }, [tenantId, readOnly]);
+
+  const handleMockAuthorizeFacebook = useCallback(async () => {
+    if (readOnly || !tenantId.trim()) return;
+    setAuthBusy(true);
+    setStatusError(null);
+    try {
+      await postTenantSyndicationFacebookMockAuthorize(tenantId.trim());
+      await loadStatus();
+    } catch (e) {
+      setStatusError(e instanceof Error ? e.message : "Authorization failed");
+    } finally {
+      setAuthBusy(false);
+    }
+  }, [tenantId, readOnly, loadStatus]);
+
+  const handleSaveFacebookPage = useCallback(async () => {
+    if (readOnly || !tenantId.trim() || !selectedPageId.trim()) return;
+    setPageBusy(true);
+    setStatusError(null);
+    try {
+      const s = await postTenantSyndicationFacebookSelectPage(tenantId.trim(), selectedPageId.trim());
+      setFacebookPageSelected(s.facebook.pageSelected);
+      setFacebookPageName(s.facebook.pageName);
+    } catch (e) {
+      setStatusError(e instanceof Error ? e.message : "Failed to save Facebook Page");
+    } finally {
+      setPageBusy(false);
+    }
+  }, [tenantId, readOnly, selectedPageId]);
+
+  const handleStartInstagramOAuth = useCallback(async () => {
+    if (readOnly || !tenantId.trim()) return;
+    setAuthBusy(true);
+    setStatusError(null);
+    try {
+      const url = await fetchTenantSyndicationInstagramAuthUrl(tenantId.trim());
+      window.location.href = url;
+    } catch (e) {
+      setStatusError(e instanceof Error ? e.message : "Could not start Instagram sign-in");
+    } finally {
+      setAuthBusy(false);
+    }
+  }, [tenantId, readOnly]);
+
+  const handleMockAuthorizeInstagram = useCallback(async () => {
+    if (readOnly || !tenantId.trim()) return;
+    setAuthBusy(true);
+    setStatusError(null);
+    try {
+      await postTenantSyndicationInstagramMockAuthorize(tenantId.trim());
+      await loadStatus();
+    } catch (e) {
+      setStatusError(e instanceof Error ? e.message : "Mock authorize failed");
+    } finally {
+      setAuthBusy(false);
+    }
+  }, [tenantId, readOnly, loadStatus]);
+
+  const handleSaveInstagramAccount = useCallback(async () => {
+    if (readOnly || !tenantId.trim() || !selectedIgAccountId.trim()) return;
+    setPageBusy(true);
+    setStatusError(null);
+    try {
+      const s = await postTenantSyndicationInstagramSelectAccount(tenantId.trim(), selectedIgAccountId.trim());
+      setInstagramAccountSelected(s.instagram.accountSelected);
+      setInstagramUsername(s.instagram.username);
+    } catch (e) {
+      setStatusError(e instanceof Error ? e.message : "Failed to save Instagram account");
+    } finally {
+      setPageBusy(false);
+    }
+  }, [tenantId, readOnly, selectedIgAccountId]);
+
+  const handleStartTiktokOAuth = useCallback(async () => {
+    if (readOnly || !tenantId.trim()) return;
+    setAuthBusy(true);
+    setStatusError(null);
+    try {
+      const url = await fetchTenantSyndicationTiktokAuthUrl(tenantId.trim());
+      window.location.href = url;
+    } catch (e) {
+      setStatusError(e instanceof Error ? e.message : "Could not start TikTok sign-in");
+    } finally {
+      setAuthBusy(false);
+    }
+  }, [tenantId, readOnly]);
+
+  const handleMockAuthorizeTiktok = useCallback(async () => {
+    if (readOnly || !tenantId.trim()) return;
+    setAuthBusy(true);
+    setStatusError(null);
+    try {
+      await postTenantSyndicationTiktokMockAuthorize(tenantId.trim());
+      await loadStatus();
+    } catch (e) {
+      setStatusError(e instanceof Error ? e.message : "Mock authorize failed");
+    } finally {
+      setAuthBusy(false);
+    }
+  }, [tenantId, readOnly, loadStatus]);
 
   const setOpt = useCallback((patch: Partial<EditorClipYoutubeSyndicationOptions>) => {
     setYtDraft((d) => ({ ...d, options: { ...d.options, ...patch } }));
@@ -134,9 +490,10 @@ export function EditorSyndicationModal({
 
   const handleSave = useCallback(() => {
     if (!clip || readOnly || !onSave) return;
-    const next: EditorClipSyndication = {
-      youtube: {
-        enabled: ytDraft.enabled,
+    const next: EditorClipSyndication = {};
+    if (youtubeConnected && ytDraft.enabled) {
+      next.youtube = {
+        enabled: true,
         options: {
           ...ytDraft.options,
           titleOverride: ytDraft.options.titleOverride?.trim() || undefined,
@@ -149,15 +506,78 @@ export function EditorSyndicationModal({
           defaultAudioLanguage: ytDraft.options.defaultAudioLanguage?.trim() || undefined,
         },
         upload: ytDraft.upload,
-      },
-    };
-    if (!next.youtube?.enabled) {
+      };
+    }
+    if (twitterConnected && twDraft.enabled) {
+      next.twitter = {
+        enabled: true,
+        options: {
+          textOverride: twDraft.options.textOverride?.trim() || undefined,
+        },
+        upload: twDraft.upload,
+      };
+    }
+    if (facebookConnected && facebookPageSelected && fbDraft.enabled) {
+      next.facebook = {
+        enabled: true,
+        options: {
+          titleOverride: fbDraft.options.titleOverride?.trim() || undefined,
+          descriptionOverride: fbDraft.options.descriptionOverride?.trim() || undefined,
+        },
+        upload: fbDraft.upload,
+      };
+    }
+    if (instagramConnected && instagramAccountSelected && igDraft.enabled) {
+      const mediaType: EditorInstagramMediaType =
+        igDraft.options.mediaType === "feed" ? "feed" : "reels";
+      next.instagram = {
+        enabled: true,
+        options: {
+          captionOverride: igDraft.options.captionOverride?.trim() || undefined,
+          mediaType,
+        },
+        upload: igDraft.upload,
+      };
+    }
+    if (tiktokConnected && ttDraft.enabled) {
+      next.tiktok = {
+        enabled: true,
+        options: {
+          captionOverride: ttDraft.options.captionOverride?.trim() || undefined,
+          privacyLevel: ttDraft.options.privacyLevel?.trim() || undefined,
+          disableDuet: ttDraft.options.disableDuet === true ? true : undefined,
+          disableComment: ttDraft.options.disableComment === true ? true : undefined,
+          disableStitch: ttDraft.options.disableStitch === true ? true : undefined,
+          brandContentToggle: ttDraft.options.brandContentToggle === true ? true : undefined,
+          brandOrganicToggle: ttDraft.options.brandOrganicToggle === true ? true : undefined,
+        },
+        upload: ttDraft.upload,
+      };
+    }
+    if (!next.youtube && !next.twitter && !next.facebook && !next.instagram && !next.tiktok) {
       onSave(clip.id, undefined);
     } else {
       onSave(clip.id, next);
     }
     onOpenChange(false);
-  }, [clip, readOnly, onSave, ytDraft, onOpenChange]);
+  }, [
+    clip,
+    readOnly,
+    onSave,
+    ytDraft,
+    twDraft,
+    fbDraft,
+    igDraft,
+    ttDraft,
+    youtubeConnected,
+    twitterConnected,
+    facebookConnected,
+    facebookPageSelected,
+    instagramConnected,
+    instagramAccountSelected,
+    tiktokConnected,
+    onOpenChange,
+  ]);
 
   if (!clip) return null;
 
@@ -172,9 +592,8 @@ export function EditorSyndicationModal({
       onOpenChange={onOpenChange}
       isDismissable
       isKeyboardDismissDisabled={false}
-      className="z-[80]"
     >
-      <Modal className="z-[81]">
+      <Modal>
         <Dialog
           aria-label="Syndication"
           className="mx-4 flex w-full max-w-xl justify-center outline-hidden sm:mx-auto"
@@ -183,7 +602,8 @@ export function EditorSyndicationModal({
             <CloseButton slot="close" size="xs" label="Close" className="absolute top-3 right-3 z-10" />
             <h2 className="pr-10 text-lg font-semibold text-primary">Syndication</h2>
             <p className="mt-1 text-xs text-tertiary">
-              Configure YouTube publishing for this clip. Settings are stored on the clip and sent with the encode job.
+              Configure YouTube, X, Facebook, Instagram, and TikTok publishing for this clip. Settings are stored on the
+              clip and sent with the encode job.
             </p>
             <p className="mt-2 text-xs text-secondary">
               <span className="font-medium text-primary">{title}</span>
@@ -204,7 +624,10 @@ export function EditorSyndicationModal({
                 fullWidth
                 items={[
                   { id: "youtube", label: "YouTube", children: "YouTube" },
+                  { id: "twitter", label: "Twitter / X", children: "Twitter / X" },
+                  { id: "facebook", label: "Facebook", children: "Facebook" },
                   { id: "instagram", label: "Instagram", children: "Instagram" },
+                  { id: "tiktok", label: "TikTok", children: "TikTok" },
                 ]}
               />
               <Tabs.Panel id="youtube" className="pt-2">
@@ -226,11 +649,11 @@ export function EditorSyndicationModal({
                     >
                       {authBusy ? "Redirecting…" : "Authorize with Google"}
                     </button>
-                    {mockAuthAvailable ? (
+                    {youtubeMockAuthAvailable ? (
                       <button
                         type="button"
                         disabled={readOnly || authBusy}
-                        onClick={() => void handleMockAuthorize()}
+                        onClick={() => void handleMockAuthorizeYoutube()}
                         className="rounded-lg border border-secondary bg-primary px-3 py-2 text-xs font-medium text-secondary hover:bg-tertiary/40"
                       >
                         Dev: mock connected (no Google)
@@ -472,10 +895,544 @@ export function EditorSyndicationModal({
                   </div>
                 )}
               </Tabs.Panel>
+              <Tabs.Panel id="twitter" className="pt-2">
+                {statusLoading ? (
+                  <p className="text-sm text-tertiary">Loading connection status…</p>
+                ) : !twitterConnected ? (
+                  <div className="flex flex-col gap-3 rounded-lg border border-secondary bg-secondary/40 p-4">
+                    <p className="text-sm text-primary">
+                      Authorize Immergo with X to post the finished encode as a video tweet on your account.
+                    </p>
+                    <button
+                      type="button"
+                      disabled={readOnly || authBusy}
+                      onClick={() => void handleStartTwitterOAuth()}
+                      className={cx(
+                        "rounded-lg bg-brand-solid px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-brand-solid-hover",
+                        (readOnly || authBusy) && "cursor-not-allowed opacity-50",
+                      )}
+                    >
+                      {authBusy ? "Redirecting…" : "Authorize with X"}
+                    </button>
+                    {twitterMockAuthAvailable ? (
+                      <button
+                        type="button"
+                        disabled={readOnly || authBusy}
+                        onClick={() => void handleMockAuthorizeTwitter()}
+                        className="rounded-lg border border-secondary bg-primary px-3 py-2 text-xs font-medium text-secondary hover:bg-tertiary/40"
+                      >
+                        Dev: mock connected (no X)
+                      </button>
+                    ) : null}
+                  </div>
+                ) : (
+                  <div className="flex flex-col gap-4">
+                    <Toggle
+                      isSelected={twDraft.enabled}
+                      onChange={(v) => setTwDraft((d) => ({ ...d, enabled: v }))}
+                      isDisabled={readOnly}
+                      label="Syndicate this clip to X after encode"
+                      hint="When the VOD job completes, the backend uploads the MP4 and publishes a video tweet."
+                      size="sm"
+                    />
+                    <label className="flex flex-col gap-1 text-xs font-medium text-secondary">
+                      Tweet text override (optional)
+                      <textarea
+                        disabled={readOnly || !twDraft.enabled}
+                        value={twDraft.options.textOverride || ""}
+                        onChange={(e) =>
+                          setTwDraft((d) => ({
+                            ...d,
+                            options: { ...d.options, textOverride: e.target.value },
+                          }))
+                        }
+                        placeholder={title}
+                        rows={3}
+                        className="rounded-lg border border-secondary bg-primary px-2 py-2 text-sm text-primary"
+                      />
+                    </label>
+                    <p className="text-xs text-tertiary">
+                      Default tweet text is the clip title when override is empty. X may enforce length and media
+                      limits per your developer plan.
+                    </p>
+                    {twDraft.upload?.state ? (
+                      <p className="rounded-md border border-secondary bg-secondary px-2 py-2 text-xs text-secondary">
+                        Upload status: <strong className="text-primary">{twDraft.upload.state}</strong>
+                        {twDraft.upload.message ? ` — ${twDraft.upload.message}` : ""}
+                        {twDraft.upload.tweetUrl ? (
+                          <>
+                            {" "}
+                            <a
+                              href={twDraft.upload.tweetUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="text-brand-secondary underline"
+                            >
+                              Open post
+                            </a>
+                          </>
+                        ) : null}
+                        {twDraft.upload.error ? (
+                          <span className="mt-1 block text-error-primary">{twDraft.upload.error}</span>
+                        ) : null}
+                      </p>
+                    ) : null}
+                  </div>
+                )}
+              </Tabs.Panel>
+              <Tabs.Panel id="facebook" className="pt-2">
+                {statusLoading ? (
+                  <p className="text-sm text-tertiary">Loading connection status…</p>
+                ) : !facebookConnected ? (
+                  <div className="flex flex-col gap-3 rounded-lg border border-secondary bg-secondary/40 p-4">
+                    <p className="text-sm text-primary">
+                      Sign in with Facebook to publish finished encodes to a Facebook Page you manage.
+                    </p>
+                    <button
+                      type="button"
+                      disabled={readOnly || authBusy}
+                      onClick={() => void handleStartFacebookOAuth()}
+                      className={cx(
+                        "rounded-lg bg-brand-solid px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-brand-solid-hover",
+                        (readOnly || authBusy) && "cursor-not-allowed opacity-50",
+                      )}
+                    >
+                      {authBusy ? "Redirecting…" : "Authorize with Facebook"}
+                    </button>
+                    {facebookMockAuthAvailable ? (
+                      <button
+                        type="button"
+                        disabled={readOnly || authBusy}
+                        onClick={() => void handleMockAuthorizeFacebook()}
+                        className="rounded-lg border border-secondary bg-primary px-3 py-2 text-xs font-medium text-secondary hover:bg-tertiary/40"
+                      >
+                        Dev: mock connected (no Facebook)
+                      </button>
+                    ) : null}
+                  </div>
+                ) : !facebookPageSelected ? (
+                  <div className="flex flex-col gap-3 rounded-lg border border-secondary bg-secondary/40 p-4">
+                    <p className="text-sm text-primary">
+                      Choose which Facebook Page should receive syndicated videos for this tenant.
+                    </p>
+                    {pageBusy && facebookPages.length === 0 ? (
+                      <p className="text-xs text-tertiary">Loading Pages…</p>
+                    ) : facebookPages.length === 0 ? (
+                      <p className="text-xs text-tertiary">
+                        No Pages found. Ensure your Facebook account manages at least one Page.
+                      </p>
+                    ) : (
+                      <label className="flex flex-col gap-1 text-xs font-medium text-secondary">
+                        Facebook Page
+                        <select
+                          disabled={readOnly || pageBusy}
+                          value={selectedPageId}
+                          onChange={(e) => setSelectedPageId(e.target.value)}
+                          className="rounded-lg border border-secondary bg-primary px-2 py-2 text-sm text-primary"
+                        >
+                          <option value="">Select a Page…</option>
+                          {facebookPages.map((p) => (
+                            <option key={p.id} value={p.id}>
+                              {p.name}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    )}
+                    <button
+                      type="button"
+                      disabled={readOnly || pageBusy || !selectedPageId.trim()}
+                      onClick={() => void handleSaveFacebookPage()}
+                      className={cx(
+                        "rounded-lg bg-brand-solid px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-brand-solid-hover",
+                        (readOnly || pageBusy || !selectedPageId.trim()) && "cursor-not-allowed opacity-50",
+                      )}
+                    >
+                      {pageBusy ? "Saving…" : "Save Page"}
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex flex-col gap-4">
+                    <p className="text-xs text-secondary">
+                      Connected Page: <strong className="text-primary">{facebookPageName || "—"}</strong>
+                    </p>
+                    <Toggle
+                      isSelected={fbDraft.enabled}
+                      onChange={(v) => setFbDraft((d) => ({ ...d, enabled: v }))}
+                      isDisabled={readOnly}
+                      label="Syndicate this clip to Facebook after encode"
+                      hint="When the VOD job completes, the backend publishes the MP4 to the selected Page."
+                      size="sm"
+                    />
+                    <label className="flex flex-col gap-1 text-xs font-medium text-secondary">
+                      Title override (optional)
+                      <input
+                        type="text"
+                        disabled={readOnly || !fbDraft.enabled}
+                        value={fbDraft.options.titleOverride || ""}
+                        onChange={(e) =>
+                          setFbDraft((d) => ({
+                            ...d,
+                            options: { ...d.options, titleOverride: e.target.value },
+                          }))
+                        }
+                        placeholder={title}
+                        className="rounded-lg border border-secondary bg-primary px-2 py-2 text-sm text-primary"
+                      />
+                    </label>
+                    <label className="flex flex-col gap-1 text-xs font-medium text-secondary">
+                      Description override (optional)
+                      <textarea
+                        disabled={readOnly || !fbDraft.enabled}
+                        value={fbDraft.options.descriptionOverride || ""}
+                        onChange={(e) =>
+                          setFbDraft((d) => ({
+                            ...d,
+                            options: { ...d.options, descriptionOverride: e.target.value },
+                          }))
+                        }
+                        placeholder={description || "—"}
+                        rows={3}
+                        className="rounded-lg border border-secondary bg-primary px-2 py-2 text-sm text-primary"
+                      />
+                    </label>
+                    {fbDraft.upload?.state ? (
+                      <p className="rounded-md border border-secondary bg-secondary px-2 py-2 text-xs text-secondary">
+                        Upload status: <strong className="text-primary">{fbDraft.upload.state}</strong>
+                        {fbDraft.upload.message ? ` — ${fbDraft.upload.message}` : ""}
+                        {fbDraft.upload.permalinkUrl ? (
+                          <>
+                            {" "}
+                            <a
+                              href={fbDraft.upload.permalinkUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="text-brand-secondary underline"
+                            >
+                              Open post
+                            </a>
+                          </>
+                        ) : null}
+                        {fbDraft.upload.error ? (
+                          <span className="mt-1 block text-error-primary">{fbDraft.upload.error}</span>
+                        ) : null}
+                      </p>
+                    ) : null}
+                  </div>
+                )}
+              </Tabs.Panel>
               <Tabs.Panel id="instagram" className="pt-2">
-                <p className="rounded-lg border border-dashed border-secondary bg-secondary/20 px-3 py-4 text-sm text-tertiary">
-                  Instagram syndication is not available yet.
-                </p>
+                {statusLoading ? (
+                  <p className="text-sm text-tertiary">Loading connection status…</p>
+                ) : !instagramConnected ? (
+                  <div className="flex flex-col gap-3 rounded-lg border border-secondary bg-secondary/40 p-4">
+                    <p className="text-sm text-primary">
+                      Sign in with Meta to publish finished encodes to an Instagram Business or Creator account linked
+                      to a Facebook Page.
+                    </p>
+                    <button
+                      type="button"
+                      disabled={readOnly || authBusy}
+                      onClick={() => void handleStartInstagramOAuth()}
+                      className={cx(
+                        "rounded-lg bg-brand-solid px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-brand-solid-hover",
+                        (readOnly || authBusy) && "cursor-not-allowed opacity-50",
+                      )}
+                    >
+                      {authBusy ? "Redirecting…" : "Authorize with Instagram"}
+                    </button>
+                    {instagramMockAuthAvailable ? (
+                      <button
+                        type="button"
+                        disabled={readOnly || authBusy}
+                        onClick={() => void handleMockAuthorizeInstagram()}
+                        className="rounded-lg border border-secondary bg-primary px-3 py-2 text-xs font-medium text-secondary hover:bg-tertiary/40"
+                      >
+                        Dev: mock connected (no Instagram)
+                      </button>
+                    ) : null}
+                  </div>
+                ) : !instagramAccountSelected ? (
+                  <div className="flex flex-col gap-3 rounded-lg border border-secondary bg-secondary/40 p-4">
+                    <p className="text-sm text-primary">
+                      Choose which Instagram account should receive syndicated videos for this tenant.
+                    </p>
+                    {pageBusy && instagramAccounts.length === 0 ? (
+                      <p className="text-xs text-tertiary">Loading accounts…</p>
+                    ) : instagramAccounts.length === 0 ? (
+                      <p className="text-xs text-tertiary">
+                        No Instagram Business accounts found. Link an Instagram account to a Facebook Page you manage.
+                      </p>
+                    ) : (
+                      <label className="flex flex-col gap-1 text-xs font-medium text-secondary">
+                        Instagram account
+                        <select
+                          disabled={readOnly || pageBusy}
+                          value={selectedIgAccountId}
+                          onChange={(e) => setSelectedIgAccountId(e.target.value)}
+                          className="rounded-lg border border-secondary bg-primary px-2 py-2 text-sm text-primary"
+                        >
+                          <option value="">Select an account…</option>
+                          {instagramAccounts.map((a) => (
+                            <option key={a.id} value={a.id}>
+                              @{a.username}
+                              {a.pageName ? ` (${a.pageName})` : ""}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    )}
+                    <button
+                      type="button"
+                      disabled={readOnly || pageBusy || !selectedIgAccountId.trim()}
+                      onClick={() => void handleSaveInstagramAccount()}
+                      className={cx(
+                        "rounded-lg bg-brand-solid px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-brand-solid-hover",
+                        (readOnly || pageBusy || !selectedIgAccountId.trim()) && "cursor-not-allowed opacity-50",
+                      )}
+                    >
+                      {pageBusy ? "Saving…" : "Save account"}
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex flex-col gap-4">
+                    <p className="text-xs text-secondary">
+                      Connected account:{" "}
+                      <strong className="text-primary">
+                        {instagramUsername ? `@${instagramUsername}` : "—"}
+                      </strong>
+                    </p>
+                    <Toggle
+                      isSelected={igDraft.enabled}
+                      onChange={(v) => setIgDraft((d) => ({ ...d, enabled: v }))}
+                      isDisabled={readOnly}
+                      label="Syndicate this clip to Instagram after encode"
+                      hint="When the VOD job completes, the backend publishes the MP4 to the selected account."
+                      size="sm"
+                    />
+                    <label className="flex flex-col gap-1 text-xs font-medium text-secondary">
+                      Destination
+                      <select
+                        disabled={readOnly || !igDraft.enabled}
+                        value={igDraft.options.mediaType === "feed" ? "feed" : "reels"}
+                        onChange={(e) =>
+                          setIgDraft((d) => ({
+                            ...d,
+                            options: {
+                              ...d.options,
+                              mediaType: e.target.value === "feed" ? "feed" : "reels",
+                            },
+                          }))
+                        }
+                        className="rounded-lg border border-secondary bg-primary px-2 py-2 text-sm text-primary"
+                      >
+                        <option value="reels">Reels</option>
+                        <option value="feed">Feed (video post)</option>
+                      </select>
+                    </label>
+                    <label className="flex flex-col gap-1 text-xs font-medium text-secondary">
+                      Caption override (optional)
+                      <textarea
+                        disabled={readOnly || !igDraft.enabled}
+                        value={igDraft.options.captionOverride || ""}
+                        onChange={(e) =>
+                          setIgDraft((d) => ({
+                            ...d,
+                            options: { ...d.options, captionOverride: e.target.value },
+                          }))
+                        }
+                        placeholder={[title, description].filter(Boolean).join("\n\n") || "—"}
+                        rows={3}
+                        className="rounded-lg border border-secondary bg-primary px-2 py-2 text-sm text-primary"
+                      />
+                    </label>
+                    {igDraft.upload?.state ? (
+                      <p className="rounded-md border border-secondary bg-secondary px-2 py-2 text-xs text-secondary">
+                        Upload status: <strong className="text-primary">{igDraft.upload.state}</strong>
+                        {igDraft.upload.message ? ` — ${igDraft.upload.message}` : ""}
+                        {igDraft.upload.permalinkUrl ? (
+                          <>
+                            {" "}
+                            <a
+                              href={igDraft.upload.permalinkUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="text-brand-secondary underline"
+                            >
+                              Open post
+                            </a>
+                          </>
+                        ) : null}
+                        {igDraft.upload.error ? (
+                          <span className="mt-1 block text-error-primary">{igDraft.upload.error}</span>
+                        ) : null}
+                      </p>
+                    ) : null}
+                  </div>
+                )}
+              </Tabs.Panel>
+              <Tabs.Panel id="tiktok" className="pt-2">
+                {statusLoading ? (
+                  <p className="text-sm text-tertiary">Loading connection status…</p>
+                ) : !tiktokConnected ? (
+                  <div className="flex flex-col gap-3 rounded-lg border border-secondary bg-secondary/40 p-4">
+                    <p className="text-sm text-primary">
+                      Sign in with TikTok to publish finished encodes to your TikTok account (Direct Post API).
+                    </p>
+                    <p className="text-xs text-tertiary">
+                      Unaudited apps may only publish as private until TikTok approves your Content Posting API
+                      integration. Verify your MP4 output URL domain in the TikTok developer portal for pull-from-URL
+                      uploads.
+                    </p>
+                    <button
+                      type="button"
+                      disabled={readOnly || authBusy}
+                      onClick={() => void handleStartTiktokOAuth()}
+                      className={cx(
+                        "rounded-lg bg-brand-solid px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-brand-solid-hover",
+                        (readOnly || authBusy) && "cursor-not-allowed opacity-50",
+                      )}
+                    >
+                      {authBusy ? "Redirecting…" : "Authorize with TikTok"}
+                    </button>
+                    {tiktokMockAuthAvailable ? (
+                      <button
+                        type="button"
+                        disabled={readOnly || authBusy}
+                        onClick={() => void handleMockAuthorizeTiktok()}
+                        className="rounded-lg border border-secondary bg-primary px-3 py-2 text-xs font-medium text-secondary hover:bg-tertiary/40"
+                      >
+                        Dev: mock connected (no TikTok)
+                      </button>
+                    ) : null}
+                  </div>
+                ) : (
+                  <div className="flex flex-col gap-4">
+                    <p className="text-xs text-secondary">
+                      Connected account:{" "}
+                      <strong className="text-primary">
+                        {tiktokUsername
+                          ? `@${tiktokUsername}`
+                          : tiktokCreatorInfo?.creator_username
+                            ? `@${tiktokCreatorInfo.creator_username}`
+                            : "—"}
+                      </strong>
+                    </p>
+                    {creatorInfoBusy && !tiktokCreatorInfo ? (
+                      <p className="text-xs text-tertiary">Loading creator settings…</p>
+                    ) : null}
+                    <Toggle
+                      isSelected={ttDraft.enabled}
+                      onChange={(v) => setTtDraft((d) => ({ ...d, enabled: v }))}
+                      isDisabled={readOnly}
+                      label="Syndicate this clip to TikTok after encode"
+                      hint="When the VOD job completes, the backend publishes the MP4 via TikTok Direct Post."
+                      size="sm"
+                    />
+                    <label className="flex flex-col gap-1 text-xs font-medium text-secondary">
+                      Privacy
+                      <select
+                        disabled={readOnly || !ttDraft.enabled || creatorInfoBusy}
+                        value={ttDraft.options.privacyLevel || ""}
+                        onChange={(e) =>
+                          setTtDraft((d) => ({
+                            ...d,
+                            options: { ...d.options, privacyLevel: e.target.value },
+                          }))
+                        }
+                        className="rounded-lg border border-secondary bg-primary px-2 py-2 text-sm text-primary"
+                      >
+                        {(tiktokCreatorInfo?.privacy_level_options?.length
+                          ? tiktokCreatorInfo.privacy_level_options
+                          : ["SELF_ONLY"]
+                        ).map((p) => (
+                          <option key={p} value={p}>
+                            {p.replace(/_/g, " ").toLowerCase()}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="flex flex-col gap-1 text-xs font-medium text-secondary">
+                      Caption override (optional)
+                      <textarea
+                        disabled={readOnly || !ttDraft.enabled}
+                        value={ttDraft.options.captionOverride || ""}
+                        onChange={(e) =>
+                          setTtDraft((d) => ({
+                            ...d,
+                            options: { ...d.options, captionOverride: e.target.value },
+                          }))
+                        }
+                        placeholder={[title, description].filter(Boolean).join("\n\n") || "—"}
+                        rows={3}
+                        className="rounded-lg border border-secondary bg-primary px-2 py-2 text-sm text-primary"
+                      />
+                    </label>
+                    <div className="flex flex-col gap-2">
+                      <Toggle
+                        isSelected={ttDraft.options.disableDuet === true}
+                        onChange={(v) => setTtDraft((d) => ({ ...d, options: { ...d.options, disableDuet: v } }))}
+                        isDisabled={readOnly || !ttDraft.enabled || tiktokCreatorInfo?.duet_disabled === true}
+                        label="Disable duet"
+                        size="sm"
+                      />
+                      <Toggle
+                        isSelected={ttDraft.options.disableComment === true}
+                        onChange={(v) => setTtDraft((d) => ({ ...d, options: { ...d.options, disableComment: v } }))}
+                        isDisabled={readOnly || !ttDraft.enabled || tiktokCreatorInfo?.comment_disabled === true}
+                        label="Disable comments"
+                        size="sm"
+                      />
+                      <Toggle
+                        isSelected={ttDraft.options.disableStitch === true}
+                        onChange={(v) => setTtDraft((d) => ({ ...d, options: { ...d.options, disableStitch: v } }))}
+                        isDisabled={readOnly || !ttDraft.enabled || tiktokCreatorInfo?.stitch_disabled === true}
+                        label="Disable stitch"
+                        size="sm"
+                      />
+                      <Toggle
+                        isSelected={ttDraft.options.brandContentToggle === true}
+                        onChange={(v) =>
+                          setTtDraft((d) => ({ ...d, options: { ...d.options, brandContentToggle: v } }))
+                        }
+                        isDisabled={readOnly || !ttDraft.enabled}
+                        label="Paid partnership (brand content)"
+                        size="sm"
+                      />
+                      <Toggle
+                        isSelected={ttDraft.options.brandOrganicToggle === true}
+                        onChange={(v) =>
+                          setTtDraft((d) => ({ ...d, options: { ...d.options, brandOrganicToggle: v } }))
+                        }
+                        isDisabled={readOnly || !ttDraft.enabled}
+                        label="Promoting my own business (brand organic)"
+                        size="sm"
+                      />
+                    </div>
+                    {ttDraft.upload?.state ? (
+                      <p className="rounded-md border border-secondary bg-secondary px-2 py-2 text-xs text-secondary">
+                        Upload status: <strong className="text-primary">{ttDraft.upload.state}</strong>
+                        {ttDraft.upload.message ? ` — ${ttDraft.upload.message}` : ""}
+                        {ttDraft.upload.shareUrl ? (
+                          <>
+                            {" "}
+                            <a
+                              href={ttDraft.upload.shareUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="text-brand-secondary underline"
+                            >
+                              Open post
+                            </a>
+                          </>
+                        ) : null}
+                        {ttDraft.upload.error ? (
+                          <span className="mt-1 block text-error-primary">{ttDraft.upload.error}</span>
+                        ) : null}
+                      </p>
+                    ) : null}
+                  </div>
+                )}
               </Tabs.Panel>
             </Tabs>
 
@@ -487,7 +1444,15 @@ export function EditorSyndicationModal({
               >
                 Cancel
               </button>
-              {readOnly || !youtubeConnected || !onSave ? null : (
+              {readOnly ||
+              !(
+                youtubeConnected ||
+                twitterConnected ||
+                (facebookConnected && facebookPageSelected) ||
+                (instagramConnected && instagramAccountSelected) ||
+                tiktokConnected
+              ) ||
+              !onSave ? null : (
                 <button
                   type="button"
                   onClick={() => void handleSave()}

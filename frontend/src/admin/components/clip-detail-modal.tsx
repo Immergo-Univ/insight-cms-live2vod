@@ -16,35 +16,146 @@ function syndicationSummariesFromClip(clip: AdminClipDetail): { key: string; lab
     if (!c || typeof c !== "object") continue;
     const synd = (c as { syndication?: unknown }).syndication;
     if (!synd || typeof synd !== "object") continue;
-    const yt = (synd as { youtube?: unknown }).youtube;
-    if (!yt || typeof yt !== "object") continue;
-    const en = (yt as { enabled?: unknown }).enabled === true;
-    const up = (yt as { upload?: unknown }).upload;
-    const opt = (yt as { options?: unknown }).options;
     const clientId = typeof (c as { editorClientClipId?: unknown }).editorClientClipId === "string"
       ? String((c as { editorClientClipId: string }).editorClientClipId)
       : `clip-${i + 1}`;
-    const lines: string[] = [];
-    lines.push(`Enabled: ${en ? "yes" : "no"}`);
-    if (opt && typeof opt === "object") {
-      const o = opt as Record<string, unknown>;
-      if (o.privacyStatus) lines.push(`Privacy: ${String(o.privacyStatus)}`);
-      if (o.categoryId != null) lines.push(`Category: ${String(o.categoryId)}`);
-      if (o.license) lines.push(`License: ${String(o.license)}`);
+
+    const yt = (synd as { youtube?: unknown }).youtube;
+    if (yt && typeof yt === "object") {
+      const en = (yt as { enabled?: unknown }).enabled === true;
+      const up = (yt as { upload?: unknown }).upload;
+      const opt = (yt as { options?: unknown }).options;
+      const lines: string[] = [];
+      lines.push(`Enabled: ${en ? "yes" : "no"}`);
+      if (opt && typeof opt === "object") {
+        const o = opt as Record<string, unknown>;
+        if (o.privacyStatus) lines.push(`Privacy: ${String(o.privacyStatus)}`);
+        if (o.categoryId != null) lines.push(`Category: ${String(o.categoryId)}`);
+        if (o.license) lines.push(`License: ${String(o.license)}`);
+      }
+      if (up && typeof up === "object") {
+        const u = up as Record<string, unknown>;
+        if (u.state) lines.push(`Upload state: ${String(u.state)}`);
+        if (u.message) lines.push(`Message: ${String(u.message)}`);
+        if (u.videoId) lines.push(`Video ID: ${String(u.videoId)}`);
+        if (u.watchUrl) lines.push(`URL: ${String(u.watchUrl)}`);
+        if (u.error) lines.push(`Error: ${String(u.error)}`);
+      }
+      out.push({
+        key: `${clientId}-yt`,
+        label: `YouTube — ${clientId}`,
+        body: lines.join("\n"),
+      });
     }
-    if (up && typeof up === "object") {
-      const u = up as Record<string, unknown>;
-      if (u.state) lines.push(`Upload state: ${String(u.state)}`);
-      if (u.message) lines.push(`Message: ${String(u.message)}`);
-      if (u.videoId) lines.push(`Video ID: ${String(u.videoId)}`);
-      if (u.watchUrl) lines.push(`URL: ${String(u.watchUrl)}`);
-      if (u.error) lines.push(`Error: ${String(u.error)}`);
+
+    const tw = (synd as { twitter?: unknown }).twitter;
+    if (tw && typeof tw === "object") {
+      const en = (tw as { enabled?: unknown }).enabled === true;
+      const up = (tw as { upload?: unknown }).upload;
+      const opt = (tw as { options?: unknown }).options;
+      const lines: string[] = [];
+      lines.push(`Enabled: ${en ? "yes" : "no"}`);
+      if (opt && typeof opt === "object") {
+        const o = opt as Record<string, unknown>;
+        if (o.textOverride) lines.push(`Text override: ${String(o.textOverride)}`);
+      }
+      if (up && typeof up === "object") {
+        const u = up as Record<string, unknown>;
+        if (u.state) lines.push(`Upload state: ${String(u.state)}`);
+        if (u.message) lines.push(`Message: ${String(u.message)}`);
+        if (u.tweetId) lines.push(`Tweet ID: ${String(u.tweetId)}`);
+        if (u.tweetUrl) lines.push(`URL: ${String(u.tweetUrl)}`);
+        if (u.error) lines.push(`Error: ${String(u.error)}`);
+      }
+      out.push({
+        key: `${clientId}-tw`,
+        label: `X / Twitter — ${clientId}`,
+        body: lines.join("\n"),
+      });
     }
-    out.push({
-      key: clientId,
-      label: `YouTube — ${clientId}`,
-      body: lines.join("\n"),
-    });
+
+    const fb = (synd as { facebook?: unknown }).facebook;
+    if (fb && typeof fb === "object") {
+      const en = (fb as { enabled?: unknown }).enabled === true;
+      const up = (fb as { upload?: unknown }).upload;
+      const opt = (fb as { options?: unknown }).options;
+      const lines: string[] = [];
+      lines.push(`Enabled: ${en ? "yes" : "no"}`);
+      if (opt && typeof opt === "object") {
+        const o = opt as Record<string, unknown>;
+        if (o.titleOverride) lines.push(`Title override: ${String(o.titleOverride)}`);
+        if (o.descriptionOverride) lines.push(`Description override: ${String(o.descriptionOverride)}`);
+      }
+      if (up && typeof up === "object") {
+        const u = up as Record<string, unknown>;
+        if (u.state) lines.push(`Upload state: ${String(u.state)}`);
+        if (u.message) lines.push(`Message: ${String(u.message)}`);
+        if (u.postId) lines.push(`Post ID: ${String(u.postId)}`);
+        if (u.permalinkUrl) lines.push(`URL: ${String(u.permalinkUrl)}`);
+        if (u.error) lines.push(`Error: ${String(u.error)}`);
+      }
+      out.push({
+        key: `${clientId}-fb`,
+        label: `Facebook — ${clientId}`,
+        body: lines.join("\n"),
+      });
+    }
+
+    const ig = (synd as { instagram?: unknown }).instagram;
+    if (ig && typeof ig === "object") {
+      const en = (ig as { enabled?: unknown }).enabled === true;
+      const up = (ig as { upload?: unknown }).upload;
+      const opt = (ig as { options?: unknown }).options;
+      const lines: string[] = [];
+      lines.push(`Enabled: ${en ? "yes" : "no"}`);
+      if (opt && typeof opt === "object") {
+        const o = opt as Record<string, unknown>;
+        if (o.captionOverride) lines.push(`Caption override: ${String(o.captionOverride)}`);
+        if (o.mediaType) lines.push(`Media type: ${String(o.mediaType)}`);
+      }
+      if (up && typeof up === "object") {
+        const u = up as Record<string, unknown>;
+        if (u.state) lines.push(`Upload state: ${String(u.state)}`);
+        if (u.message) lines.push(`Message: ${String(u.message)}`);
+        if (u.mediaId) lines.push(`Media ID: ${String(u.mediaId)}`);
+        if (u.permalinkUrl) lines.push(`URL: ${String(u.permalinkUrl)}`);
+        if (u.error) lines.push(`Error: ${String(u.error)}`);
+      }
+      out.push({
+        key: `${clientId}-ig`,
+        label: `Instagram — ${clientId}`,
+        body: lines.join("\n"),
+      });
+    }
+
+    const tt = (synd as { tiktok?: unknown }).tiktok;
+    if (tt && typeof tt === "object") {
+      const en = (tt as { enabled?: unknown }).enabled === true;
+      const up = (tt as { upload?: unknown }).upload;
+      const opt = (tt as { options?: unknown }).options;
+      const lines: string[] = [];
+      lines.push(`Enabled: ${en ? "yes" : "no"}`);
+      if (opt && typeof opt === "object") {
+        const o = opt as Record<string, unknown>;
+        if (o.captionOverride) lines.push(`Caption override: ${String(o.captionOverride)}`);
+        if (o.privacyLevel) lines.push(`Privacy: ${String(o.privacyLevel)}`);
+      }
+      if (up && typeof up === "object") {
+        const u = up as Record<string, unknown>;
+        if (u.state) lines.push(`Upload state: ${String(u.state)}`);
+        if (u.message) lines.push(`Message: ${String(u.message)}`);
+        if (u.publishId) lines.push(`Publish ID: ${String(u.publishId)}`);
+        if (u.postId) lines.push(`Post ID: ${String(u.postId)}`);
+        if (u.shareUrl) lines.push(`URL: ${String(u.shareUrl)}`);
+        if (u.error) lines.push(`Error: ${String(u.error)}`);
+      }
+      out.push({
+        key: `${clientId}-tt`,
+        label: `TikTok — ${clientId}`,
+        body: lines.join("\n"),
+      });
+    }
+
     i += 1;
   }
   return out;

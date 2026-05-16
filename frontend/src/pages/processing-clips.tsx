@@ -72,9 +72,8 @@ export function ProcessingClipsPage() {
           }}
           isDismissable
           isKeyboardDismissDisabled={false}
-          className="z-[70]"
         >
-          <Modal className="z-[71]">
+          <Modal>
             <Dialog
               aria-label="Generated video"
               className="mx-4 flex w-full max-w-4xl justify-center outline-hidden sm:mx-auto"

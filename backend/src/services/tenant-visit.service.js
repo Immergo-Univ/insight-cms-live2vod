@@ -52,11 +52,46 @@ export async function ensureTenantVisited(opts) {
  */
 export function tenantRowToApi(plain) {
   const hasYoutubeToken = Boolean(plain.youtubeRefreshToken && String(plain.youtubeRefreshToken).trim());
+  const hasTwitterToken = Boolean(plain.twitterRefreshToken && String(plain.twitterRefreshToken).trim());
+  const hasFacebookUserToken = Boolean(plain.facebookUserAccessToken && String(plain.facebookUserAccessToken).trim());
+  const facebookPageId =
+    typeof plain.facebookPageId === "string" && plain.facebookPageId.trim() ? plain.facebookPageId.trim() : null;
+  const facebookPageName =
+    typeof plain.facebookPageName === "string" && plain.facebookPageName.trim() ? plain.facebookPageName.trim() : null;
+  const hasFacebookPageToken = Boolean(plain.facebookPageAccessToken && String(plain.facebookPageAccessToken).trim());
+  const hasIgUser = Boolean(plain.instagramUserAccessToken && String(plain.instagramUserAccessToken).trim());
+  const igBusinessId =
+    typeof plain.instagramBusinessAccountId === "string" && plain.instagramBusinessAccountId.trim()
+      ? plain.instagramBusinessAccountId.trim()
+      : null;
+  const igUsername =
+    typeof plain.instagramUsername === "string" && plain.instagramUsername.trim()
+      ? plain.instagramUsername.trim()
+      : null;
+  const hasIgPageToken = Boolean(plain.instagramPageAccessToken && String(plain.instagramPageAccessToken).trim());
+  const hasTiktokToken = Boolean(plain.tiktokRefreshToken && String(plain.tiktokRefreshToken).trim());
+  const tiktokUsername =
+    typeof plain.tiktokUsername === "string" && plain.tiktokUsername.trim() ? plain.tiktokUsername.trim() : null;
   return {
     tenantId: plain.tenantId,
     subtitlesEnabled: plain.subtitlesEnabled !== false,
     syndicationYoutubeEnabled: plain.syndicationYoutubeEnabled === true,
     syndicationYoutubeConnected: hasYoutubeToken || plain.syndicationYoutubeConnected === true,
+    syndicationTwitterEnabled: plain.syndicationTwitterEnabled === true,
+    syndicationTwitterConnected: hasTwitterToken || plain.syndicationTwitterConnected === true,
+    syndicationFacebookEnabled: plain.syndicationFacebookEnabled === true,
+    syndicationFacebookConnected: hasFacebookUserToken || plain.syndicationFacebookConnected === true,
+    facebookPageId,
+    facebookPageName,
+    facebookPageSelected: Boolean(facebookPageId && hasFacebookPageToken),
+    syndicationInstagramEnabled: plain.syndicationInstagramEnabled === true,
+    syndicationInstagramConnected: hasIgUser || plain.syndicationInstagramConnected === true,
+    instagramBusinessAccountId: igBusinessId,
+    instagramUsername: igUsername,
+    instagramAccountSelected: Boolean(igBusinessId && hasIgPageToken),
+    syndicationTiktokEnabled: plain.syndicationTiktokEnabled === true,
+    syndicationTiktokConnected: hasTiktokToken || plain.syndicationTiktokConnected === true,
+    tiktokUsername,
     timezoneLastSeen: plain.timezoneLastSeen ?? null,
     metadata: plain.metadata ?? null,
     firstSeenAt: plain.firstSeenAt,

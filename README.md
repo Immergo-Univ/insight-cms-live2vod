@@ -55,11 +55,36 @@ Variables de entorno (opcional, recomendado):
 - **`INSIGHT_API_BASE`**: base URL de Insight API (default en código)
 - **`INSIGHT_AUTH_TOKEN`**: token Bearer para Insight API (**recomendado setearlo por env**, no hardcode)
 
-**YouTube / sindicación (OAuth)** — podés guardar **Client ID**, **client secret** y **redirect URI** en **Admin → Ajustes → Sindicación → YouTube** (tabla `app_settings` en Postgres). Si un campo queda vacío en la base, se usa el valor de entorno del backend.
+**YouTube / sindicación (OAuth)** — podés guardar **Client ID**, **client secret** y **redirect URI** en **Admin → Ajustes → Sindicación → YouTube** (tabla `app_settings` en Postgres). **X / Twitter** y **Facebook** tienen el mismo patrón en sus paneles de Sindicación. Si un campo queda vacío en la base, se usa el valor de entorno del backend.
 
 Alternativa / respaldo por entorno del proceso Node:
 
 - **`YOUTUBE_CLIENT_ID`**, **`YOUTUBE_CLIENT_SECRET`**, **`YOUTUBE_REDIRECT_URI`** (callback del backend, p. ej. `https://<tu-api>/api/tenants/oauth/youtube/callback`).
+
+**X / Twitter (sindicación OAuth 2.0)** — igual que YouTube: **Admin → Ajustes → Sindicación → Twitter / X** en `app_settings`, o variables de entorno si el campo en BD está vacío.
+
+- **`TWITTER_CLIENT_ID`**, **`TWITTER_CLIENT_SECRET`**, **`TWITTER_REDIRECT_URI`** (callback del backend, p. ej. `https://<tu-api>/api/tenants/oauth/twitter/callback`).
+- Opcional: **`TWITTER_OAUTH_FRONTEND_REDIRECT`**, **`TWITTER_OAUTH_STATE_SECRET`**. Desarrollo: **`TWITTER_ALLOW_MOCK_AUTH=true`** para simular cuenta conectada sin OAuth real.
+
+**Facebook (sindicación a Página)** — **Admin → Ajustes → Sindicación → Facebook** en `app_settings`, o variables de entorno si el campo en BD está vacío.
+
+- **`FACEBOOK_APP_ID`**, **`FACEBOOK_APP_SECRET`**, **`FACEBOOK_REDIRECT_URI`** (callback del backend, p. ej. `https://<tu-api>/api/tenants/oauth/facebook/callback`).
+- Opcional: **`FACEBOOK_OAUTH_FRONTEND_REDIRECT`**, **`FACEBOOK_OAUTH_STATE_SECRET`**. Desarrollo: **`FACEBOOK_ALLOW_MOCK_AUTH=true`** para simular conexión sin OAuth real.
+- Tras OAuth, el editor pide **elegir una Página** de Facebook antes de activar sindicación por clip. El MP4 del encode debe ser accesible por URL pública para que Meta lo descargue (`file_url`).
+
+**Instagram (Reels y feed)** — **Admin → Ajustes → Sindicación → Instagram** en `app_settings`, o variables de entorno si el campo en BD está vacío.
+
+- **`INSTAGRAM_APP_ID`**, **`INSTAGRAM_APP_SECRET`**, **`INSTAGRAM_REDIRECT_URI`** (callback del backend, p. ej. `https://<tu-api>/api/tenants/oauth/instagram/callback`).
+- Opcional: **`INSTAGRAM_OAUTH_FRONTEND_REDIRECT`**, **`INSTAGRAM_OAUTH_STATE_SECRET`**. Desarrollo: **`INSTAGRAM_ALLOW_MOCK_AUTH=true`** para simular conexión sin OAuth real.
+- Requisitos Meta: cuenta Instagram Business o Creator vinculada a una Página de Facebook, permiso `instagram_content_publish`, y MP4 del encode accesible por URL pública.
+- Tras OAuth, el editor pide **elegir la cuenta de Instagram** y por clip se elige **Reels** o **Feed**.
+
+**TikTok (Direct Post)** — **Admin → Ajustes → Sindicación → TikTok** en `app_settings`, o variables de entorno si el campo en BD está vacío.
+
+- **`TIKTOK_CLIENT_KEY`**, **`TIKTOK_CLIENT_SECRET`**, **`TIKTOK_REDIRECT_URI`** (callback del backend, p. ej. `https://<tu-api>/api/tenants/oauth/tiktok/callback`).
+- Opcional: **`TIKTOK_OAUTH_FRONTEND_REDIRECT`**, **`TIKTOK_OAUTH_STATE_SECRET`**. Desarrollo: **`TIKTOK_ALLOW_MOCK_AUTH=true`**.
+- Scopes: `user.info.basic`, `video.publish`. Verificar en el portal de TikTok el prefijo de dominio de las URLs MP4 (`PULL_FROM_URL`).
+- Apps no auditadas publican en modo privado hasta aprobar la [auditoría Content Posting API](https://developers.tiktok.com/application/content-posting-api).
 
 Los scripts `npm run dev` / `npm start` del backend cargan **`backend/.env`** (`node --env-file=.env`). En producción, definí variables donde corresponda (Docker, Kubernetes, etc.); los valores en BD tienen prioridad si no están vacíos.
 
@@ -179,11 +204,36 @@ Environment variables (optional, recommended):
 - **`INSIGHT_API_BASE`**: Insight API base URL (default is in code)
 - **`INSIGHT_AUTH_TOKEN`**: Insight API Bearer token (**recommended via env**, not hardcoded)
 
-**YouTube syndication (OAuth)** — you can store **client ID**, **client secret**, and **redirect URI** in **Admin → Settings → Syndication → YouTube** (persisted in Postgres `app_settings`). If a value is empty in the database, the backend environment variable is used.
+**YouTube syndication (OAuth)** — you can store **client ID**, **client secret**, and **redirect URI** in **Admin → Settings → Syndication → YouTube** (persisted in Postgres `app_settings`). **X / Twitter** and **Facebook** use the same pattern under their Syndication panels. If a value is empty in the database, the backend environment variable is used.
 
 Fallback / env on the Node backend process:
 
 - **`YOUTUBE_CLIENT_ID`**, **`YOUTUBE_CLIENT_SECRET`**, **`YOUTUBE_REDIRECT_URI`** (backend callback URL, e.g. `https://<your-api>/api/tenants/oauth/youtube/callback`).
+
+**X / Twitter syndication (OAuth 2.0)** — same pattern as YouTube: **Admin → Settings → Syndication → Twitter / X** in `app_settings`, or env vars when DB fields are empty.
+
+- **`TWITTER_CLIENT_ID`**, **`TWITTER_CLIENT_SECRET`**, **`TWITTER_REDIRECT_URI`** (backend callback URL, e.g. `https://<your-api>/api/tenants/oauth/twitter/callback`).
+- Optional: **`TWITTER_OAUTH_FRONTEND_REDIRECT`**, **`TWITTER_OAUTH_STATE_SECRET`**. Local dev: **`TWITTER_ALLOW_MOCK_AUTH=true`** to mock a connected account without real OAuth.
+
+**Facebook Page syndication** — **Admin → Settings → Syndication → Facebook** in `app_settings`, or env vars when DB fields are empty.
+
+- **`FACEBOOK_APP_ID`**, **`FACEBOOK_APP_SECRET`**, **`FACEBOOK_REDIRECT_URI`** (backend callback URL, e.g. `https://<your-api>/api/tenants/oauth/facebook/callback`).
+- Optional: **`FACEBOOK_OAUTH_FRONTEND_REDIRECT`**, **`FACEBOOK_OAUTH_STATE_SECRET`**. Local dev: **`FACEBOOK_ALLOW_MOCK_AUTH=true`** to mock connection without real OAuth.
+- After OAuth, the editor prompts to **pick a Facebook Page** before per-clip syndication. The encoded MP4 URL must be publicly reachable by Meta (`file_url` upload).
+
+**Instagram (Reels and feed)** — **Admin → Settings → Syndication → Instagram** in `app_settings`, or env vars when DB fields are empty.
+
+- **`INSTAGRAM_APP_ID`**, **`INSTAGRAM_APP_SECRET`**, **`INSTAGRAM_REDIRECT_URI`** (backend callback URL, e.g. `https://<your-api>/api/tenants/oauth/instagram/callback`).
+- Optional: **`INSTAGRAM_OAUTH_FRONTEND_REDIRECT`**, **`INSTAGRAM_OAUTH_STATE_SECRET`**. Local dev: **`INSTAGRAM_ALLOW_MOCK_AUTH=true`** to mock connection without real OAuth.
+- Meta prerequisites: Instagram Business or Creator account linked to a Facebook Page, `instagram_content_publish` permission, and a publicly reachable encoded MP4 URL.
+- After OAuth, the editor prompts to **pick the Instagram account**; per clip you choose **Reels** or **Feed**.
+
+**TikTok (Direct Post)** — **Admin → Settings → Syndication → TikTok** in `app_settings`, or env vars when DB fields are empty.
+
+- **`TIKTOK_CLIENT_KEY`**, **`TIKTOK_CLIENT_SECRET`**, **`TIKTOK_REDIRECT_URI`** (backend callback URL, e.g. `https://<your-api>/api/tenants/oauth/tiktok/callback`).
+- Optional: **`TIKTOK_OAUTH_FRONTEND_REDIRECT`**, **`TIKTOK_OAUTH_STATE_SECRET`**. Local dev: **`TIKTOK_ALLOW_MOCK_AUTH=true`**.
+- Scopes: `user.info.basic`, `video.publish`. Verify your MP4 output URL domain prefix in the TikTok developer portal (`PULL_FROM_URL`).
+- Unaudited apps publish as private until [Content Posting API audit](https://developers.tiktok.com/application/content-posting-api) approval.
 
 Backend `npm run dev` / `npm start` load **`backend/.env`** via `node --env-file=.env`. Non-empty DB fields override env at runtime.
 

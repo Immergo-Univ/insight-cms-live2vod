@@ -617,9 +617,8 @@ export function EditorClipWidgetsOverlay({
           }}
           isDismissable
           isKeyboardDismissDisabled={false}
-          className="z-[85]"
         >
-          <Modal className="z-[86]">
+          <Modal>
             <Dialog
               aria-label="Edit widget"
               className="mx-4 flex w-full max-w-lg justify-center outline-hidden sm:mx-auto"

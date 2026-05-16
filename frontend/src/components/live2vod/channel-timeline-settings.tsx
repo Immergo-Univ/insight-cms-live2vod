@@ -315,8 +315,8 @@ export function ChannelTimelineSettings({ channelId }: ChannelTimelineSettingsPr
           className="shadow-md"
           aria-label="Channel settings"
         />
-        <ModalOverlay isDismissable isKeyboardDismissDisabled={false} className="z-[60]">
-          <Modal className="z-[61]">
+        <ModalOverlay isDismissable isKeyboardDismissDisabled={false}>
+          <Modal>
             <Dialog
               aria-labelledby="channel-settings-title"
               className="mx-4 flex w-full max-w-4xl justify-center outline-hidden sm:mx-auto"

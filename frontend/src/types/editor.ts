@@ -378,8 +378,106 @@ export interface EditorClipYoutubeSyndication {
   upload?: EditorClipYoutubeSyndicationUpload;
 }
 
+/** Upload lifecycle persisted on `clips[].syndication.twitter.upload` in job `editorSpec`. */
+export interface EditorClipTwitterSyndicationUpload {
+  state?: "idle" | "pending" | "uploading" | "published" | "failed";
+  message?: string;
+  error?: string;
+  tweetId?: string;
+  tweetUrl?: string;
+  updatedAt?: string;
+}
+
+export interface EditorClipTwitterSyndicationOptions {
+  /** Overrides tweet text; defaults to clip title from metadata. */
+  textOverride?: string;
+}
+
+export interface EditorClipTwitterSyndication {
+  enabled: boolean;
+  options: EditorClipTwitterSyndicationOptions;
+  upload?: EditorClipTwitterSyndicationUpload;
+}
+
+/** Upload lifecycle persisted on `clips[].syndication.facebook.upload` in job `editorSpec`. */
+export interface EditorClipFacebookSyndicationUpload {
+  state?: "idle" | "pending" | "uploading" | "published" | "failed";
+  message?: string;
+  error?: string;
+  postId?: string;
+  permalinkUrl?: string;
+  updatedAt?: string;
+}
+
+export interface EditorClipFacebookSyndicationOptions {
+  titleOverride?: string;
+  descriptionOverride?: string;
+}
+
+export interface EditorClipFacebookSyndication {
+  enabled: boolean;
+  options: EditorClipFacebookSyndicationOptions;
+  upload?: EditorClipFacebookSyndicationUpload;
+}
+
+export type EditorInstagramMediaType = "reels" | "feed";
+
+/** Upload lifecycle persisted on `clips[].syndication.instagram.upload` in job `editorSpec`. */
+export interface EditorClipInstagramSyndicationUpload {
+  state?: "idle" | "pending" | "uploading" | "published" | "failed";
+  message?: string;
+  error?: string;
+  mediaId?: string;
+  permalinkUrl?: string;
+  updatedAt?: string;
+}
+
+export interface EditorClipInstagramSyndicationOptions {
+  /** Overrides caption; defaults to clip title + description from metadata. */
+  captionOverride?: string;
+  /** Where to publish: Instagram Reels or feed video. */
+  mediaType?: EditorInstagramMediaType;
+}
+
+export interface EditorClipInstagramSyndication {
+  enabled: boolean;
+  options: EditorClipInstagramSyndicationOptions;
+  upload?: EditorClipInstagramSyndicationUpload;
+}
+
+/** Upload lifecycle persisted on `clips[].syndication.tiktok.upload` in job `editorSpec`. */
+export interface EditorClipTiktokSyndicationUpload {
+  state?: "idle" | "pending" | "uploading" | "published" | "failed";
+  message?: string;
+  error?: string;
+  publishId?: string;
+  postId?: string;
+  shareUrl?: string;
+  updatedAt?: string;
+}
+
+export interface EditorClipTiktokSyndicationOptions {
+  captionOverride?: string;
+  privacyLevel?: string;
+  disableDuet?: boolean;
+  disableComment?: boolean;
+  disableStitch?: boolean;
+  brandContentToggle?: boolean;
+  brandOrganicToggle?: boolean;
+}
+
+export interface EditorClipTiktokSyndication {
+  enabled: boolean;
+  options: EditorClipTiktokSyndicationOptions;
+  upload?: EditorClipTiktokSyndicationUpload;
+}
+
 export interface EditorClipSyndication {
   youtube?: EditorClipYoutubeSyndication;
+  twitter?: EditorClipTwitterSyndication;
+  facebook?: EditorClipFacebookSyndication;
+  instagram?: EditorClipInstagramSyndication;
+  tiktok?: EditorClipTiktokSyndication;
 }
 
 /** Sent in JSON when subtitle mode is on. */

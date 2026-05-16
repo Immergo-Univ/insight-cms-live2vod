@@ -8,8 +8,16 @@ type TenantSettingsContextValue = {
   loading: boolean;
   /** When false, hide subtitle / realtime transcribe controls for this tenant. */
   subtitlesEnabled: boolean;
-  /** When true, show per-clip syndication UI (YouTube first). */
+  /** When true, show per-clip syndication UI for YouTube. */
   syndicationYoutubeEnabled: boolean;
+  /** When true, show per-clip syndication UI for X / Twitter. */
+  syndicationTwitterEnabled: boolean;
+  /** When true, show per-clip syndication UI for Facebook. */
+  syndicationFacebookEnabled: boolean;
+  /** When true, show per-clip syndication UI for Instagram. */
+  syndicationInstagramEnabled: boolean;
+  /** When true, show per-clip syndication UI for TikTok. */
+  syndicationTiktokEnabled: boolean;
   refresh: () => Promise<void>;
 };
 
@@ -67,8 +75,28 @@ export function TenantSettingsProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     try {
       const q = new URLSearchParams(location.search);
+      let changed = false;
       if (q.get("youtubeConnected") === "1") {
         q.delete("youtubeConnected");
+        changed = true;
+      }
+      if (q.get("twitterConnected") === "1") {
+        q.delete("twitterConnected");
+        changed = true;
+      }
+      if (q.get("facebookConnected") === "1") {
+        q.delete("facebookConnected");
+        changed = true;
+      }
+      if (q.get("instagramConnected") === "1") {
+        q.delete("instagramConnected");
+        changed = true;
+      }
+      if (q.get("tiktokConnected") === "1") {
+        q.delete("tiktokConnected");
+        changed = true;
+      }
+      if (changed) {
         const next = `${location.pathname}${q.toString() ? `?${q.toString()}` : ""}${location.hash}`;
         window.history.replaceState({}, "", next);
         void refresh();
@@ -80,6 +108,10 @@ export function TenantSettingsProvider({ children }: { children: ReactNode }) {
 
   const subtitlesEnabled = !tenantId || tenant?.subtitlesEnabled !== false;
   const syndicationYoutubeEnabled = Boolean(tenantId && tenant?.syndicationYoutubeEnabled === true);
+  const syndicationTwitterEnabled = Boolean(tenantId && tenant?.syndicationTwitterEnabled === true);
+  const syndicationFacebookEnabled = Boolean(tenantId && tenant?.syndicationFacebookEnabled === true);
+  const syndicationInstagramEnabled = Boolean(tenantId && tenant?.syndicationInstagramEnabled === true);
+  const syndicationTiktokEnabled = Boolean(tenantId && tenant?.syndicationTiktokEnabled === true);
 
   const value = useMemo(
     () => ({
@@ -88,9 +120,24 @@ export function TenantSettingsProvider({ children }: { children: ReactNode }) {
       loading,
       subtitlesEnabled,
       syndicationYoutubeEnabled,
+      syndicationTwitterEnabled,
+      syndicationFacebookEnabled,
+      syndicationInstagramEnabled,
+      syndicationTiktokEnabled,
       refresh,
     }),
-    [tenantId, tenant, loading, subtitlesEnabled, syndicationYoutubeEnabled, refresh],
+    [
+      tenantId,
+      tenant,
+      loading,
+      subtitlesEnabled,
+      syndicationYoutubeEnabled,
+      syndicationTwitterEnabled,
+      syndicationFacebookEnabled,
+      syndicationInstagramEnabled,
+      syndicationTiktokEnabled,
+      refresh,
+    ],
   );
 
   return <TenantSettingsContext.Provider value={value}>{children}</TenantSettingsContext.Provider>;

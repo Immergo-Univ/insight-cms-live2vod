@@ -28,8 +28,8 @@ export function EditorTranscribeSettingsModal({
   }, [isOpen, value]);
 
   return (
-    <ModalOverlay isOpen={isOpen} onOpenChange={onOpenChange} isDismissable className="z-[90]">
-      <Modal className="z-[91]">
+    <ModalOverlay isOpen={isOpen} onOpenChange={onOpenChange} isDismissable>
+      <Modal>
         <Dialog
           aria-label="Transcribe settings"
           className="mx-4 flex w-full max-w-md justify-center outline-hidden sm:mx-auto"
