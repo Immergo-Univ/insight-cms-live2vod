@@ -288,9 +288,18 @@ export async function uploadVideoToYoutube(opts) {
 
 const TWITTER_AUTH = "https://x.com/i/oauth2/authorize";
 const TWITTER_TOKEN = "https://api.twitter.com/2/oauth2/token";
-const TWITTER_UPLOAD = "https://upload.twitter.com/1.1/media/upload.json";
-const TWITTER_TWEETS = "https://api.twitter.com/2/tweets";
+// OAuth 2.0 user tokens require the v2 media upload endpoint (v1.1 returns 403 with empty body).
+const TWITTER_UPLOAD = "https://api.x.com/2/media/upload";
+const TWITTER_TWEETS = "https://api.x.com/2/tweets";
 const TWITTER_SCOPES = ["tweet.read", "tweet.write", "users.read", "offline.access", "media.write"].join(" ");
+
+function twitterMediaUploadId(json) {
+  return json?.data?.id ?? json?.media_id_string ?? json?.media_id ?? null;
+}
+
+function twitterMediaProcessingInfo(json) {
+  return json?.data?.processing_info ?? json?.processing_info ?? null;
+}
 
 function twitterOauthStateSecret() {
   return (
@@ -523,25 +532,27 @@ export async function uploadVideoToTwitter(opts) {
   const totalBytes = buf.length;
   if (totalBytes < 1) throw new Error("Encoded video is empty");
 
-  const initBody = new URLSearchParams({
-    command: "INIT",
-    total_bytes: String(totalBytes),
-    media_type: "video/mp4",
-    media_category: "tweet_video",
-  });
+  const initBody = new FormData();
+  initBody.set("command", "INIT");
+  initBody.set("total_bytes", String(totalBytes));
+  initBody.set("media_type", "video/mp4");
+  initBody.set("media_category", "tweet_video");
   const initRes = await fetch(TWITTER_UPLOAD, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/x-www-form-urlencoded",
-      Authorization: `Bearer ${access}`,
-    },
-    body: initBody.toString(),
+    headers: { Authorization: `Bearer ${access}` },
+    body: initBody,
   });
-  const initJson = await initRes.json().catch(() => ({}));
+  const initText = await initRes.text();
+  let initJson;
+  try {
+    initJson = JSON.parse(initText);
+  } catch {
+    initJson = { raw: initText };
+  }
   if (!initRes.ok) {
     throw new Error(`Twitter media INIT failed: ${initRes.status} ${JSON.stringify(initJson).slice(0, 400)}`);
   }
-  const mediaId = initJson.media_id_string || initJson.media_id;
+  const mediaId = twitterMediaUploadId(initJson);
   if (!mediaId) throw new Error("Twitter media INIT returned no media_id");
 
   const chunkSize = 2 * 1024 * 1024;
@@ -565,43 +576,41 @@ export async function uploadVideoToTwitter(opts) {
     segmentIndex += 1;
   }
 
-  const finBody = new URLSearchParams({ command: "FINALIZE", media_id: String(mediaId) });
+  const finBody = new FormData();
+  finBody.set("command", "FINALIZE");
+  finBody.set("media_id", String(mediaId));
   const finRes = await fetch(TWITTER_UPLOAD, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/x-www-form-urlencoded",
-      Authorization: `Bearer ${access}`,
-    },
-    body: finBody.toString(),
+    headers: { Authorization: `Bearer ${access}` },
+    body: finBody,
   });
   const finJson = await finRes.json().catch(() => ({}));
   if (!finRes.ok) {
     throw new Error(`Twitter media FINALIZE failed: ${finRes.status} ${JSON.stringify(finJson).slice(0, 400)}`);
   }
 
-  const processing = finJson.processing_info;
+  const processing = twitterMediaProcessingInfo(finJson);
   if (processing && processing.state && processing.state !== "succeeded") {
     const deadline = Date.now() + 5 * 60 * 1000;
     let waitMs = parseInt(String(processing.check_after_secs || "2"), 10) * 1000 || 2000;
     while (Date.now() < deadline) {
       await new Promise((r) => setTimeout(r, Math.min(waitMs, 15000)));
-      const stBody = new URLSearchParams({ command: "STATUS", media_id: String(mediaId) });
-      const stRes = await fetch(TWITTER_UPLOAD, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/x-www-form-urlencoded",
-          Authorization: `Bearer ${access}`,
-        },
-        body: stBody.toString(),
+      const statusUrl = new URL(TWITTER_UPLOAD);
+      statusUrl.searchParams.set("command", "STATUS");
+      statusUrl.searchParams.set("media_id", String(mediaId));
+      const stRes = await fetch(statusUrl, {
+        method: "GET",
+        headers: { Authorization: `Bearer ${access}` },
       });
       const stJson = await stRes.json().catch(() => ({}));
-      const st = stJson.processing_info?.state;
+      const stInfo = twitterMediaProcessingInfo(stJson);
+      const st = stInfo?.state;
       if (st === "succeeded") break;
       if (st === "failed") {
-        const err = stJson.processing_info?.error || stJson;
+        const err = stInfo?.error || stJson;
         throw new Error(`Twitter media processing failed: ${JSON.stringify(err).slice(0, 400)}`);
       }
-      waitMs = parseInt(String(stJson.processing_info?.check_after_secs || "2"), 10) * 1000 || 2000;
+      waitMs = parseInt(String(stInfo?.check_after_secs || "2"), 10) * 1000 || 2000;
     }
   }
 
