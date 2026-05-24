@@ -286,7 +286,7 @@ export async function uploadVideoToYoutube(opts) {
 
 // --- X (Twitter) OAuth 2.0 + video syndication (mirrors YouTube flow in this module) ---
 
-const TWITTER_AUTH = "https://twitter.com/i/oauth2/authorize";
+const TWITTER_AUTH = "https://x.com/i/oauth2/authorize";
 const TWITTER_TOKEN = "https://api.twitter.com/2/oauth2/token";
 const TWITTER_UPLOAD = "https://upload.twitter.com/1.1/media/upload.json";
 const TWITTER_TWEETS = "https://api.twitter.com/2/tweets";
