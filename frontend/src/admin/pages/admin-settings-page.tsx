@@ -23,6 +23,20 @@ type AppSettingsPayload = {
   tiktokDbClientSecretSet?: boolean;
 };
 
+function asTrimmedString(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function saveErrorMessage(e: unknown, fallback: string): string {
+  if (e && typeof e === "object" && "errorFields" in e) {
+    const fields = (e as { errorFields?: { errors: string[] }[] }).errorFields;
+    const first = fields?.[0]?.errors?.[0];
+    if (first) return first;
+  }
+  const err = e as { response?: { data?: { error?: string } }; message?: string };
+  return err.response?.data?.error || err.message || fallback;
+}
+
 export function AdminSettingsPage() {
   const { t } = useTranslation("admin");
   const { message } = App.useApp();
@@ -124,54 +138,60 @@ export function AdminSettingsPage() {
 
   const save = async () => {
     if (!can("settings", "edit")) return;
-    const v = await form.validateFields();
+    let v: Awaited<ReturnType<typeof form.validateFields>>;
+    try {
+      v = await form.validateFields();
+    } catch (e: unknown) {
+      message.error(saveErrorMessage(e, t("settings.validationFailed")));
+      return;
+    }
     setSaving(true);
     try {
       const youtube: Record<string, unknown> = {
-        oauthClientId: v.ytOauthClientId.trim(),
-        oauthRedirectUri: v.ytOauthRedirectUri.trim(),
-        defaultPrivacy: v.ytDefaultPrivacy,
-        defaultCategoryId: v.ytCategoryId.trim() || "22",
-        defaultEmbeddable: v.ytEmbeddable,
-        defaultMadeForKids: v.ytMadeForKids,
-        defaultLicense: v.ytLicense,
-        defaultNotifySubscribers: v.ytNotifySubscribers,
-        defaultPublicStatsViewable: v.ytPublicStats,
+        oauthClientId: asTrimmedString(v.ytOauthClientId),
+        oauthRedirectUri: asTrimmedString(v.ytOauthRedirectUri),
+        defaultPrivacy: v.ytDefaultPrivacy ?? "private",
+        defaultCategoryId: asTrimmedString(v.ytCategoryId) || "22",
+        defaultEmbeddable: v.ytEmbeddable !== false,
+        defaultMadeForKids: Boolean(v.ytMadeForKids),
+        defaultLicense: v.ytLicense ?? "youtube",
+        defaultNotifySubscribers: Boolean(v.ytNotifySubscribers),
+        defaultPublicStatsViewable: v.ytPublicStats !== false,
       };
-      const secretYtTrim = v.ytOauthClientSecret.trim();
+      const secretYtTrim = asTrimmedString(v.ytOauthClientSecret);
       if (secretYtTrim) youtube.oauthClientSecret = secretYtTrim;
 
       const twitter: Record<string, unknown> = {
-        oauthClientId: v.twOauthClientId.trim(),
-        oauthRedirectUri: v.twOauthRedirectUri.trim(),
-        defaultTweetText: v.twDefaultTweetText.trim(),
+        oauthClientId: asTrimmedString(v.twOauthClientId),
+        oauthRedirectUri: asTrimmedString(v.twOauthRedirectUri),
+        defaultTweetText: asTrimmedString(v.twDefaultTweetText),
       };
-      const secretTwTrim = v.twOauthClientSecret.trim();
+      const secretTwTrim = asTrimmedString(v.twOauthClientSecret);
       if (secretTwTrim) twitter.oauthClientSecret = secretTwTrim;
 
       const facebook: Record<string, unknown> = {
-        oauthClientId: v.fbOauthClientId.trim(),
-        oauthRedirectUri: v.fbOauthRedirectUri.trim(),
-        defaultDescription: v.fbDefaultDescription.trim(),
+        oauthClientId: asTrimmedString(v.fbOauthClientId),
+        oauthRedirectUri: asTrimmedString(v.fbOauthRedirectUri),
+        defaultDescription: asTrimmedString(v.fbDefaultDescription),
       };
-      const secretFbTrim = v.fbOauthClientSecret.trim();
+      const secretFbTrim = asTrimmedString(v.fbOauthClientSecret);
       if (secretFbTrim) facebook.oauthClientSecret = secretFbTrim;
 
       const instagram: Record<string, unknown> = {
-        oauthClientId: v.igOauthClientId.trim(),
-        oauthRedirectUri: v.igOauthRedirectUri.trim(),
-        defaultCaption: v.igDefaultCaption.trim(),
+        oauthClientId: asTrimmedString(v.igOauthClientId),
+        oauthRedirectUri: asTrimmedString(v.igOauthRedirectUri),
+        defaultCaption: asTrimmedString(v.igDefaultCaption),
       };
-      const secretIgTrim = v.igOauthClientSecret.trim();
+      const secretIgTrim = asTrimmedString(v.igOauthClientSecret);
       if (secretIgTrim) instagram.oauthClientSecret = secretIgTrim;
 
       const tiktok: Record<string, unknown> = {
-        oauthClientKey: v.ttOauthClientKey.trim(),
-        oauthRedirectUri: v.ttOauthRedirectUri.trim(),
-        defaultPrivacyLevel: v.ttDefaultPrivacyLevel.trim() || "SELF_ONLY",
-        defaultCaption: v.ttDefaultCaption.trim(),
+        oauthClientKey: asTrimmedString(v.ttOauthClientKey),
+        oauthRedirectUri: asTrimmedString(v.ttOauthRedirectUri),
+        defaultPrivacyLevel: asTrimmedString(v.ttDefaultPrivacyLevel) || "SELF_ONLY",
+        defaultCaption: asTrimmedString(v.ttDefaultCaption),
       };
-      const secretTtTrim = v.ttOauthClientSecret.trim();
+      const secretTtTrim = asTrimmedString(v.ttOauthClientSecret);
       if (secretTtTrim) tiktok.oauthClientSecret = secretTtTrim;
 
       const { data } = await getAdminClient().patch<AppSettingsPayload>("/settings", {
@@ -195,8 +215,7 @@ export function AdminSettingsPage() {
       });
       message.success(t("settings.saved"));
     } catch (e: unknown) {
-      const err = e as { response?: { data?: { error?: string } } };
-      message.error(err.response?.data?.error || "Error");
+      message.error(saveErrorMessage(e, t("settings.saveFailed")));
     } finally {
       setSaving(false);
     }
@@ -292,14 +311,21 @@ export function AdminSettingsPage() {
                   <Typography.Paragraph type="secondary" style={{ marginBottom: 16 }}>
                     {t("settings.oauthEnvWhereHint")}
                   </Typography.Paragraph>
+                  <Form
+                    form={form}
+                    layout="vertical"
+                    disabled={!can("settings", "edit")}
+                    onFinish={() => void save()}
+                  >
                   <Collapse
                     defaultActiveKey={["youtube"]}
                     items={[
                       {
                         key: "youtube",
+                        forceRender: true,
                         label: t("settings.youtubePanelTitle"),
                         children: (
-                          <Form form={form} layout="vertical" disabled={!can("settings", "edit")}>
+                          <>
                             <Typography.Text type="secondary" style={{ display: "block", marginBottom: 12 }}>
                               {t("settings.oauthYoutubeBlockIntro")}
                             </Typography.Text>
@@ -361,14 +387,15 @@ export function AdminSettingsPage() {
                             >
                               <Switch />
                             </Form.Item>
-                          </Form>
+                          </>
                         ),
                       },
                       {
                         key: "twitter",
+                        forceRender: true,
                         label: t("settings.twitterPanelTitle"),
                         children: (
-                          <Form form={form} layout="vertical" disabled={!can("settings", "edit")}>
+                          <>
                             <Typography.Text type="secondary" style={{ display: "block", marginBottom: 12 }}>
                               {t("settings.oauthTwitterBlockIntro")}
                             </Typography.Text>
@@ -400,14 +427,15 @@ export function AdminSettingsPage() {
                             <Form.Item name="twDefaultTweetText" label={t("settings.twDefaultTweetText")}>
                               <Input.TextArea rows={2} placeholder="" />
                             </Form.Item>
-                          </Form>
+                          </>
                         ),
                       },
                       {
                         key: "facebook",
+                        forceRender: true,
                         label: t("settings.facebookPanelTitle"),
                         children: (
-                          <Form form={form} layout="vertical" disabled={!can("settings", "edit")}>
+                          <>
                             <Typography.Text type="secondary" style={{ display: "block", marginBottom: 12 }}>
                               {t("settings.oauthFacebookBlockIntro")}
                             </Typography.Text>
@@ -439,14 +467,15 @@ export function AdminSettingsPage() {
                             <Form.Item name="fbDefaultDescription" label={t("settings.fbDefaultDescription")}>
                               <Input.TextArea rows={2} placeholder="" />
                             </Form.Item>
-                          </Form>
+                          </>
                         ),
                       },
                       {
                         key: "instagram",
+                        forceRender: true,
                         label: t("settings.instagramPanelTitle"),
                         children: (
-                          <Form form={form} layout="vertical" disabled={!can("settings", "edit")}>
+                          <>
                             <Typography.Text type="secondary" style={{ display: "block", marginBottom: 12 }}>
                               {t("settings.oauthInstagramBlockIntro")}
                             </Typography.Text>
@@ -478,14 +507,15 @@ export function AdminSettingsPage() {
                             <Form.Item name="igDefaultCaption" label={t("settings.igDefaultCaption")}>
                               <Input.TextArea rows={2} placeholder="" />
                             </Form.Item>
-                          </Form>
+                          </>
                         ),
                       },
                       {
                         key: "tiktok",
+                        forceRender: true,
                         label: t("settings.tiktokPanelTitle"),
                         children: (
-                          <Form form={form} layout="vertical" disabled={!can("settings", "edit")}>
+                          <>
                             <Typography.Text type="secondary" style={{ display: "block", marginBottom: 12 }}>
                               {t("settings.oauthTiktokBlockIntro")}
                             </Typography.Text>
@@ -527,16 +557,17 @@ export function AdminSettingsPage() {
                             <Form.Item name="ttDefaultCaption" label={t("settings.ttDefaultCaption")}>
                               <Input.TextArea rows={2} placeholder="" />
                             </Form.Item>
-                          </Form>
+                          </>
                         ),
                       },
                     ]}
                   />
                   {can("settings", "edit") ? (
-                    <Button type="primary" loading={saving} onClick={() => void save()} style={{ marginTop: 16 }}>
+                    <Button type="primary" htmlType="submit" loading={saving} style={{ marginTop: 16 }}>
                       {t("common.save")}
                     </Button>
                   ) : null}
+                  </Form>
                 </div>
               ),
             },

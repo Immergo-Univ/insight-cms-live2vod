@@ -169,7 +169,9 @@
     "ttOauthClientSecretSavedDb": "Ya hay un client secret guardado en la base. Dejá el campo vacío para conservarlo.",
     "ttDefaultPrivacyLevel": "Privacidad por defecto para nueva sindicación",
     "ttDefaultCaption": "Leyenda por defecto para sindicación (opcional)",
-    "saved": "Ajustes guardados"
+    "saved": "Ajustes guardados",
+    "validationFailed": "Corrige los campos marcados antes de guardar.",
+    "saveFailed": "No se pudieron guardar los ajustes"
   },
   "users": {
     "title": "Usuarios",

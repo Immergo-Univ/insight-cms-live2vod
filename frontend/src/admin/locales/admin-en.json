@@ -169,7 +169,9 @@
     "ttOauthClientSecretSavedDb": "A client secret is already stored in the database. Leave the field empty to keep it.",
     "ttDefaultPrivacyLevel": "Default privacy for new clip syndication",
     "ttDefaultCaption": "Default caption for syndication (optional)",
-    "saved": "Settings saved"
+    "saved": "Settings saved",
+    "validationFailed": "Fix the highlighted fields before saving.",
+    "saveFailed": "Could not save settings"
   },
   "users": {
     "title": "Users",
