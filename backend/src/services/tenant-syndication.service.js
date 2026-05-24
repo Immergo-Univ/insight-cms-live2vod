@@ -387,6 +387,7 @@ export async function buildTwitterAuthorizationUrl(tenantId) {
   u.searchParams.set("state", state);
   u.searchParams.set("code_challenge", codeChallenge);
   u.searchParams.set("code_challenge_method", "S256");
+  u.searchParams.set("prompt", "consent");
   return u.toString();
 }
 
@@ -492,7 +493,8 @@ export async function getTenantTwitterRefreshToken(tenantId) {
  * @returns {Promise<string>} user access token
  */
 export async function getTwitterAccessTokenForTenant(tenantId) {
-  const refresh = await getTenantTwitterRefreshToken(tenantId);
+  const id = String(tenantId || "").trim();
+  const refresh = await getTenantTwitterRefreshToken(id);
   if (!refresh) throw new Error("Tenant has no X refresh token");
 
   const { clientId, clientSecret } = await getResolvedTwitterOAuth();
@@ -511,6 +513,17 @@ export async function getTwitterAccessTokenForTenant(tenantId) {
   if (!access || typeof access !== "string") {
     throw new Error("X token refresh did not return access_token");
   }
+
+  // X rotates refresh tokens on every refresh; persist the new one or the chain breaks.
+  if (json.refresh_token && typeof json.refresh_token === "string") {
+    const { Tenant } = models();
+    const row = await Tenant.findByPk(id);
+    if (row) {
+      row.twitterRefreshToken = json.refresh_token;
+      await row.save();
+    }
+  }
+
   return access.trim();
 }
 
