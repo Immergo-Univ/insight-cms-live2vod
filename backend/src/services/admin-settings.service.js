@@ -230,7 +230,7 @@ export async function getResolvedTwitterOAuth() {
  */
 function resolveFacebookOAuthFromMerged(merged) {
   const synd = merged.syndication && typeof merged.syndication === "object" && !Array.isArray(merged.syndication) ? merged.syndication : {};
-  const fbRaw = /** @type {Record<string, unknown>} */ (syn).facebook;
+  const fbRaw = /** @type {Record<string, unknown>} */ (synd).facebook;
   const fb = fbRaw && typeof fbRaw === "object" && !Array.isArray(fbRaw) ? fbRaw : {};
   const fromDb = (key) => String(fb[key] ?? "").trim();
   const clientId = fromDb("oauthClientId") || config.facebook.appId;
@@ -259,7 +259,7 @@ export async function getResolvedFacebookOAuth() {
  */
 function resolveInstagramOAuthFromMerged(merged) {
   const synd = merged.syndication && typeof merged.syndication === "object" && !Array.isArray(merged.syndication) ? merged.syndication : {};
-  const igRaw = /** @type {Record<string, unknown>} */ (syn).instagram;
+  const igRaw = /** @type {Record<string, unknown>} */ (synd).instagram;
   const ig = igRaw && typeof igRaw === "object" && !Array.isArray(igRaw) ? igRaw : {};
   const fromDb = (key) => String(ig[key] ?? "").trim();
   const clientId = fromDb("oauthClientId") || config.instagram.appId;
@@ -288,7 +288,7 @@ export async function getResolvedInstagramOAuth() {
  */
 function resolveTiktokOAuthFromMerged(merged) {
   const synd = merged.syndication && typeof merged.syndication === "object" && !Array.isArray(merged.syndication) ? merged.syndication : {};
-  const ttRaw = /** @type {Record<string, unknown>} */ (syn).tiktok;
+  const ttRaw = /** @type {Record<string, unknown>} */ (synd).tiktok;
   const tt = ttRaw && typeof ttRaw === "object" && !Array.isArray(ttRaw) ? ttRaw : {};
   const fromDb = (key) => String(tt[key] ?? "").trim();
   const clientKey = fromDb("oauthClientKey") || config.tiktok.clientKey;
@@ -318,7 +318,7 @@ export async function getTiktokSyndicationDefaults() {
   try {
     const merged = await loadMergedSettingsFromDb();
     const synd = merged.syndication && typeof merged.syndication === "object" && !Array.isArray(merged.syndication) ? merged.syndication : {};
-    const ttRaw = /** @type {Record<string, unknown>} */ (syn).tiktok;
+    const ttRaw = /** @type {Record<string, unknown>} */ (synd).tiktok;
     const tt = ttRaw && typeof ttRaw === "object" && !Array.isArray(ttRaw) ? ttRaw : {};
     const defaultCaption = typeof tt.defaultCaption === "string" ? tt.defaultCaption.trim() : "";
     const defaultPrivacyLevel =
@@ -369,7 +369,7 @@ function facebookClientSecretStoredInDb(merged) {
  */
 function instagramClientSecretStoredInDb(merged) {
   const synd = merged.syndication && typeof merged.syndication === "object" && !Array.isArray(merged.syndication) ? merged.syndication : {};
-  const ig = /** @type {Record<string, unknown>} */ (syn).instagram;
+  const ig = /** @type {Record<string, unknown>} */ (synd).instagram;
   if (!ig || typeof ig !== "object" || Array.isArray(ig)) return false;
   const s = ig.oauthClientSecret;
   return typeof s === "string" && Boolean(s.trim());
@@ -380,7 +380,7 @@ function instagramClientSecretStoredInDb(merged) {
  */
 function tiktokClientSecretStoredInDb(merged) {
   const synd = merged.syndication && typeof merged.syndication === "object" && !Array.isArray(merged.syndication) ? merged.syndication : {};
-  const tt = /** @type {Record<string, unknown>} */ (syn).tiktok;
+  const tt = /** @type {Record<string, unknown>} */ (synd).tiktok;
   if (!tt || typeof tt !== "object" || Array.isArray(tt)) return false;
   const s = tt.oauthClientSecret;
   return typeof s === "string" && Boolean(s.trim());
