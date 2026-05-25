@@ -1776,22 +1776,38 @@ export async function uploadVideoToTiktok(opts) {
     ttlSeconds: 90 * 60,
   });
   const effectiveVideoUrl = proxyUrl || String(videoUrl).trim();
-
-  const initJson = await tiktokApiPost(access, "/v2/post/publish/video/init/", {
+  /**
+   * Build a TikTok init payload.
+   * strictMode=true enforces conservative settings for unaudited/sandbox clients.
+   *
+   * @param {boolean} strictMode
+   */
+  const buildInitPayload = (strictMode) => ({
     post_info: {
       title: String(caption || "").slice(0, 2200),
-      privacy_level: privacy,
-      disable_duet: Boolean(disableDuet) || creator.duet_disabled === true,
-      disable_comment: Boolean(disableComment) || creator.comment_disabled === true,
-      disable_stitch: Boolean(disableStitch) || creator.stitch_disabled === true,
-      brand_content_toggle: Boolean(brandContentToggle),
-      brand_organic_toggle: Boolean(brandOrganicToggle),
+      privacy_level: strictMode && options.includes("SELF_ONLY") ? "SELF_ONLY" : privacy,
+      disable_duet: strictMode ? true : Boolean(disableDuet) || creator.duet_disabled === true,
+      disable_comment: strictMode ? true : Boolean(disableComment) || creator.comment_disabled === true,
+      disable_stitch: strictMode ? true : Boolean(disableStitch) || creator.stitch_disabled === true,
+      brand_content_toggle: strictMode ? false : Boolean(brandContentToggle),
+      brand_organic_toggle: strictMode ? false : Boolean(brandOrganicToggle),
     },
     source_info: {
       source: "PULL_FROM_URL",
       video_url: effectiveVideoUrl,
     },
   });
+
+  let initJson;
+  try {
+    initJson = await tiktokApiPost(access, "/v2/post/publish/video/init/", buildInitPayload(false));
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    const shouldRetryStrict =
+      /integration guidelines|content-sharing-guidelines|Direct Post API/i.test(msg) && options.includes("SELF_ONLY");
+    if (!shouldRetryStrict) throw e;
+    initJson = await tiktokApiPost(access, "/v2/post/publish/video/init/", buildInitPayload(true));
+  }
 
   const data = initJson.data && typeof initJson.data === "object" ? initJson.data : {};
   const publishId = data.publish_id;
