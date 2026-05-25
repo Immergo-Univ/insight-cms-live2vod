@@ -94,6 +94,10 @@ function createDefaultFullWindowSubClip(
   clipState: EditorClipState,
   nowUnixSec: number,
   id: string,
+  defaults?: {
+    subtitlesDefaultEnabled?: boolean;
+    defaultSyndication?: EditorClipSyndication | undefined;
+  },
 ): EditorSubClip {
   const isRealtime = clipState.selectionMode === "realtime";
   const wallSpan = Math.max(
@@ -109,7 +113,25 @@ function createDefaultFullWindowSubClip(
     startTime: 0,
     endTime,
     ...defaultEditorSubClipEncodeFields(),
+    subtitleMode: defaults?.subtitlesDefaultEnabled === true,
+    ...(defaults?.defaultSyndication ? { syndication: defaults.defaultSyndication } : {}),
   };
+}
+
+function buildDefaultClipSyndication(opts: {
+  youtubeEnabled?: boolean;
+  twitterEnabled?: boolean;
+  facebookEnabled?: boolean;
+  instagramEnabled?: boolean;
+  tiktokEnabled?: boolean;
+}): EditorClipSyndication | undefined {
+  const next: EditorClipSyndication = {};
+  if (opts.youtubeEnabled) next.youtube = { enabled: true, options: {} };
+  if (opts.twitterEnabled) next.twitter = { enabled: true, options: {} };
+  if (opts.facebookEnabled) next.facebook = { enabled: true, options: {} };
+  if (opts.instagramEnabled) next.instagram = { enabled: true, options: { mediaType: "reels" } };
+  if (opts.tiktokEnabled) next.tiktok = { enabled: true, options: {} };
+  return Object.keys(next).length ? next : undefined;
 }
 
 /** Keep user-placed slots when precalc/detect finishes (avoids wiping manual ads). */
@@ -451,6 +473,7 @@ export function EditorPage() {
   const defaultFullWindowClipIdRef = useRef<string | null>(null);
 
   const shouldSkipAdsFetchRef = useRef(!!mountSnapshot?.adsLoadComplete);
+  const appliedInitialTenantDefaultsRef = useRef(false);
 
   const playerRef = useRef<EditorPlayerRef>(null);
   const timelineRef = useRef<EditorTimelineHandle>(null);
@@ -546,15 +569,83 @@ export function EditorPage() {
   const selectionMode = clipState?.selectionMode ?? "epg";
   const isRealtime = selectionMode === "realtime";
   const {
+    loading: tenantSettingsLoading,
     subtitlesEnabled: tenantSubtitlesEnabled,
+    subtitlesDefaultEnabled,
     syndicationYoutubeEnabled,
+    syndicationYoutubeDefaultEnabled,
     syndicationTwitterEnabled,
+    syndicationTwitterDefaultEnabled,
     syndicationFacebookEnabled,
+    syndicationFacebookDefaultEnabled,
     syndicationInstagramEnabled,
+    syndicationInstagramDefaultEnabled,
     syndicationTiktokEnabled,
+    syndicationTiktokDefaultEnabled,
     tenantId: editorTenantId,
   } =
     useTenantSettings();
+
+  const defaultClipSyndication = useMemo(
+    () =>
+      buildDefaultClipSyndication({
+        youtubeEnabled: syndicationYoutubeEnabled && syndicationYoutubeDefaultEnabled,
+        twitterEnabled: syndicationTwitterEnabled && syndicationTwitterDefaultEnabled,
+        facebookEnabled: syndicationFacebookEnabled && syndicationFacebookDefaultEnabled,
+        instagramEnabled: syndicationInstagramEnabled && syndicationInstagramDefaultEnabled,
+        tiktokEnabled: syndicationTiktokEnabled && syndicationTiktokDefaultEnabled,
+      }),
+    [
+      syndicationYoutubeEnabled,
+      syndicationYoutubeDefaultEnabled,
+      syndicationTwitterEnabled,
+      syndicationTwitterDefaultEnabled,
+      syndicationFacebookEnabled,
+      syndicationFacebookDefaultEnabled,
+      syndicationInstagramEnabled,
+      syndicationInstagramDefaultEnabled,
+      syndicationTiktokEnabled,
+      syndicationTiktokDefaultEnabled,
+    ],
+  );
+
+  useEffect(() => {
+    if (appliedInitialTenantDefaultsRef.current) return;
+    if (tenantSettingsLoading) return;
+    if (mountSnapshot?.fromCache === true) {
+      appliedInitialTenantDefaultsRef.current = true;
+      return;
+    }
+    if (clipState?.selectionMode === "realtime") {
+      appliedInitialTenantDefaultsRef.current = true;
+      return;
+    }
+    setClips((prev) => {
+      if (prev.length !== 1) return prev;
+      const clip = prev[0];
+      const shouldSetSubtitle = tenantSubtitlesEnabled && subtitlesDefaultEnabled === true && !clip.subtitleMode;
+      const shouldSetSyndication = Boolean(defaultClipSyndication && !clip.syndication);
+      if (!shouldSetSubtitle && !shouldSetSyndication) return prev;
+      appliedInitialTenantDefaultsRef.current = true;
+      return [
+        {
+          ...clip,
+          subtitleMode: shouldSetSubtitle ? true : clip.subtitleMode,
+          ...(shouldSetSyndication
+            ? { syndication: JSON.parse(JSON.stringify(defaultClipSyndication)) }
+            : {}),
+        },
+      ];
+    });
+    appliedInitialTenantDefaultsRef.current = true;
+  }, [
+    tenantSettingsLoading,
+    mountSnapshot?.fromCache,
+    clipState?.selectionMode,
+    tenantSubtitlesEnabled,
+    subtitlesDefaultEnabled,
+    defaultClipSyndication,
+  ]);
 
   const selectedEncodeClip = useMemo(
     () => (selectedClipId ? clips.find((c) => c.id === selectedClipId) ?? null : null),
@@ -833,12 +924,14 @@ export function EditorPage() {
             startTime: timeSeconds,
             endTime: end,
             ...defaultEditorSubClipEncodeFields(),
+            subtitleMode: tenantSubtitlesEnabled && subtitlesDefaultEnabled === true,
+            ...(defaultClipSyndication ? { syndication: JSON.parse(JSON.stringify(defaultClipSyndication)) } : {}),
           },
         ];
       });
       setSelectedClipId(id);
     },
-    [clipState, selectedClipId, isRealtime, clips, duration, zoomIndex],
+    [clipState, selectedClipId, isRealtime, clips, duration, zoomIndex, tenantSubtitlesEnabled, subtitlesDefaultEnabled, defaultClipSyndication],
   );
 
   /** Append a new sub-clip at the current playhead (same span logic as Mark In without selection). */
@@ -893,13 +986,15 @@ export function EditorPage() {
             startTime: timeSeconds,
             endTime: end,
             ...encode,
+            subtitleMode: tenantSubtitlesEnabled && subtitlesDefaultEnabled === true,
+            ...(defaultClipSyndication ? { syndication: JSON.parse(JSON.stringify(defaultClipSyndication)) } : {}),
           },
         ];
       });
       setSelectedClipId(id);
       timelineRef.current?.scrollTimeToCenter(timeSeconds);
     },
-    [clipState, clips, duration, isRealtime, zoomIndex, currentTime],
+    [clipState, clips, duration, isRealtime, zoomIndex, currentTime, tenantSubtitlesEnabled, subtitlesDefaultEnabled, defaultClipSyndication],
   );
 
   const handleMarkOut = useCallback(
@@ -942,6 +1037,8 @@ export function EditorPage() {
             startTime: offset,
             endTime: end,
             ...defaultEditorSubClipEncodeFields(),
+            subtitleMode: tenantSubtitlesEnabled && subtitlesDefaultEnabled === true,
+            ...(defaultClipSyndication ? { syndication: JSON.parse(JSON.stringify(defaultClipSyndication)) } : {}),
           },
         ];
       });
@@ -995,6 +1092,9 @@ export function EditorPage() {
     realtimeTranscribeOnRec,
     realtimeTranscribeSettings,
     refreshVodJobs,
+    tenantSubtitlesEnabled,
+    subtitlesDefaultEnabled,
+    defaultClipSyndication,
   ]);
 
   const handleRemoveClip = useCallback((id: string) => {
@@ -1577,10 +1677,15 @@ export function EditorPage() {
               }
               syndicationTenantId={editorTenantId}
               syndicationYoutubeEnabled={syndicationYoutubeEnabled}
+              syndicationYoutubeDefaultEnabled={syndicationYoutubeDefaultEnabled}
               syndicationTwitterEnabled={syndicationTwitterEnabled}
+              syndicationTwitterDefaultEnabled={syndicationTwitterDefaultEnabled}
               syndicationFacebookEnabled={syndicationFacebookEnabled}
+              syndicationFacebookDefaultEnabled={syndicationFacebookDefaultEnabled}
               syndicationInstagramEnabled={syndicationInstagramEnabled}
+              syndicationInstagramDefaultEnabled={syndicationInstagramDefaultEnabled}
               syndicationTiktokEnabled={syndicationTiktokEnabled}
+              syndicationTiktokDefaultEnabled={syndicationTiktokDefaultEnabled}
               onCaptureClipPoster={handleCaptureClipPoster}
               onAddTextWidget={handleAddTextWidget}
               onAddImageWidgetFromFile={handleAddImageWidgetFromFile}

@@ -347,11 +347,32 @@ Fallback por `.env` (solo si no se carga en Admin):
 Consola oficial:
 
 - [https://developers.tiktok.com/](https://developers.tiktok.com/)
+- App dashboard / Manage app: [https://developers.tiktok.com/](https://developers.tiktok.com/)
+- URL ownership (Direct Post / PULL_FROM_URL): [https://developers.tiktok.com/doc/content-posting-api-media-transfer-guide/#pull_from_url](https://developers.tiktok.com/doc/content-posting-api-media-transfer-guide/#pull_from_url)
+- Integration guidelines (Direct Post): [https://developers.tiktok.com/doc/content-sharing-guidelines/](https://developers.tiktok.com/doc/content-sharing-guidelines/)
 
-1. Crear app y habilitar Login Kit + Content Posting API.
-2. Configurar redirect URI:
+Pasos recomendados:
+
+1. Crear app y trabajar en pestaña `Sandbox` para pruebas iniciales.
+2. En `Products`, habilitar:
+   - `Login Kit`
+   - `Content Posting API` con `Direct Post` activado.
+3. En `Login Kit`, cargar callback OAuth exacto:
    - `https://TU_BACKEND/api/tenants/oauth/tiktok/callback`
-3. Configurar Domain / URL prefix permitido para subida por URL.
+4. En `Scopes`, dejar habilitados:
+   - `user.info.basic`
+   - `video.publish`
+5. En `Sandbox settings -> Target Users`, agregar explícitamente la cuenta TikTok que autorizará.
+6. Configurar y verificar `URL prefix` para `PULL_FROM_URL` (ownership del dominio de media).
+
+Referencia visual (sandbox con Login Kit, Content Posting API, scopes y target user):
+
+![TikTok Sandbox - configuración app](./images/screencapture-developers-tiktok-app-7643813441124812816-sandbox-7643833715001182209-2026-05-25-18_03_54.png)
+
+Notas importantes visibles en esa pantalla:
+
+- La app queda marcada como `testing` / `sandbox` mientras no pase auditoría.
+- `Direct Post` puede estar habilitado, pero igual aplican restricciones de cliente no auditado.
 
 ### 5.2 Scopes que usa este backend
 
@@ -365,6 +386,10 @@ Configurar primero en `Admin -> Settings -> Syndication -> TikTok`:
 - `TIKTOK_CLIENT_KEY`
 - `TIKTOK_CLIENT_SECRET`
 - `TIKTOK_REDIRECT_URI`
+- `domainVerificationPath` (ruta pública para archivo de verificación)
+- `domainVerificationFileName` (nombre del archivo `.txt` en modo URL prefix)
+- `domainVerificationFileContent` (contenido exacto entregado por TikTok)
+- `domainVerificationContentType` (normalmente `text/plain; charset=utf-8`)
 
 Variables opcionales:
 
@@ -376,6 +401,10 @@ Fallback por `.env` (solo si no se carga en Admin):
 - `TIKTOK_CLIENT_KEY`
 - `TIKTOK_CLIENT_SECRET`
 - `TIKTOK_REDIRECT_URI`
+- `TIKTOK_DOMAIN_VERIFICATION_PATH`
+- `TIKTOK_DOMAIN_VERIFICATION_FILE_NAME`
+- `TIKTOK_DOMAIN_VERIFICATION_FILE_CONTENT`
+- `TIKTOK_DOMAIN_VERIFICATION_CONTENT_TYPE`
 
 ### 5.4 Conectar tenant
 
@@ -390,6 +419,35 @@ Fallback por `.env` (solo si no se carga en Admin):
 
 - Publicación usa `PULL_FROM_URL`; el MP4 debe ser HTTP(S) público.
 - El dominio/prefijo de esa URL debe estar permitido en TikTok Developer Portal.
+- Si TikTok agrega slash final en el prefix, asegurar acceso con y sin slash (`/tiktok` y `/tiktok/`).
+- Para verificación por archivo, validar también la URL completa `/<prefix>/<archivo>.txt`.
+- En esta implementación, el backend puede exponer una URL propia bajo dominio verificado para evitar bloqueos por ownership del storage/CDN.
+
+### 5.6 Restricciones de app no auditada (muy importante)
+
+Si la app está en `unaudited` / `sandbox`, TikTok aplica políticas adicionales:
+
+- Error típico: `code=unaudited_client_can_only_post_to_private_accounts`
+- Requisito: la cuenta TikTok que publica debe ser **cuenta privada** (configuración de privacidad de la cuenta, no solo del post).
+- Además, la cuenta debe estar en `Sandbox -> Target Users`.
+- El post debe ir en `SELF_ONLY` durante pruebas de cliente no auditado.
+
+### 5.7 Causas frecuentes de rechazo 403 y cómo resolver
+
+1. `Please review our URL ownership verification rules ... pull_from_url`
+   - Causa: dominio/prefix del MP4 no verificado.
+   - Solución: verificar ownership del prefix real usado por `video_url`.
+
+2. `Please review our integration guidelines ... content-sharing-guidelines`
+   - Causa: incumplimiento de políticas de integración.
+   - Solución:
+     - Evitar watermark/logo/promotional overlays en video.
+     - Mantener flujo de consentimiento y controles requeridos en UX.
+     - En pruebas, usar cuenta privada + `SELF_ONLY`.
+
+3. URL de verificación responde HTML/404 en lugar del TXT
+   - Causa: ruta no publicada o fallback al frontend.
+   - Solución: verificar que la URL entregue texto plano exacto.
 
 ---
 

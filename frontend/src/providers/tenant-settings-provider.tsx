@@ -8,16 +8,28 @@ type TenantSettingsContextValue = {
   loading: boolean;
   /** When false, hide subtitle / realtime transcribe controls for this tenant. */
   subtitlesEnabled: boolean;
+  /** When true, new clips start with subtitle mode enabled by default. */
+  subtitlesDefaultEnabled: boolean;
   /** When true, show per-clip syndication UI for YouTube. */
   syndicationYoutubeEnabled: boolean;
+  /** When true, new clips start with YouTube syndication enabled by default. */
+  syndicationYoutubeDefaultEnabled: boolean;
   /** When true, show per-clip syndication UI for X / Twitter. */
   syndicationTwitterEnabled: boolean;
+  /** When true, new clips start with X syndication enabled by default. */
+  syndicationTwitterDefaultEnabled: boolean;
   /** When true, show per-clip syndication UI for Facebook. */
   syndicationFacebookEnabled: boolean;
+  /** When true, new clips start with Facebook syndication enabled by default. */
+  syndicationFacebookDefaultEnabled: boolean;
   /** When true, show per-clip syndication UI for Instagram. */
   syndicationInstagramEnabled: boolean;
+  /** When true, new clips start with Instagram syndication enabled by default. */
+  syndicationInstagramDefaultEnabled: boolean;
   /** When true, show per-clip syndication UI for TikTok. */
   syndicationTiktokEnabled: boolean;
+  /** When true, new clips start with TikTok syndication enabled by default. */
+  syndicationTiktokDefaultEnabled: boolean;
   refresh: () => Promise<void>;
 };
 
@@ -107,11 +119,17 @@ export function TenantSettingsProvider({ children }: { children: ReactNode }) {
   }, [location.search, location.pathname, location.hash, refresh]);
 
   const subtitlesEnabled = !tenantId || tenant?.subtitlesEnabled !== false;
+  const subtitlesDefaultEnabled = Boolean(tenantId && tenant?.subtitlesDefaultEnabled === true);
   const syndicationYoutubeEnabled = Boolean(tenantId && tenant?.syndicationYoutubeEnabled === true);
+  const syndicationYoutubeDefaultEnabled = Boolean(tenantId && tenant?.syndicationYoutubeDefaultEnabled === true);
   const syndicationTwitterEnabled = Boolean(tenantId && tenant?.syndicationTwitterEnabled === true);
+  const syndicationTwitterDefaultEnabled = Boolean(tenantId && tenant?.syndicationTwitterDefaultEnabled === true);
   const syndicationFacebookEnabled = Boolean(tenantId && tenant?.syndicationFacebookEnabled === true);
+  const syndicationFacebookDefaultEnabled = Boolean(tenantId && tenant?.syndicationFacebookDefaultEnabled === true);
   const syndicationInstagramEnabled = Boolean(tenantId && tenant?.syndicationInstagramEnabled === true);
+  const syndicationInstagramDefaultEnabled = Boolean(tenantId && tenant?.syndicationInstagramDefaultEnabled === true);
   const syndicationTiktokEnabled = Boolean(tenantId && tenant?.syndicationTiktokEnabled === true);
+  const syndicationTiktokDefaultEnabled = Boolean(tenantId && tenant?.syndicationTiktokDefaultEnabled === true);
 
   const value = useMemo(
     () => ({
@@ -119,11 +137,17 @@ export function TenantSettingsProvider({ children }: { children: ReactNode }) {
       tenant,
       loading,
       subtitlesEnabled,
+      subtitlesDefaultEnabled,
       syndicationYoutubeEnabled,
+      syndicationYoutubeDefaultEnabled,
       syndicationTwitterEnabled,
+      syndicationTwitterDefaultEnabled,
       syndicationFacebookEnabled,
+      syndicationFacebookDefaultEnabled,
       syndicationInstagramEnabled,
+      syndicationInstagramDefaultEnabled,
       syndicationTiktokEnabled,
+      syndicationTiktokDefaultEnabled,
       refresh,
     }),
     [
@@ -131,11 +155,17 @@ export function TenantSettingsProvider({ children }: { children: ReactNode }) {
       tenant,
       loading,
       subtitlesEnabled,
+      subtitlesDefaultEnabled,
       syndicationYoutubeEnabled,
+      syndicationYoutubeDefaultEnabled,
       syndicationTwitterEnabled,
+      syndicationTwitterDefaultEnabled,
       syndicationFacebookEnabled,
+      syndicationFacebookDefaultEnabled,
       syndicationInstagramEnabled,
+      syndicationInstagramDefaultEnabled,
       syndicationTiktokEnabled,
+      syndicationTiktokDefaultEnabled,
       refresh,
     ],
   );

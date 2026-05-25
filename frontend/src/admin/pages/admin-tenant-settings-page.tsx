@@ -14,19 +14,25 @@ import {
 type TenantDetail = {
   tenantId: string;
   subtitlesEnabled: boolean;
+  subtitlesDefaultEnabled?: boolean;
   syndicationYoutubeEnabled: boolean;
+  syndicationYoutubeDefaultEnabled?: boolean;
   syndicationYoutubeConnected?: boolean;
   syndicationTwitterEnabled: boolean;
+  syndicationTwitterDefaultEnabled?: boolean;
   syndicationTwitterConnected?: boolean;
   syndicationFacebookEnabled: boolean;
+  syndicationFacebookDefaultEnabled?: boolean;
   syndicationFacebookConnected?: boolean;
   facebookPageId?: string | null;
   facebookPageName?: string | null;
   syndicationInstagramEnabled: boolean;
+  syndicationInstagramDefaultEnabled?: boolean;
   syndicationInstagramConnected?: boolean;
   instagramBusinessAccountId?: string | null;
   instagramUsername?: string | null;
   syndicationTiktokEnabled: boolean;
+  syndicationTiktokDefaultEnabled?: boolean;
   syndicationTiktokConnected?: boolean;
   tiktokUsername?: string | null;
   metadata: Record<string, unknown> | null;
@@ -34,11 +40,17 @@ type TenantDetail = {
 
 type FormShape = {
   subtitlesEnabled: boolean;
+  subtitlesDefaultEnabled: boolean;
   syndicationYoutubeEnabled: boolean;
+  syndicationYoutubeDefaultEnabled: boolean;
   syndicationTwitterEnabled: boolean;
+  syndicationTwitterDefaultEnabled: boolean;
   syndicationFacebookEnabled: boolean;
+  syndicationFacebookDefaultEnabled: boolean;
   syndicationInstagramEnabled: boolean;
+  syndicationInstagramDefaultEnabled: boolean;
   syndicationTiktokEnabled: boolean;
+  syndicationTiktokDefaultEnabled: boolean;
   metadataJson: string;
 };
 
@@ -90,11 +102,17 @@ export function AdminTenantSettingsPage() {
     (data: TenantDetail) => {
       form.setFieldsValue({
         subtitlesEnabled: data.subtitlesEnabled !== false,
+        subtitlesDefaultEnabled: data.subtitlesDefaultEnabled === true,
         syndicationYoutubeEnabled: data.syndicationYoutubeEnabled === true,
+        syndicationYoutubeDefaultEnabled: data.syndicationYoutubeDefaultEnabled === true,
         syndicationTwitterEnabled: data.syndicationTwitterEnabled === true,
+        syndicationTwitterDefaultEnabled: data.syndicationTwitterDefaultEnabled === true,
         syndicationFacebookEnabled: data.syndicationFacebookEnabled === true,
+        syndicationFacebookDefaultEnabled: data.syndicationFacebookDefaultEnabled === true,
         syndicationInstagramEnabled: data.syndicationInstagramEnabled === true,
+        syndicationInstagramDefaultEnabled: data.syndicationInstagramDefaultEnabled === true,
         syndicationTiktokEnabled: data.syndicationTiktokEnabled === true,
+        syndicationTiktokDefaultEnabled: data.syndicationTiktokDefaultEnabled === true,
         metadataJson: data.metadata && typeof data.metadata === "object" ? JSON.stringify(data.metadata, null, 2) : "",
       });
       setSelectedFacebookPageId(typeof data.facebookPageId === "string" ? data.facebookPageId : "");
@@ -180,11 +198,17 @@ export function AdminTenantSettingsPage() {
 
     const payload = {
       subtitlesEnabled: Boolean(form.getFieldValue("subtitlesEnabled")),
+      subtitlesDefaultEnabled: Boolean(form.getFieldValue("subtitlesDefaultEnabled")),
       syndicationYoutubeEnabled: Boolean(form.getFieldValue("syndicationYoutubeEnabled")),
+      syndicationYoutubeDefaultEnabled: Boolean(form.getFieldValue("syndicationYoutubeDefaultEnabled")),
       syndicationTwitterEnabled: Boolean(form.getFieldValue("syndicationTwitterEnabled")),
+      syndicationTwitterDefaultEnabled: Boolean(form.getFieldValue("syndicationTwitterDefaultEnabled")),
       syndicationFacebookEnabled: Boolean(form.getFieldValue("syndicationFacebookEnabled")),
+      syndicationFacebookDefaultEnabled: Boolean(form.getFieldValue("syndicationFacebookDefaultEnabled")),
       syndicationInstagramEnabled: Boolean(form.getFieldValue("syndicationInstagramEnabled")),
+      syndicationInstagramDefaultEnabled: Boolean(form.getFieldValue("syndicationInstagramDefaultEnabled")),
       syndicationTiktokEnabled: Boolean(form.getFieldValue("syndicationTiktokEnabled")),
+      syndicationTiktokDefaultEnabled: Boolean(form.getFieldValue("syndicationTiktokDefaultEnabled")),
       metadata,
     };
 
@@ -302,19 +326,31 @@ export function AdminTenantSettingsPage() {
   const syndicationSwitches: Array<{
     name:
       | "subtitlesEnabled"
+      | "subtitlesDefaultEnabled"
       | "syndicationYoutubeEnabled"
+      | "syndicationYoutubeDefaultEnabled"
       | "syndicationTwitterEnabled"
+      | "syndicationTwitterDefaultEnabled"
       | "syndicationFacebookEnabled"
+      | "syndicationFacebookDefaultEnabled"
       | "syndicationInstagramEnabled"
-      | "syndicationTiktokEnabled";
+      | "syndicationInstagramDefaultEnabled"
+      | "syndicationTiktokEnabled"
+      | "syndicationTiktokDefaultEnabled";
     label: string;
   }> = [
     { name: "subtitlesEnabled", label: t("tenants.subtitlesEnabledLabel") },
+    { name: "subtitlesDefaultEnabled", label: t("tenants.subtitlesDefaultEnabledLabel") },
     { name: "syndicationYoutubeEnabled", label: t("tenants.syndicationYoutubeEnabledLabel") },
+    { name: "syndicationYoutubeDefaultEnabled", label: t("tenants.syndicationYoutubeDefaultEnabledLabel") },
     { name: "syndicationTwitterEnabled", label: t("tenants.syndicationTwitterEnabledLabel") },
+    { name: "syndicationTwitterDefaultEnabled", label: t("tenants.syndicationTwitterDefaultEnabledLabel") },
     { name: "syndicationFacebookEnabled", label: t("tenants.syndicationFacebookEnabledLabel") },
+    { name: "syndicationFacebookDefaultEnabled", label: t("tenants.syndicationFacebookDefaultEnabledLabel") },
     { name: "syndicationInstagramEnabled", label: t("tenants.syndicationInstagramEnabledLabel") },
+    { name: "syndicationInstagramDefaultEnabled", label: t("tenants.syndicationInstagramDefaultEnabledLabel") },
     { name: "syndicationTiktokEnabled", label: t("tenants.syndicationTiktokEnabledLabel") },
+    { name: "syndicationTiktokDefaultEnabled", label: t("tenants.syndicationTiktokDefaultEnabledLabel") },
   ];
 
   return (

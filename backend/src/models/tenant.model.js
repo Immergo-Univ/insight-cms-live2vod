@@ -13,11 +13,15 @@ export function registerTenantModel(sequelize) {
     {
       tenantId: { type: DataTypes.STRING(128), primaryKey: true },
       subtitlesEnabled: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
+      subtitlesDefaultEnabled: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
       syndicationYoutubeEnabled: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
+      syndicationYoutubeDefaultEnabled: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
       syndicationYoutubeConnected: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
       syndicationTwitterEnabled: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
+      syndicationTwitterDefaultEnabled: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
       syndicationTwitterConnected: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
       syndicationFacebookEnabled: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
+      syndicationFacebookDefaultEnabled: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
       syndicationFacebookConnected: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
       /** OAuth refresh token for YouTube Data API (never exposed on public tenant DTO). */
       youtubeRefreshToken: { type: DataTypes.TEXT, allowNull: true },
@@ -36,6 +40,8 @@ export function registerTenantModel(sequelize) {
       instagramPageId: { type: DataTypes.STRING(64), allowNull: true },
       instagramPageAccessToken: { type: DataTypes.TEXT, allowNull: true },
       syndicationTiktokEnabled: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
+      syndicationInstagramDefaultEnabled: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
+      syndicationTiktokDefaultEnabled: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
       syndicationTiktokConnected: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
       /** OAuth refresh token for TikTok Content Posting API (never exposed on public tenant DTO). */
       tiktokRefreshToken: { type: DataTypes.TEXT, allowNull: true },

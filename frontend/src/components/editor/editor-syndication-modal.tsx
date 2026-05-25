@@ -44,10 +44,22 @@ import { cx } from "@/utils/cx";
 import { buildThumbnailUrl } from "./editor-constants";
 import { formatTime } from "./editor-timeline";
 
-function defaultYoutubeBranch(clip: EditorSubClip): EditorClipYoutubeSyndication {
+function clipMetadataDefaults(clip: EditorSubClip) {
+  const title = clip.title?.trim() || `Clip ${clip.order}`;
+  const description = clip.description?.trim() || "";
+  const tags = normalizeEditorClipTagsList(clip.tags ?? []);
+  const combinedText = [title, description].filter(Boolean).join("\n\n");
+  return { title, description, tags, combinedText };
+}
+
+function defaultYoutubeBranch(
+  clip: EditorSubClip,
+  defaultEnabled: boolean,
+): EditorClipYoutubeSyndication {
   const existing = clip.syndication?.youtube;
+  const defaults = clipMetadataDefaults(clip);
   return {
-    enabled: existing?.enabled === true,
+    enabled: existing?.enabled === true || (!existing && defaultEnabled),
     options: {
       privacyStatus: (existing?.options?.privacyStatus as EditorYoutubePrivacyStatus) || "private",
       categoryId: existing?.options?.categoryId != null ? String(existing.options.categoryId) : "22",
@@ -56,9 +68,9 @@ function defaultYoutubeBranch(clip: EditorSubClip): EditorClipYoutubeSyndication
       publicStatsViewable: existing?.options?.publicStatsViewable !== false,
       selfDeclaredMadeForKids: Boolean(existing?.options?.selfDeclaredMadeForKids),
       notifySubscribers: Boolean(existing?.options?.notifySubscribers),
-      titleOverride: existing?.options?.titleOverride ?? "",
-      descriptionOverride: existing?.options?.descriptionOverride ?? "",
-      tagsExtra: existing?.options?.tagsExtra?.length ? [...existing.options.tagsExtra] : [],
+      titleOverride: existing?.options?.titleOverride?.trim() || defaults.title,
+      descriptionOverride: existing?.options?.descriptionOverride?.trim() || defaults.description,
+      tagsExtra: existing?.options?.tagsExtra?.length ? [...existing.options.tagsExtra] : [...defaults.tags],
       defaultLanguage: existing?.options?.defaultLanguage ?? "",
       defaultAudioLanguage: existing?.options?.defaultAudioLanguage ?? "",
     },
@@ -66,49 +78,65 @@ function defaultYoutubeBranch(clip: EditorSubClip): EditorClipYoutubeSyndication
   };
 }
 
-function defaultTwitterBranch(clip: EditorSubClip): EditorClipTwitterSyndication {
+function defaultTwitterBranch(
+  clip: EditorSubClip,
+  defaultEnabled: boolean,
+): EditorClipTwitterSyndication {
   const existing = clip.syndication?.twitter;
+  const defaults = clipMetadataDefaults(clip);
   return {
-    enabled: existing?.enabled === true,
+    enabled: existing?.enabled === true || (!existing && defaultEnabled),
     options: {
-      textOverride: existing?.options?.textOverride ?? "",
+      textOverride: existing?.options?.textOverride?.trim() || defaults.combinedText || defaults.title,
     },
     upload: existing?.upload ? { ...existing.upload } : undefined,
   };
 }
 
-function defaultFacebookBranch(clip: EditorSubClip): EditorClipFacebookSyndication {
+function defaultFacebookBranch(
+  clip: EditorSubClip,
+  defaultEnabled: boolean,
+): EditorClipFacebookSyndication {
   const existing = clip.syndication?.facebook;
+  const defaults = clipMetadataDefaults(clip);
   return {
-    enabled: existing?.enabled === true,
+    enabled: existing?.enabled === true || (!existing && defaultEnabled),
     options: {
-      titleOverride: existing?.options?.titleOverride ?? "",
-      descriptionOverride: existing?.options?.descriptionOverride ?? "",
+      titleOverride: existing?.options?.titleOverride?.trim() || defaults.title,
+      descriptionOverride: existing?.options?.descriptionOverride?.trim() || defaults.description,
     },
     upload: existing?.upload ? { ...existing.upload } : undefined,
   };
 }
 
-function defaultInstagramBranch(clip: EditorSubClip): EditorClipInstagramSyndication {
+function defaultInstagramBranch(
+  clip: EditorSubClip,
+  defaultEnabled: boolean,
+): EditorClipInstagramSyndication {
   const existing = clip.syndication?.instagram;
   const mediaTypeRaw = existing?.options?.mediaType;
   const mediaType: EditorInstagramMediaType = mediaTypeRaw === "feed" ? "feed" : "reels";
+  const defaults = clipMetadataDefaults(clip);
   return {
-    enabled: existing?.enabled === true,
+    enabled: existing?.enabled === true || (!existing && defaultEnabled),
     options: {
-      captionOverride: existing?.options?.captionOverride ?? "",
+      captionOverride: existing?.options?.captionOverride?.trim() || defaults.combinedText || defaults.title,
       mediaType,
     },
     upload: existing?.upload ? { ...existing.upload } : undefined,
   };
 }
 
-function defaultTiktokBranch(clip: EditorSubClip): EditorClipTiktokSyndication {
+function defaultTiktokBranch(
+  clip: EditorSubClip,
+  defaultEnabled: boolean,
+): EditorClipTiktokSyndication {
   const existing = clip.syndication?.tiktok;
+  const defaults = clipMetadataDefaults(clip);
   return {
-    enabled: existing?.enabled === true,
+    enabled: existing?.enabled === true || (!existing && defaultEnabled),
     options: {
-      captionOverride: existing?.options?.captionOverride ?? "",
+      captionOverride: existing?.options?.captionOverride?.trim() || defaults.combinedText || defaults.title,
       privacyLevel: existing?.options?.privacyLevel ?? "",
       disableDuet: existing?.options?.disableDuet === true,
       disableComment: existing?.options?.disableComment === true,
@@ -128,6 +156,16 @@ interface EditorSyndicationModalProps {
   clipUrl: string;
   channelId: string;
   readOnly?: boolean;
+  syndicationYoutubeEnabled?: boolean;
+  syndicationYoutubeDefaultEnabled?: boolean;
+  syndicationTwitterEnabled?: boolean;
+  syndicationTwitterDefaultEnabled?: boolean;
+  syndicationFacebookEnabled?: boolean;
+  syndicationFacebookDefaultEnabled?: boolean;
+  syndicationInstagramEnabled?: boolean;
+  syndicationInstagramDefaultEnabled?: boolean;
+  syndicationTiktokEnabled?: boolean;
+  syndicationTiktokDefaultEnabled?: boolean;
   onSave?: (clipId: string, syndication: EditorClipSyndication | undefined) => void;
 }
 
@@ -139,6 +177,16 @@ export function EditorSyndicationModal({
   clipUrl,
   channelId,
   readOnly = false,
+  syndicationYoutubeEnabled = false,
+  syndicationYoutubeDefaultEnabled = false,
+  syndicationTwitterEnabled = false,
+  syndicationTwitterDefaultEnabled = false,
+  syndicationFacebookEnabled = false,
+  syndicationFacebookDefaultEnabled = false,
+  syndicationInstagramEnabled = false,
+  syndicationInstagramDefaultEnabled = false,
+  syndicationTiktokEnabled = false,
+  syndicationTiktokDefaultEnabled = false,
   onSave,
 }: EditorSyndicationModalProps) {
   const [statusLoading, setStatusLoading] = useState(false);
@@ -162,16 +210,16 @@ export function EditorSyndicationModal({
   const [selectedPageId, setSelectedPageId] = useState("");
   const [selectedIgAccountId, setSelectedIgAccountId] = useState("");
   const [ytDraft, setYtDraft] = useState<EditorClipYoutubeSyndication>(() =>
-    clip ? defaultYoutubeBranch(clip) : { enabled: false, options: {} },
+    clip ? defaultYoutubeBranch(clip, syndicationYoutubeDefaultEnabled) : { enabled: false, options: {} },
   );
   const [twDraft, setTwDraft] = useState<EditorClipTwitterSyndication>(() =>
-    clip ? defaultTwitterBranch(clip) : { enabled: false, options: {} },
+    clip ? defaultTwitterBranch(clip, syndicationTwitterDefaultEnabled) : { enabled: false, options: {} },
   );
   const [fbDraft, setFbDraft] = useState<EditorClipFacebookSyndication>(() =>
-    clip ? defaultFacebookBranch(clip) : { enabled: false, options: {} },
+    clip ? defaultFacebookBranch(clip, syndicationFacebookDefaultEnabled) : { enabled: false, options: {} },
   );
   const [igDraft, setIgDraft] = useState<EditorClipInstagramSyndication>(() =>
-    clip ? defaultInstagramBranch(clip) : { enabled: false, options: { mediaType: "reels" } },
+    clip ? defaultInstagramBranch(clip, syndicationInstagramDefaultEnabled) : { enabled: false, options: { mediaType: "reels" } },
   );
   const [tiktokConnected, setTiktokConnected] = useState(false);
   const [tiktokUsername, setTiktokUsername] = useState<string | null>(null);
@@ -179,7 +227,7 @@ export function EditorSyndicationModal({
   const [tiktokCreatorInfo, setTiktokCreatorInfo] = useState<TiktokCreatorInfo | null>(null);
   const [creatorInfoBusy, setCreatorInfoBusy] = useState(false);
   const [ttDraft, setTtDraft] = useState<EditorClipTiktokSyndication>(() =>
-    clip ? defaultTiktokBranch(clip) : { enabled: false, options: {} },
+    clip ? defaultTiktokBranch(clip, syndicationTiktokDefaultEnabled) : { enabled: false, options: {} },
   );
 
   const loadStatus = useCallback(async () => {
@@ -233,13 +281,25 @@ export function EditorSyndicationModal({
 
   useEffect(() => {
     if (isOpen && clip) {
-      setYtDraft(defaultYoutubeBranch(clip));
-      setTwDraft(defaultTwitterBranch(clip));
-      setFbDraft(defaultFacebookBranch(clip));
-      setIgDraft(defaultInstagramBranch(clip));
-      setTtDraft(defaultTiktokBranch(clip));
+      setYtDraft(defaultYoutubeBranch(clip, syndicationYoutubeDefaultEnabled));
+      setTwDraft(defaultTwitterBranch(clip, syndicationTwitterDefaultEnabled));
+      setFbDraft(defaultFacebookBranch(clip, syndicationFacebookDefaultEnabled));
+      setIgDraft(defaultInstagramBranch(clip, syndicationInstagramDefaultEnabled));
+      setTtDraft(defaultTiktokBranch(clip, syndicationTiktokDefaultEnabled));
     }
-  }, [isOpen, clip?.id, clip?.syndication]);
+  }, [
+    isOpen,
+    clip?.id,
+    clip?.syndication,
+    clip?.title,
+    clip?.description,
+    clip?.tags,
+    syndicationYoutubeDefaultEnabled,
+    syndicationTwitterDefaultEnabled,
+    syndicationFacebookDefaultEnabled,
+    syndicationInstagramDefaultEnabled,
+    syndicationTiktokDefaultEnabled,
+  ]);
 
   const loadTiktokCreatorInfo = useCallback(async () => {
     const id = tenantId.trim();
@@ -491,7 +551,7 @@ export function EditorSyndicationModal({
   const handleSave = useCallback(() => {
     if (!clip || readOnly || !onSave) return;
     const next: EditorClipSyndication = {};
-    if (youtubeConnected && ytDraft.enabled) {
+    if (syndicationYoutubeEnabled && youtubeConnected && ytDraft.enabled) {
       next.youtube = {
         enabled: true,
         options: {
@@ -508,7 +568,7 @@ export function EditorSyndicationModal({
         upload: ytDraft.upload,
       };
     }
-    if (twitterConnected && twDraft.enabled) {
+    if (syndicationTwitterEnabled && twitterConnected && twDraft.enabled) {
       next.twitter = {
         enabled: true,
         options: {
@@ -517,7 +577,7 @@ export function EditorSyndicationModal({
         upload: twDraft.upload,
       };
     }
-    if (facebookConnected && facebookPageSelected && fbDraft.enabled) {
+    if (syndicationFacebookEnabled && facebookConnected && facebookPageSelected && fbDraft.enabled) {
       next.facebook = {
         enabled: true,
         options: {
@@ -527,7 +587,7 @@ export function EditorSyndicationModal({
         upload: fbDraft.upload,
       };
     }
-    if (instagramConnected && instagramAccountSelected && igDraft.enabled) {
+    if (syndicationInstagramEnabled && instagramConnected && instagramAccountSelected && igDraft.enabled) {
       const mediaType: EditorInstagramMediaType =
         igDraft.options.mediaType === "feed" ? "feed" : "reels";
       next.instagram = {
@@ -539,7 +599,7 @@ export function EditorSyndicationModal({
         upload: igDraft.upload,
       };
     }
-    if (tiktokConnected && ttDraft.enabled) {
+    if (syndicationTiktokEnabled && tiktokConnected && ttDraft.enabled) {
       next.tiktok = {
         enabled: true,
         options: {
@@ -576,6 +636,11 @@ export function EditorSyndicationModal({
     instagramConnected,
     instagramAccountSelected,
     tiktokConnected,
+    syndicationYoutubeEnabled,
+    syndicationTwitterEnabled,
+    syndicationFacebookEnabled,
+    syndicationInstagramEnabled,
+    syndicationTiktokEnabled,
     onOpenChange,
   ]);
 
@@ -585,6 +650,21 @@ export function EditorSyndicationModal({
   const description = clip.description?.trim() || "";
   const tags = normalizeEditorClipTagsList(clip.tags ?? []);
   const posters = clip.posters ?? [];
+  const enabledNetworks = {
+    youtube: syndicationYoutubeEnabled,
+    twitter: syndicationTwitterEnabled,
+    facebook: syndicationFacebookEnabled,
+    instagram: syndicationInstagramEnabled,
+    tiktok: syndicationTiktokEnabled,
+  };
+  const tabItems = [
+    enabledNetworks.youtube ? { id: "youtube", label: "YouTube", children: "YouTube" } : null,
+    enabledNetworks.twitter ? { id: "twitter", label: "Twitter / X", children: "Twitter / X" } : null,
+    enabledNetworks.facebook ? { id: "facebook", label: "Facebook", children: "Facebook" } : null,
+    enabledNetworks.instagram ? { id: "instagram", label: "Instagram", children: "Instagram" } : null,
+    enabledNetworks.tiktok ? { id: "tiktok", label: "TikTok", children: "TikTok" } : null,
+  ].filter(Boolean) as Array<{ id: string; label: string; children: string }>;
+  const defaultTabId = tabItems[0]?.id || "youtube";
 
   return (
     <ModalOverlay
@@ -617,19 +697,19 @@ export function EditorSyndicationModal({
 
             {statusError ? <p className="mt-3 text-xs text-error-primary">{statusError}</p> : null}
 
-            <Tabs defaultSelectedKey="youtube" className="mt-4 min-w-0 gap-3">
+            {tabItems.length === 0 ? (
+              <p className="mt-4 rounded-lg border border-secondary bg-secondary/40 px-3 py-2 text-xs text-tertiary">
+                Syndication is not enabled for this tenant. Enable at least one network in tenant settings.
+              </p>
+            ) : (
+            <Tabs defaultSelectedKey={defaultTabId} className="mt-4 min-w-0 gap-3">
               <Tabs.List
                 type="underline"
                 orientation="horizontal"
                 fullWidth
-                items={[
-                  { id: "youtube", label: "YouTube", children: "YouTube" },
-                  { id: "twitter", label: "Twitter / X", children: "Twitter / X" },
-                  { id: "facebook", label: "Facebook", children: "Facebook" },
-                  { id: "instagram", label: "Instagram", children: "Instagram" },
-                  { id: "tiktok", label: "TikTok", children: "TikTok" },
-                ]}
+                items={tabItems}
               />
+              {enabledNetworks.youtube ? (
               <Tabs.Panel id="youtube" className="pt-2">
                 {statusLoading ? (
                   <p className="text-sm text-tertiary">Loading connection status…</p>
@@ -895,6 +975,8 @@ export function EditorSyndicationModal({
                   </div>
                 )}
               </Tabs.Panel>
+              ) : null}
+              {enabledNetworks.twitter ? (
               <Tabs.Panel id="twitter" className="pt-2">
                 {statusLoading ? (
                   <p className="text-sm text-tertiary">Loading connection status…</p>
@@ -980,6 +1062,8 @@ export function EditorSyndicationModal({
                   </div>
                 )}
               </Tabs.Panel>
+              ) : null}
+              {enabledNetworks.facebook ? (
               <Tabs.Panel id="facebook" className="pt-2">
                 {statusLoading ? (
                   <p className="text-sm text-tertiary">Loading connection status…</p>
@@ -1121,6 +1205,8 @@ export function EditorSyndicationModal({
                   </div>
                 )}
               </Tabs.Panel>
+              ) : null}
+              {enabledNetworks.instagram ? (
               <Tabs.Panel id="instagram" className="pt-2">
                 {statusLoading ? (
                   <p className="text-sm text-tertiary">Loading connection status…</p>
@@ -1271,6 +1357,8 @@ export function EditorSyndicationModal({
                   </div>
                 )}
               </Tabs.Panel>
+              ) : null}
+              {enabledNetworks.tiktok ? (
               <Tabs.Panel id="tiktok" className="pt-2">
                 {statusLoading ? (
                   <p className="text-sm text-tertiary">Loading connection status…</p>
@@ -1434,7 +1522,9 @@ export function EditorSyndicationModal({
                   </div>
                 )}
               </Tabs.Panel>
+              ) : null}
             </Tabs>
+            )}
 
             <div className="mt-6 flex justify-end gap-2">
               <button
@@ -1446,11 +1536,11 @@ export function EditorSyndicationModal({
               </button>
               {readOnly ||
               !(
-                youtubeConnected ||
-                twitterConnected ||
-                (facebookConnected && facebookPageSelected) ||
-                (instagramConnected && instagramAccountSelected) ||
-                tiktokConnected
+                (syndicationYoutubeEnabled && youtubeConnected) ||
+                (syndicationTwitterEnabled && twitterConnected) ||
+                (syndicationFacebookEnabled && facebookConnected && facebookPageSelected) ||
+                (syndicationInstagramEnabled && instagramConnected && instagramAccountSelected) ||
+                (syndicationTiktokEnabled && tiktokConnected)
               ) ||
               !onSave ? null : (
                 <button

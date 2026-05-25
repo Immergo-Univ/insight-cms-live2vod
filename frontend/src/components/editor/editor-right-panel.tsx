@@ -84,14 +84,24 @@ interface EditorRightPanelProps {
   syndicationTenantId?: string;
   /** When true with tenant id, show per-clip syndication for YouTube. */
   syndicationYoutubeEnabled?: boolean;
+  /** When true, new clips start with YouTube syndication enabled. */
+  syndicationYoutubeDefaultEnabled?: boolean;
   /** When true with tenant id, show per-clip syndication for X / Twitter. */
   syndicationTwitterEnabled?: boolean;
+  /** When true, new clips start with X syndication enabled. */
+  syndicationTwitterDefaultEnabled?: boolean;
   /** When true with tenant id, show per-clip syndication for Facebook. */
   syndicationFacebookEnabled?: boolean;
+  /** When true, new clips start with Facebook syndication enabled. */
+  syndicationFacebookDefaultEnabled?: boolean;
   /** When true with tenant id, show per-clip syndication for Instagram. */
   syndicationInstagramEnabled?: boolean;
+  /** When true, new clips start with Instagram syndication enabled. */
+  syndicationInstagramDefaultEnabled?: boolean;
   /** When true with tenant id, show per-clip syndication for TikTok. */
   syndicationTiktokEnabled?: boolean;
+  /** When true, new clips start with TikTok syndication enabled. */
+  syndicationTiktokDefaultEnabled?: boolean;
   /** Append a frame bookmark at the current playhead for this sub-clip. */
   onCaptureClipPoster?: (clipId: string) => void;
   onAddTextWidget?: (clipId: string) => void;
@@ -142,10 +152,15 @@ export function EditorRightPanel({
   onToggleClipSubtitle,
   syndicationTenantId = "",
   syndicationYoutubeEnabled = false,
+  syndicationYoutubeDefaultEnabled = false,
   syndicationTwitterEnabled = false,
+  syndicationTwitterDefaultEnabled = false,
   syndicationFacebookEnabled = false,
+  syndicationFacebookDefaultEnabled = false,
   syndicationInstagramEnabled = false,
+  syndicationInstagramDefaultEnabled = false,
   syndicationTiktokEnabled = false,
+  syndicationTiktokDefaultEnabled = false,
   onCaptureClipPoster,
   onAddTextWidget,
   onAddImageWidgetFromFile,
@@ -396,6 +411,16 @@ export function EditorRightPanel({
         clipUrl={clipUrl}
         channelId={channelId}
         readOnly={syndicationReadOnly}
+        syndicationYoutubeEnabled={syndicationYoutubeEnabled}
+        syndicationYoutubeDefaultEnabled={syndicationYoutubeDefaultEnabled}
+        syndicationTwitterEnabled={syndicationTwitterEnabled}
+        syndicationTwitterDefaultEnabled={syndicationTwitterDefaultEnabled}
+        syndicationFacebookEnabled={syndicationFacebookEnabled}
+        syndicationFacebookDefaultEnabled={syndicationFacebookDefaultEnabled}
+        syndicationInstagramEnabled={syndicationInstagramEnabled}
+        syndicationInstagramDefaultEnabled={syndicationInstagramDefaultEnabled}
+        syndicationTiktokEnabled={syndicationTiktokEnabled}
+        syndicationTiktokDefaultEnabled={syndicationTiktokDefaultEnabled}
         onSave={onUpdateClipSyndication}
       />
 

@@ -1,21 +1,27 @@
 export type TenantDto = {
   tenantId: string;
   subtitlesEnabled: boolean;
+  subtitlesDefaultEnabled?: boolean;
   syndicationYoutubeEnabled?: boolean;
+  syndicationYoutubeDefaultEnabled?: boolean;
   syndicationYoutubeConnected?: boolean;
   syndicationTwitterEnabled?: boolean;
+  syndicationTwitterDefaultEnabled?: boolean;
   syndicationTwitterConnected?: boolean;
   syndicationFacebookEnabled?: boolean;
+  syndicationFacebookDefaultEnabled?: boolean;
   syndicationFacebookConnected?: boolean;
   facebookPageId?: string | null;
   facebookPageName?: string | null;
   facebookPageSelected?: boolean;
   syndicationInstagramEnabled?: boolean;
+  syndicationInstagramDefaultEnabled?: boolean;
   syndicationInstagramConnected?: boolean;
   instagramBusinessAccountId?: string | null;
   instagramUsername?: string | null;
   instagramAccountSelected?: boolean;
   syndicationTiktokEnabled?: boolean;
+  syndicationTiktokDefaultEnabled?: boolean;
   syndicationTiktokConnected?: boolean;
   tiktokUsername?: string | null;
   timezoneLastSeen: string | null;

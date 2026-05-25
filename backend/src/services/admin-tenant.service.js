@@ -125,20 +125,36 @@ export async function adminUpdateTenant(tenantId, body) {
   const row = await Tenant.findByPk(String(tenantId || "").trim());
   if (!row) return null;
   if (body.subtitlesEnabled !== undefined) row.subtitlesEnabled = Boolean(body.subtitlesEnabled);
+  if (body.subtitlesDefaultEnabled !== undefined) row.subtitlesDefaultEnabled = Boolean(body.subtitlesDefaultEnabled);
   if (body.syndicationYoutubeEnabled !== undefined) {
     row.syndicationYoutubeEnabled = Boolean(body.syndicationYoutubeEnabled);
+  }
+  if (body.syndicationYoutubeDefaultEnabled !== undefined) {
+    row.syndicationYoutubeDefaultEnabled = Boolean(body.syndicationYoutubeDefaultEnabled);
   }
   if (body.syndicationTwitterEnabled !== undefined) {
     row.syndicationTwitterEnabled = Boolean(body.syndicationTwitterEnabled);
   }
+  if (body.syndicationTwitterDefaultEnabled !== undefined) {
+    row.syndicationTwitterDefaultEnabled = Boolean(body.syndicationTwitterDefaultEnabled);
+  }
   if (body.syndicationFacebookEnabled !== undefined) {
     row.syndicationFacebookEnabled = Boolean(body.syndicationFacebookEnabled);
+  }
+  if (body.syndicationFacebookDefaultEnabled !== undefined) {
+    row.syndicationFacebookDefaultEnabled = Boolean(body.syndicationFacebookDefaultEnabled);
   }
   if (body.syndicationInstagramEnabled !== undefined) {
     row.syndicationInstagramEnabled = Boolean(body.syndicationInstagramEnabled);
   }
+  if (body.syndicationInstagramDefaultEnabled !== undefined) {
+    row.syndicationInstagramDefaultEnabled = Boolean(body.syndicationInstagramDefaultEnabled);
+  }
   if (body.syndicationTiktokEnabled !== undefined) {
     row.syndicationTiktokEnabled = Boolean(body.syndicationTiktokEnabled);
+  }
+  if (body.syndicationTiktokDefaultEnabled !== undefined) {
+    row.syndicationTiktokDefaultEnabled = Boolean(body.syndicationTiktokDefaultEnabled);
   }
   if (body.timezoneLastSeen !== undefined) row.timezoneLastSeen = body.timezoneLastSeen ? String(body.timezoneLastSeen).slice(0, 128) : null;
   if (body.metadata !== undefined) {
