@@ -123,6 +123,7 @@ export async function tryTiktokSyndicationAfterJobCompleted(jobId) {
   try {
     const result = await uploadVideoToTiktok({
       tenantId: job.tenantId,
+      jobId,
       videoUrl,
       caption,
       privacyLevel: privacyLevel || adminDefaults.defaultPrivacyLevel,

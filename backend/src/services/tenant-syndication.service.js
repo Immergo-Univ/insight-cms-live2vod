@@ -11,6 +11,7 @@ import {
   getResolvedTiktokOAuth,
   getTiktokSyndicationDefaults,
 } from "./admin-settings.service.js";
+import { buildSignedTiktokMediaProxyUrl } from "./tiktok-media-proxy.service.js";
 
 function models() {
   const s = getSequelize();
@@ -1730,6 +1731,7 @@ async function waitForTiktokPublishComplete(publishId, accessToken) {
  *
  * @param {object} opts
  * @param {string} opts.tenantId
+ * @param {string} [opts.jobId]
  * @param {string} opts.videoUrl HTTP(S) URL to MP4 (must be verified domain prefix in TikTok portal)
  * @param {string} opts.caption
  * @param {string} opts.privacyLevel
@@ -1742,6 +1744,7 @@ async function waitForTiktokPublishComplete(publishId, accessToken) {
 export async function uploadVideoToTiktok(opts) {
   const {
     tenantId,
+    jobId = "",
     videoUrl,
     caption,
     privacyLevel,
@@ -1767,6 +1770,12 @@ export async function uploadVideoToTiktok(opts) {
   if (!privacy || !options.includes(privacy)) {
     privacy = options.includes("SELF_ONLY") ? "SELF_ONLY" : String(options[0] || "SELF_ONLY");
   }
+  const proxyUrl = await buildSignedTiktokMediaProxyUrl({
+    tenantId,
+    jobId: String(jobId || "").trim(),
+    ttlSeconds: 90 * 60,
+  });
+  const effectiveVideoUrl = proxyUrl || String(videoUrl).trim();
 
   const initJson = await tiktokApiPost(access, "/v2/post/publish/video/init/", {
     post_info: {
@@ -1780,7 +1789,7 @@ export async function uploadVideoToTiktok(opts) {
     },
     source_info: {
       source: "PULL_FROM_URL",
-      video_url: String(videoUrl).trim(),
+      video_url: effectiveVideoUrl,
     },
   });
 

@@ -13,6 +13,7 @@ import { adsRouter } from "./controllers/ads.controller.js";
 import { authRouter } from "./controllers/auth.controller.js";
 import { vodRouter } from "./controllers/vod.controller.js";
 import { publicTranscriptNewsRouter } from "./controllers/public-transcript-news.controller.js";
+import { publicTiktokMediaRouter } from "./controllers/public-tiktok-media.controller.js";
 import { encoderCallbackRouter } from "./controllers/encoder-callback.controller.js";
 import { tenantsRouter } from "./controllers/tenants.controller.js";
 import { adminRouter } from "./routes/admin.routes.js";
@@ -114,6 +115,7 @@ app.use("/api/ads", adsRouter);
 app.use("/api/vod", vodRouter);
 app.use("/api/tenants", tenantsRouter);
 app.use("/api/public", publicTranscriptNewsRouter);
+app.use("/tiktok", publicTiktokMediaRouter);
 app.use("/api/encoder", encoderCallbackRouter);
 app.use("/api/admin", adminRouter);
 
