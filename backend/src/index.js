@@ -63,11 +63,23 @@ async function readTiktokVerificationCached() {
   return tiktokVerificationCache;
 }
 
+function normalizePathForMatch(pathname) {
+  if (!pathname) return "/";
+  const trimmed = String(pathname).trim();
+  if (!trimmed) return "/";
+  const withLeadingSlash = trimmed.startsWith("/") ? trimmed : `/${trimmed}`;
+  const compact = withLeadingSlash.replace(/\/{2,}/g, "/");
+  const noTrailingSlash = compact.replace(/\/+$/g, "");
+  return noTrailingSlash || "/";
+}
+
 app.use(async (req, res, next) => {
   if (req.method !== "GET" && req.method !== "HEAD") return next();
   try {
     const resolved = await readTiktokVerificationCached();
-    if (resolved.path && resolved.content && req.path === resolved.path) {
+    const requestPath = normalizePathForMatch(req.path);
+    const configuredPath = normalizePathForMatch(resolved.path);
+    if (configuredPath && resolved.content && requestPath === configuredPath) {
       res.setHeader("Content-Type", resolved.contentType);
       if (req.method === "HEAD") return res.status(200).end();
       return res.status(200).send(resolved.content);
