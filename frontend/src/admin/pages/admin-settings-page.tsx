@@ -75,6 +75,7 @@ export function AdminSettingsPage() {
     ttDefaultPrivacyLevel: string;
     ttDefaultCaption: string;
     ttDomainVerificationPath: string;
+    ttDomainVerificationFileName: string;
     ttDomainVerificationFileContent: string;
     ttDomainVerificationContentType: string;
   }>();
@@ -130,6 +131,8 @@ export function AdminSettingsPage() {
         ttDefaultCaption: typeof tt?.defaultCaption === "string" ? tt.defaultCaption : "",
         ttDomainVerificationPath:
           typeof tt?.domainVerificationPath === "string" ? tt.domainVerificationPath : "",
+        ttDomainVerificationFileName:
+          typeof tt?.domainVerificationFileName === "string" ? tt.domainVerificationFileName : "",
         ttDomainVerificationFileContent:
           typeof tt?.domainVerificationFileContent === "string" ? tt.domainVerificationFileContent : "",
         ttDomainVerificationContentType:
@@ -204,6 +207,7 @@ export function AdminSettingsPage() {
         defaultPrivacyLevel: asTrimmedString(v.ttDefaultPrivacyLevel) || "SELF_ONLY",
         defaultCaption: asTrimmedString(v.ttDefaultCaption),
         domainVerificationPath: asTrimmedString(v.ttDomainVerificationPath),
+        domainVerificationFileName: asTrimmedString(v.ttDomainVerificationFileName),
         domainVerificationFileContent: v.ttDomainVerificationFileContent ?? "",
         domainVerificationContentType:
           asTrimmedString(v.ttDomainVerificationContentType) || "text/plain; charset=utf-8",
@@ -250,6 +254,7 @@ export function AdminSettingsPage() {
           const normalizedName = file.name.replace(/^\/+/, "");
           form.setFieldValue("ttDomainVerificationPath", `/${normalizedName}`);
         }
+        form.setFieldValue("ttDomainVerificationFileName", file.name.replace(/^\/+/, ""));
         form.setFieldValue("ttDomainVerificationFileContent", text);
         if (!asTrimmedString(form.getFieldValue("ttDomainVerificationContentType"))) {
           form.setFieldValue("ttDomainVerificationContentType", "text/plain; charset=utf-8");
@@ -620,6 +625,12 @@ export function AdminSettingsPage() {
                               label={t("settings.ttDomainVerificationContentType")}
                             >
                               <Input placeholder="text/plain; charset=utf-8" />
+                            </Form.Item>
+                            <Form.Item
+                              name="ttDomainVerificationFileName"
+                              label={t("settings.ttDomainVerificationFileName")}
+                            >
+                              <Input placeholder="tiktok-verification.txt" />
                             </Form.Item>
                             <Form.Item label={t("settings.ttDomainVerificationUpload")}>
                               <Upload {...tiktokVerificationUploadProps}>

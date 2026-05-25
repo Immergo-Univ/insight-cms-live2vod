@@ -192,6 +192,7 @@
     "ttDomainVerificationPath": "Public path for TikTok domain verification file",
     "ttDomainVerificationPathError": "The path must start with '/' (example: /.well-known/tiktok-domain-verification.txt).",
     "ttDomainVerificationContentType": "Verification file content type",
+    "ttDomainVerificationFileName": "Verification file name (for URL prefix mode)",
     "ttDomainVerificationUpload": "Upload verification file (.txt)",
     "ttDomainVerificationUploadCta": "Load file from disk",
     "ttDomainVerificationUploadLoaded": "Verification file loaded: {{fileName}}",

@@ -37,6 +37,7 @@ const TIKTOK_FILE_CACHE_MS = 10000;
 let tiktokVerificationCache = {
   expiresAt: 0,
   path: "",
+  fileName: "",
   content: "",
   contentType: "text/plain; charset=utf-8",
 };
@@ -49,6 +50,7 @@ async function readTiktokVerificationCached() {
     tiktokVerificationCache = {
       expiresAt: now + TIKTOK_FILE_CACHE_MS,
       path: String(resolved.path || "").trim(),
+      fileName: String(resolved.fileName || "").trim(),
       content: String(resolved.content || ""),
       contentType: String(resolved.contentType || "").trim() || "text/plain; charset=utf-8",
     };
@@ -56,6 +58,7 @@ async function readTiktokVerificationCached() {
     tiktokVerificationCache = {
       expiresAt: now + TIKTOK_FILE_CACHE_MS,
       path: "",
+      fileName: "",
       content: "",
       contentType: "text/plain; charset=utf-8",
     };
@@ -73,13 +76,25 @@ function normalizePathForMatch(pathname) {
   return noTrailingSlash || "/";
 }
 
+function buildVerificationFilePath(basePath, fileName) {
+  const cleanFileName = String(fileName || "").trim().replace(/^\/+/, "");
+  if (!cleanFileName) return "";
+  const cleanBase = String(basePath || "").trim();
+  if (!cleanBase) return "";
+  if (cleanBase.endsWith("/")) return `${cleanBase}${cleanFileName}`;
+  return `${cleanBase}/${cleanFileName}`;
+}
+
 app.use(async (req, res, next) => {
   if (req.method !== "GET" && req.method !== "HEAD") return next();
   try {
     const resolved = await readTiktokVerificationCached();
     const requestPath = normalizePathForMatch(req.path);
     const configuredPath = normalizePathForMatch(resolved.path);
-    if (configuredPath && resolved.content && requestPath === configuredPath) {
+    const configuredFilePath = normalizePathForMatch(buildVerificationFilePath(resolved.path, resolved.fileName));
+    const shouldServeFromDirectPath = Boolean(configuredPath && requestPath === configuredPath);
+    const shouldServeFromPrefixPath = Boolean(configuredFilePath && requestPath === configuredFilePath);
+    if (resolved.content && (shouldServeFromDirectPath || shouldServeFromPrefixPath)) {
       res.setHeader("Content-Type", resolved.contentType);
       if (req.method === "HEAD") return res.status(200).end();
       return res.status(200).send(resolved.content);

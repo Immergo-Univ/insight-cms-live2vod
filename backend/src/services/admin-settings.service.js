@@ -29,6 +29,7 @@ const DEFAULT_SETTINGS = {
       defaultCaption: "",
       defaultPrivacyLevel: "SELF_ONLY",
       domainVerificationPath: "",
+      domainVerificationFileName: "",
       domainVerificationFileContent: "",
       domainVerificationContentType: "text/plain; charset=utf-8",
     },
@@ -45,6 +46,16 @@ function normalizePublicFilePath(rawPath) {
   if (!noQuery) return "";
   const withLeadingSlash = noQuery.startsWith("/") ? noQuery : `/${noQuery}`;
   return withLeadingSlash.replace(/\/{2,}/g, "/");
+}
+
+/**
+ * @param {string} rawName
+ */
+function normalizeVerificationFileName(rawName) {
+  const trimmed = String(rawName || "").trim();
+  if (!trimmed) return "";
+  const withoutPath = trimmed.split("/").pop() || "";
+  return withoutPath.trim();
 }
 
 /**
@@ -177,6 +188,9 @@ function sanitizeTiktokDomainVerification(incoming) {
   if (!tt || typeof tt !== "object" || Array.isArray(tt)) return;
   if ("domainVerificationPath" in tt) {
     tt.domainVerificationPath = normalizePublicFilePath(String(tt.domainVerificationPath ?? ""));
+  }
+  if ("domainVerificationFileName" in tt) {
+    tt.domainVerificationFileName = normalizeVerificationFileName(String(tt.domainVerificationFileName ?? ""));
   }
   if ("domainVerificationFileContent" in tt) {
     tt.domainVerificationFileContent = String(tt.domainVerificationFileContent ?? "");
@@ -367,14 +381,16 @@ export async function getTiktokSyndicationDefaults() {
 }
 
 /**
- * @returns {Promise<{ path: string; content: string; contentType: string }>}
+ * @returns {Promise<{ path: string; fileName: string; content: string; contentType: string }>}
  */
 export async function getResolvedTiktokDomainVerificationFile() {
   const fromEnvPath = normalizePublicFilePath(config.tiktok.domainVerificationPath);
+  const fromEnvFileName = normalizeVerificationFileName(config.tiktok.domainVerificationFileName);
   const fromEnvContent = String(config.tiktok.domainVerificationFileContent || "");
   const fromEnvContentType = String(config.tiktok.domainVerificationContentType || "").trim() || "text/plain; charset=utf-8";
   const fallback = {
     path: fromEnvPath,
+    fileName: fromEnvFileName,
     content: fromEnvContent,
     contentType: fromEnvContentType,
   };
@@ -386,10 +402,12 @@ export async function getResolvedTiktokDomainVerificationFile() {
     const ttRaw = /** @type {Record<string, unknown>} */ (synd).tiktok;
     const tt = ttRaw && typeof ttRaw === "object" && !Array.isArray(ttRaw) ? ttRaw : {};
     const dbPath = normalizePublicFilePath(String(tt.domainVerificationPath ?? ""));
+    const dbFileName = normalizeVerificationFileName(String(tt.domainVerificationFileName ?? ""));
     const dbContent = String(tt.domainVerificationFileContent ?? "");
     const dbContentType = String(tt.domainVerificationContentType ?? "").trim();
     return {
       path: dbPath || fallback.path,
+      fileName: dbFileName || fallback.fileName,
       content: dbContent || fallback.content,
       contentType: dbContentType || fallback.contentType,
     };
