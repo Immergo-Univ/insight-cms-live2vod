@@ -1,6 +1,7 @@
 import { useMemo, type ReactNode } from "react";
 import { Link, Outlet, useLocation, useNavigate } from "react-router";
 import { Avatar, Dropdown, Layout, Menu, Select, Typography } from "antd";
+import type { MenuProps } from "antd";
 import {
   AppstoreOutlined,
   TeamOutlined,
@@ -24,7 +25,7 @@ export function AdminShell() {
   const { user, logout, can } = useAdminAuth();
 
   const menuItems = useMemo(() => {
-    const items: { key: string; label: ReactNode }[] = [];
+    const items: NonNullable<MenuProps["items"]> = [];
     if (can("clips", "view_item")) {
       items.push({
         key: "/admin/clips",
@@ -47,7 +48,7 @@ export function AdminShell() {
       });
     }
 
-    const configItems: { key: string; label: ReactNode; icon?: ReactNode }[] = [];
+    const configItems: NonNullable<MenuProps["items"]> = [];
     configItems.push({
       key: "/admin/profile",
       label: <Link to="/admin/profile">{t("nav.profile")}</Link>,
