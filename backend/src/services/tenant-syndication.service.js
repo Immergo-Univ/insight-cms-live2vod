@@ -288,8 +288,10 @@ export async function uploadVideoToYoutube(opts) {
 
 const TWITTER_AUTH = "https://x.com/i/oauth2/authorize";
 const TWITTER_TOKEN = "https://api.twitter.com/2/oauth2/token";
-// OAuth 2.0 user tokens require the v2 media upload endpoint (v1.1 returns 403 with empty body).
-const TWITTER_UPLOAD = "https://api.x.com/2/media/upload";
+// X deprecated the command=INIT/APPEND/FINALIZE query on /2/media/upload (May 2025).
+// New flow uses dedicated endpoints; the legacy URL stays only for GET status polling.
+const TWITTER_UPLOAD_BASE = "https://api.x.com/2/media/upload";
+const TWITTER_UPLOAD_INIT = `${TWITTER_UPLOAD_BASE}/initialize`;
 const TWITTER_TWEETS = "https://api.x.com/2/tweets";
 const TWITTER_SCOPES = ["tweet.read", "tweet.write", "users.read", "offline.access", "media.write"].join(" ");
 
@@ -581,15 +583,18 @@ export async function uploadVideoToTwitter(opts) {
   const totalBytes = buf.length;
   if (totalBytes < 1) throw new Error("Encoded video is empty");
 
-  const initBody = new FormData();
-  initBody.set("command", "INIT");
-  initBody.set("total_bytes", String(totalBytes));
-  initBody.set("media_type", "video/mp4");
-  initBody.set("media_category", "tweet_video");
-  const initRes = await fetch(TWITTER_UPLOAD, {
+  // Step 1 — INIT: dedicated endpoint, JSON body, returns data.id
+  const initRes = await fetch(TWITTER_UPLOAD_INIT, {
     method: "POST",
-    headers: { Authorization: `Bearer ${access}` },
-    body: initBody,
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${access}`,
+    },
+    body: JSON.stringify({
+      media_type: "video/mp4",
+      total_bytes: totalBytes,
+      media_category: "tweet_video",
+    }),
   });
   const initText = await initRes.text();
   let initJson;
@@ -604,16 +609,16 @@ export async function uploadVideoToTwitter(opts) {
   const mediaId = twitterMediaUploadId(initJson);
   if (!mediaId) throw new Error("Twitter media INIT returned no media_id");
 
-  const chunkSize = 2 * 1024 * 1024;
+  // Step 2 — APPEND: per-media-id endpoint, multipart segments. X recommends ≤5 MB; use 4 MB for safety.
+  const chunkSize = 4 * 1024 * 1024;
   let segmentIndex = 0;
+  const appendUrl = `${TWITTER_UPLOAD_BASE}/${encodeURIComponent(String(mediaId))}/append`;
   for (let offset = 0; offset < totalBytes; offset += chunkSize) {
     const chunk = buf.subarray(offset, Math.min(offset + chunkSize, totalBytes));
     const fd = new FormData();
-    fd.set("command", "APPEND");
-    fd.set("media_id", String(mediaId));
     fd.set("segment_index", String(segmentIndex));
     fd.set("media", new Blob([chunk]), "blob");
-    const apRes = await fetch(TWITTER_UPLOAD, {
+    const apRes = await fetch(appendUrl, {
       method: "POST",
       headers: { Authorization: `Bearer ${access}` },
       body: fd,
@@ -625,27 +630,25 @@ export async function uploadVideoToTwitter(opts) {
     segmentIndex += 1;
   }
 
-  const finBody = new FormData();
-  finBody.set("command", "FINALIZE");
-  finBody.set("media_id", String(mediaId));
-  const finRes = await fetch(TWITTER_UPLOAD, {
+  // Step 3 — FINALIZE: per-media-id endpoint, no body required.
+  const finalizeUrl = `${TWITTER_UPLOAD_BASE}/${encodeURIComponent(String(mediaId))}/finalize`;
+  const finRes = await fetch(finalizeUrl, {
     method: "POST",
     headers: { Authorization: `Bearer ${access}` },
-    body: finBody,
   });
   const finJson = await finRes.json().catch(() => ({}));
   if (!finRes.ok) {
     throw new Error(`Twitter media FINALIZE failed: ${finRes.status} ${JSON.stringify(finJson).slice(0, 400)}`);
   }
 
+  // Step 4 — STATUS poll: GET /2/media/upload?media_id=...
   const processing = twitterMediaProcessingInfo(finJson);
   if (processing && processing.state && processing.state !== "succeeded") {
     const deadline = Date.now() + 5 * 60 * 1000;
     let waitMs = parseInt(String(processing.check_after_secs || "2"), 10) * 1000 || 2000;
     while (Date.now() < deadline) {
       await new Promise((r) => setTimeout(r, Math.min(waitMs, 15000)));
-      const statusUrl = new URL(TWITTER_UPLOAD);
-      statusUrl.searchParams.set("command", "STATUS");
+      const statusUrl = new URL(TWITTER_UPLOAD_BASE);
       statusUrl.searchParams.set("media_id", String(mediaId));
       const stRes = await fetch(statusUrl, {
         method: "GET",
