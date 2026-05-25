@@ -896,6 +896,13 @@ export function EditorClipsList({
             clipVodEncodeErrors[c.id] ?? (encodeFailed ? vodJob?.error ?? "Encode failed" : undefined);
           const encodedOutputUrl = pickLatestCompletedOutputUrlForEditorClip(vodJobs, c.id);
           const encodedPreviewLabel = c.title?.trim() || `Clip ${c.order}`;
+          const syndicationCount = [
+            c.syndication?.youtube?.enabled === true,
+            c.syndication?.twitter?.enabled === true,
+            c.syndication?.facebook?.enabled === true,
+            c.syndication?.instagram?.enabled === true,
+            c.syndication?.tiktok?.enabled === true,
+          ].filter(Boolean).length;
           return (
             <li
               key={c.id}
@@ -1312,7 +1319,7 @@ export function EditorClipsList({
                             : "Syndication"
                         }
                         className={cx(
-                          "flex size-8 shrink-0 items-center justify-center rounded-full border border-secondary bg-primary text-fg-quaternary transition-colors hover:bg-secondary hover:text-fg-secondary",
+                          "relative flex size-8 shrink-0 items-center justify-center rounded-full border border-secondary bg-primary text-fg-quaternary transition-colors hover:bg-secondary hover:text-fg-secondary",
                           encodeActive
                             ? "cursor-not-allowed opacity-45 hover:bg-primary"
                             : "cursor-pointer",
@@ -1320,6 +1327,14 @@ export function EditorClipsList({
                         aria-label="Syndication"
                       >
                         <Share01 className="size-3.5" />
+                        <span
+                          className={cx(
+                            "pointer-events-none absolute -top-1 -right-1 flex min-h-4 min-w-4 items-center justify-center rounded-full px-1 text-[9px] font-bold leading-none ring-2 ring-primary",
+                            syndicationCount > 0 ? "bg-brand-solid text-white" : "bg-secondary text-tertiary",
+                          )}
+                        >
+                          {syndicationCount}
+                        </span>
                       </button>
                     ) : null}
                     <button
