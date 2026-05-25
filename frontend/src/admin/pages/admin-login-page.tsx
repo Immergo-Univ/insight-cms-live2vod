@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 import { useAdminAuth } from "@/admin/admin-auth-context";
 
 const primary = "#0d9488";
+const adminBrandLogoSrc = "/immergo-admin-logo.png";
 
 export function AdminLoginPage() {
   const { t } = useTranslation("admin");
@@ -32,7 +33,7 @@ export function AdminLoginPage() {
         }}
         className="max-lg:hidden"
       >
-        <img src="/logo.png" alt="" style={{ width: 120, height: "auto" }} />
+        <img src={adminBrandLogoSrc} alt="Immergo" style={{ width: 120, height: "auto" }} />
         <Typography.Title level={2} style={{ color: "#fff", margin: 0 }}>
           {t("login.title")}
         </Typography.Title>
@@ -49,7 +50,7 @@ export function AdminLoginPage() {
       <div style={{ flex: 1, background: "#fff", display: "flex", alignItems: "center", justifyContent: "center", padding: 32 }}>
         <div style={{ width: "100%", maxWidth: 400 }}>
           <div style={{ textAlign: "center", marginBottom: 32 }}>
-            <img src="/logo.png" alt="" style={{ width: 72, marginBottom: 16 }} />
+            <img src={adminBrandLogoSrc} alt="Immergo" style={{ width: 72, marginBottom: 16 }} />
             <Typography.Title level={3} style={{ margin: 0 }}>
               {t("login.title")}
             </Typography.Title>

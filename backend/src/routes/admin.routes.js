@@ -192,6 +192,16 @@ adminSecured.get("/tenants/:tenantId", requireAdminPermission("tenants", "view")
   }
 });
 
+adminSecured.get("/tenants/:tenantId/dashboard", requireAdminPermission("tenants", "view"), async (req, res) => {
+  try {
+    const row = await adminTenants.adminGetTenantDashboard(req.params.tenantId);
+    if (!row) return res.status(404).json({ error: "Not found" });
+    res.json(row);
+  } catch (e) {
+    res.status(500).json({ error: e instanceof Error ? e.message : String(e) });
+  }
+});
+
 adminSecured.patch("/tenants/:tenantId", requireAdminPermission("tenants", "edit"), async (req, res) => {
   try {
     const row = await adminTenants.adminUpdateTenant(req.params.tenantId, req.body || {});
