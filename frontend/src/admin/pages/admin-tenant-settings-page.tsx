@@ -3,6 +3,7 @@ import { App, Button, Card, Col, Form, Input, Popconfirm, Row, Space, Spin, Stat
 import type { ColumnsType } from "antd/es/table";
 import { useNavigate, useParams } from "react-router";
 import { useTranslation } from "react-i18next";
+import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { getAdminClient } from "@/admin/admin-api";
 import { useAdminAuth } from "@/admin/admin-auth-context";
 import {
@@ -287,6 +288,14 @@ export function AdminTenantSettingsPage() {
     return Math.max(...dashboard.dailyEncodeCounts.map((d) => Number(d.count) || 0), 0);
   }, [dashboard]);
 
+  const dailyEncodeChartData = useMemo(() => {
+    if (!dashboard?.dailyEncodeCounts?.length) return [];
+    return dashboard.dailyEncodeCounts.map((d) => ({
+      ...d,
+      dayLabel: d.date.slice(5),
+    }));
+  }, [dashboard]);
+
   const formatUsd = (value: number) => `$${Number(value || 0).toFixed(4)}`;
   const formatTrend = (value: number) => `${value >= 0 ? "+" : ""}${Number(value || 0).toFixed(2)}%`;
 
@@ -338,7 +347,7 @@ export function AdminTenantSettingsPage() {
                       <Row gutter={[16, 16]}>
                         <Col xs={24} md={12} xl={8}>
                           <Card>
-                            <Statistic title="1) Monthly clips" value={dashboard?.monthlyClips?.current || 0} />
+                            <Statistic title="Monthly clips" value={dashboard?.monthlyClips?.current || 0} />
                             <Typography.Text type="secondary">
                               Trend vs previous month: {formatTrend(dashboard?.monthlyClips?.trendPercent || 0)}
                             </Typography.Text>
@@ -346,7 +355,7 @@ export function AdminTenantSettingsPage() {
                         </Col>
                         <Col xs={24} md={12} xl={8}>
                           <Card>
-                            <Statistic title="4) AI token usage (month)" value={dashboard?.aiTokenUsage?.totalTokens || 0} />
+                            <Statistic title="AI token usage (month)" value={dashboard?.aiTokenUsage?.totalTokens || 0} />
                             <Typography.Text type="secondary">
                               Estimated cost: {formatUsd(dashboard?.aiTokenUsage?.estimatedCostUsd || 0)}
                             </Typography.Text>
@@ -355,7 +364,7 @@ export function AdminTenantSettingsPage() {
                         <Col xs={24} md={12} xl={8}>
                           <Card>
                             <Statistic
-                              title="5) Encoded minutes (month)"
+                              title="Encoded minutes (month)"
                               value={dashboard?.encodeUsage?.minutesCurrent || 0}
                               precision={2}
                             />
@@ -370,7 +379,7 @@ export function AdminTenantSettingsPage() {
                         </Col>
                       </Row>
 
-                      <Card title="2) Syndicated videos by social network (month)">
+                      <Card title="Syndicated videos by social network (month)">
                         <Table
                           size="small"
                           pagination={false}
@@ -382,7 +391,7 @@ export function AdminTenantSettingsPage() {
                         />
                       </Card>
 
-                      <Card title="3) API usage cost by social network (month)">
+                      <Card title="API usage cost by social network (month)">
                         <Table
                           size="small"
                           pagination={false}
@@ -408,33 +417,38 @@ export function AdminTenantSettingsPage() {
                         />
                       </Card>
 
-                      <Card title="6) Daily encodes (last 30 days)">
-                        <Table
-                          size="small"
-                          pagination={false}
-                          dataSource={dashboard?.dailyEncodeCounts || []}
-                          rowKey={(r) => r.date}
-                          columns={[
-                            { title: "Date (UTC)", dataIndex: "date", key: "date", width: 160 },
-                            { title: "Encodes", dataIndex: "count", key: "count", width: 100 },
-                            {
-                              title: "Trend bar",
-                              key: "bar",
-                              render: (_: unknown, r: { date: string; count: number }) => (
-                                <div style={{ width: "100%", maxWidth: 320, height: 8, background: "#e2e8f0", borderRadius: 999 }}>
-                                  <div
-                                    style={{
-                                      width: `${maxDailyCount > 0 ? Math.max(4, (r.count / maxDailyCount) * 100) : 0}%`,
-                                      height: "100%",
-                                      background: "#3d9f6f",
-                                      borderRadius: 999,
-                                    }}
-                                  />
-                                </div>
-                              ),
-                            },
-                          ]}
-                        />
+                      <Card title="Daily encodes (last 30 days)">
+                        {dailyEncodeChartData.length === 0 ? (
+                          <Typography.Text type="secondary">No data.</Typography.Text>
+                        ) : (
+                          <div style={{ width: "100%", height: Math.max(380, dailyEncodeChartData.length * 18) }}>
+                            <ResponsiveContainer width="100%" height="100%">
+                              <BarChart
+                                data={dailyEncodeChartData}
+                                layout="vertical"
+                                margin={{ top: 8, right: 24, left: 8, bottom: 8 }}
+                              >
+                                <CartesianGrid strokeDasharray="3 3" />
+                                <XAxis
+                                  type="number"
+                                  allowDecimals={false}
+                                  domain={[0, Math.max(1, maxDailyCount)]}
+                                />
+                                <YAxis
+                                  type="category"
+                                  dataKey="dayLabel"
+                                  width={52}
+                                  tick={{ fontSize: 11 }}
+                                />
+                                <Tooltip
+                                  formatter={(value: unknown) => [Number(value || 0), "Encodes"]}
+                                  labelFormatter={(label: unknown) => `Date: ${String(label || "")}`}
+                                />
+                                <Bar dataKey="count" fill="#3d9f6f" radius={[0, 4, 4, 0]} />
+                              </BarChart>
+                            </ResponsiveContainer>
+                          </div>
+                        )}
                       </Card>
                     </Space>
                   </Spin>
