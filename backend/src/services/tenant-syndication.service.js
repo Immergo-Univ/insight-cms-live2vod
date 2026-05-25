@@ -1512,7 +1512,9 @@ async function tiktokApiPost(accessToken, path, body = {}) {
   const errCode = json?.error?.code;
   if (!res.ok || (errCode && errCode !== "ok")) {
     const msg = json?.error?.message || JSON.stringify(json).slice(0, 500);
-    throw new Error(`TikTok API failed: ${res.status} ${msg}`);
+    const code = json?.error?.code ? ` code=${String(json.error.code)}` : "";
+    const logId = json?.error?.log_id ? ` log_id=${String(json.error.log_id)}` : "";
+    throw new Error(`TikTok API failed: ${res.status}${code}${logId} ${msg}`);
   }
   return /** @type {Record<string, unknown>} */ (json);
 }
@@ -1804,9 +1806,14 @@ export async function uploadVideoToTiktok(opts) {
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     const shouldRetryStrict =
-      /integration guidelines|content-sharing-guidelines|Direct Post API/i.test(msg) && options.includes("SELF_ONLY");
+      /integration guidelines|content-sharing-guidelines|Direct Post API/i.test(msg);
     if (!shouldRetryStrict) throw e;
-    initJson = await tiktokApiPost(access, "/v2/post/publish/video/init/", buildInitPayload(true));
+    try {
+      initJson = await tiktokApiPost(access, "/v2/post/publish/video/init/", buildInitPayload(true));
+    } catch (strictError) {
+      const strictMsg = strictError instanceof Error ? strictError.message : String(strictError);
+      throw new Error(`TikTok strict retry failed after guidelines rejection: ${strictMsg}`);
+    }
   }
 
   const data = initJson.data && typeof initJson.data === "object" ? initJson.data : {};
