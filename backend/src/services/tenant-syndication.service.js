@@ -489,26 +489,62 @@ export async function getTenantTwitterRefreshToken(tenantId) {
 }
 
 /**
+ * X rotates refresh tokens on every successful refresh and invalidates the previous one.
+ * If concurrent encoder jobs both refresh, only the first persists; later jobs see "invalid token".
+ * If the user revoked the app, or 6 months passed without use, the token is also dead.
+ * In any of those cases the only fix is forcing the user to re-authorize, so clear the connection.
+ *
+ * @param {string} tenantId
+ */
+async function markTwitterDisconnected(tenantId) {
+  const id = String(tenantId || "").trim();
+  if (!id) return;
+  try {
+    const { Tenant } = models();
+    const row = await Tenant.findByPk(id);
+    if (!row) return;
+    row.twitterRefreshToken = null;
+    row.syndicationTwitterConnected = false;
+    await row.save();
+  } catch {
+    // ignore — best-effort cleanup so the UI surfaces "reconnect"
+  }
+}
+
+/**
  * @param {string} tenantId
  * @returns {Promise<string>} user access token
  */
 export async function getTwitterAccessTokenForTenant(tenantId) {
   const id = String(tenantId || "").trim();
   const refresh = await getTenantTwitterRefreshToken(id);
-  if (!refresh) throw new Error("Tenant has no X refresh token");
+  if (!refresh) throw new Error("Tenant has no X refresh token; reconnect X in Tenant settings");
 
   const { clientId, clientSecret } = await getResolvedTwitterOAuth();
   if (!clientId || !clientSecret) throw new Error("X / Twitter OAuth is not configured");
 
-  const json = await twitterTokenRequest(
-    {
-      grant_type: "refresh_token",
-      refresh_token: refresh,
-      client_id: clientId,
-    },
-    clientId,
-    clientSecret,
-  );
+  let json;
+  try {
+    json = await twitterTokenRequest(
+      {
+        grant_type: "refresh_token",
+        refresh_token: refresh,
+        client_id: clientId,
+      },
+      clientId,
+      clientSecret,
+    );
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    // 400 from /oauth2/token on refresh_token grant always means the token is unusable.
+    if (/\b400\b/.test(msg) || /invalid[_ ]grant/i.test(msg) || /token was invalid/i.test(msg)) {
+      await markTwitterDisconnected(id);
+      throw new Error(
+        "X refresh token is invalid or revoked — reconnect X in Tenant settings (Syndication → Connect X).",
+      );
+    }
+    throw e;
+  }
   const access = json.access_token;
   if (!access || typeof access !== "string") {
     throw new Error("X token refresh did not return access_token");
