@@ -218,6 +218,8 @@ export const config = {
    * TikTok Direct Post (Content Posting API). OAuth redirect must match TikTok developer portal exactly.
    * Env: TIKTOK_CLIENT_KEY, TIKTOK_CLIENT_SECRET, TIKTOK_REDIRECT_URI (backend callback URL).
    * Optional: TIKTOK_OAUTH_FRONTEND_REDIRECT, TIKTOK_OAUTH_STATE_SECRET, TIKTOK_ALLOW_MOCK_AUTH.
+   * Domain verification fallback (when not configured in Admin): TIKTOK_DOMAIN_VERIFICATION_PATH,
+   * TIKTOK_DOMAIN_VERIFICATION_FILE_CONTENT, TIKTOK_DOMAIN_VERIFICATION_CONTENT_TYPE.
    */
   tiktok: {
     clientKey: (process.env.TIKTOK_CLIENT_KEY || "").trim(),
@@ -225,6 +227,9 @@ export const config = {
     redirectUri: (process.env.TIKTOK_REDIRECT_URI || "").trim(),
     oauthSuccessRedirect: (process.env.TIKTOK_OAUTH_FRONTEND_REDIRECT || "").trim(),
     oauthStateSecret: (process.env.TIKTOK_OAUTH_STATE_SECRET || "").trim(),
+    domainVerificationPath: (process.env.TIKTOK_DOMAIN_VERIFICATION_PATH || "").trim(),
+    domainVerificationFileContent: process.env.TIKTOK_DOMAIN_VERIFICATION_FILE_CONTENT || "",
+    domainVerificationContentType: (process.env.TIKTOK_DOMAIN_VERIFICATION_CONTENT_TYPE || "text/plain; charset=utf-8").trim(),
   },
 
   /**

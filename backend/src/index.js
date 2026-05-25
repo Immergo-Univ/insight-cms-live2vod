@@ -22,6 +22,7 @@ import { startLogoLiveMatchingService } from "./services/logo-live-matching.serv
 import { isS3LogosEnabled, logS3LogosStartup } from "./services/s3-logos.service.js";
 import { syncAllChannelLogosFromS3, startChannelLogosS3Sync } from "./services/channel-logos-sync.service.js";
 import { syncChannelAdsSnapshotsFromS3OnStartup } from "./services/channel-ads-s3-backup.service.js";
+import { getResolvedTiktokDomainVerificationFile } from "./services/admin-settings.service.js";
 import { resolveTenant } from "./services/auth.service.js";
 import { initVodJobsPersistence, subscribeTenant, unsubscribeTenant } from "./services/vod-jobs.store.js";
 
@@ -31,6 +32,51 @@ const PORT = config.port;
 
 app.use(cors());
 app.use(express.json({ limit: "12mb" }));
+
+const TIKTOK_FILE_CACHE_MS = 10000;
+let tiktokVerificationCache = {
+  expiresAt: 0,
+  path: "",
+  content: "",
+  contentType: "text/plain; charset=utf-8",
+};
+
+async function readTiktokVerificationCached() {
+  const now = Date.now();
+  if (tiktokVerificationCache.expiresAt > now) return tiktokVerificationCache;
+  try {
+    const resolved = await getResolvedTiktokDomainVerificationFile();
+    tiktokVerificationCache = {
+      expiresAt: now + TIKTOK_FILE_CACHE_MS,
+      path: String(resolved.path || "").trim(),
+      content: String(resolved.content || ""),
+      contentType: String(resolved.contentType || "").trim() || "text/plain; charset=utf-8",
+    };
+  } catch {
+    tiktokVerificationCache = {
+      expiresAt: now + TIKTOK_FILE_CACHE_MS,
+      path: "",
+      content: "",
+      contentType: "text/plain; charset=utf-8",
+    };
+  }
+  return tiktokVerificationCache;
+}
+
+app.use(async (req, res, next) => {
+  if (req.method !== "GET" && req.method !== "HEAD") return next();
+  try {
+    const resolved = await readTiktokVerificationCached();
+    if (resolved.path && resolved.content && req.path === resolved.path) {
+      res.setHeader("Content-Type", resolved.contentType);
+      if (req.method === "HEAD") return res.status(200).end();
+      return res.status(200).send(resolved.content);
+    }
+  } catch {
+    // Keep request flow healthy even if settings read fails.
+  }
+  next();
+});
 
 app.use("/api/auth", authRouter);
 app.use("/api/channels", channelSettingsRouter);

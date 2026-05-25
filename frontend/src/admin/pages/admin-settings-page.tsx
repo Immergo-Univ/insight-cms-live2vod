@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
-import { App, Button, Collapse, Form, Input, Select, Spin, Switch, Tabs, Typography } from "antd";
+import { UploadOutlined } from "@ant-design/icons";
+import { App, Button, Collapse, Form, Input, Select, Spin, Switch, Tabs, Typography, Upload } from "antd";
+import type { UploadProps } from "antd";
 import { useTranslation } from "react-i18next";
 import { getAdminClient } from "@/admin/admin-api";
 import { useAdminAuth } from "@/admin/admin-auth-context";
@@ -72,6 +74,9 @@ export function AdminSettingsPage() {
     ttOauthClientSecret: string;
     ttDefaultPrivacyLevel: string;
     ttDefaultCaption: string;
+    ttDomainVerificationPath: string;
+    ttDomainVerificationFileContent: string;
+    ttDomainVerificationContentType: string;
   }>();
 
   const load = useCallback(async () => {
@@ -123,6 +128,14 @@ export function AdminSettingsPage() {
         ttDefaultPrivacyLevel:
           typeof tt?.defaultPrivacyLevel === "string" ? tt.defaultPrivacyLevel : "SELF_ONLY",
         ttDefaultCaption: typeof tt?.defaultCaption === "string" ? tt.defaultCaption : "",
+        ttDomainVerificationPath:
+          typeof tt?.domainVerificationPath === "string" ? tt.domainVerificationPath : "",
+        ttDomainVerificationFileContent:
+          typeof tt?.domainVerificationFileContent === "string" ? tt.domainVerificationFileContent : "",
+        ttDomainVerificationContentType:
+          typeof tt?.domainVerificationContentType === "string" && tt.domainVerificationContentType.trim()
+            ? tt.domainVerificationContentType
+            : "text/plain; charset=utf-8",
       });
     } catch (e: unknown) {
       const err = e as { response?: { data?: { error?: string } } };
@@ -190,6 +203,10 @@ export function AdminSettingsPage() {
         oauthRedirectUri: asTrimmedString(v.ttOauthRedirectUri),
         defaultPrivacyLevel: asTrimmedString(v.ttDefaultPrivacyLevel) || "SELF_ONLY",
         defaultCaption: asTrimmedString(v.ttDefaultCaption),
+        domainVerificationPath: asTrimmedString(v.ttDomainVerificationPath),
+        domainVerificationFileContent: v.ttDomainVerificationFileContent ?? "",
+        domainVerificationContentType:
+          asTrimmedString(v.ttDomainVerificationContentType) || "text/plain; charset=utf-8",
       };
       const secretTtTrim = asTrimmedString(v.ttOauthClientSecret);
       if (secretTtTrim) tiktok.oauthClientSecret = secretTtTrim;
@@ -219,6 +236,30 @@ export function AdminSettingsPage() {
     } finally {
       setSaving(false);
     }
+  };
+
+  const tiktokVerificationUploadProps: UploadProps = {
+    accept: ".txt,text/plain",
+    maxCount: 1,
+    showUploadList: false,
+    beforeUpload: async (file) => {
+      try {
+        const text = await file.text();
+        const currentPath = asTrimmedString(form.getFieldValue("ttDomainVerificationPath"));
+        if (!currentPath) {
+          const normalizedName = file.name.replace(/^\/+/, "");
+          form.setFieldValue("ttDomainVerificationPath", `/${normalizedName}`);
+        }
+        form.setFieldValue("ttDomainVerificationFileContent", text);
+        if (!asTrimmedString(form.getFieldValue("ttDomainVerificationContentType"))) {
+          form.setFieldValue("ttDomainVerificationContentType", "text/plain; charset=utf-8");
+        }
+        message.success(t("settings.ttDomainVerificationUploadLoaded", { fileName: file.name }));
+      } catch {
+        message.error(t("settings.ttDomainVerificationUploadFailed"));
+      }
+      return false;
+    },
   };
 
   return (
@@ -556,6 +597,40 @@ export function AdminSettingsPage() {
                             </Form.Item>
                             <Form.Item name="ttDefaultCaption" label={t("settings.ttDefaultCaption")}>
                               <Input.TextArea rows={2} placeholder="" />
+                            </Form.Item>
+                            <Form.Item
+                              name="ttDomainVerificationPath"
+                              label={t("settings.ttDomainVerificationPath")}
+                              rules={[
+                                {
+                                  validator: async (_, value: unknown) => {
+                                    const path = asTrimmedString(value);
+                                    if (!path) return;
+                                    if (!path.startsWith("/")) {
+                                      throw new Error(t("settings.ttDomainVerificationPathError"));
+                                    }
+                                  },
+                                },
+                              ]}
+                            >
+                              <Input placeholder="/.well-known/tiktok-domain-verification.txt" />
+                            </Form.Item>
+                            <Form.Item
+                              name="ttDomainVerificationContentType"
+                              label={t("settings.ttDomainVerificationContentType")}
+                            >
+                              <Input placeholder="text/plain; charset=utf-8" />
+                            </Form.Item>
+                            <Form.Item label={t("settings.ttDomainVerificationUpload")}>
+                              <Upload {...tiktokVerificationUploadProps}>
+                                <Button icon={<UploadOutlined />}>{t("settings.ttDomainVerificationUploadCta")}</Button>
+                              </Upload>
+                            </Form.Item>
+                            <Form.Item
+                              name="ttDomainVerificationFileContent"
+                              label={t("settings.ttDomainVerificationFileContent")}
+                            >
+                              <Input.TextArea rows={8} placeholder="Paste the exact verification file content here" />
                             </Form.Item>
                           </>
                         ),

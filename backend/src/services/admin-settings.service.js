@@ -28,9 +28,24 @@ const DEFAULT_SETTINGS = {
     tiktok: {
       defaultCaption: "",
       defaultPrivacyLevel: "SELF_ONLY",
+      domainVerificationPath: "",
+      domainVerificationFileContent: "",
+      domainVerificationContentType: "text/plain; charset=utf-8",
     },
   },
 };
+
+/**
+ * @param {string} rawPath
+ */
+function normalizePublicFilePath(rawPath) {
+  const trimmed = String(rawPath || "").trim();
+  if (!trimmed) return "";
+  const noQuery = trimmed.split("?")[0].split("#")[0].trim();
+  if (!noQuery) return "";
+  const withLeadingSlash = noQuery.startsWith("/") ? noQuery : `/${noQuery}`;
+  return withLeadingSlash.replace(/\/{2,}/g, "/");
+}
 
 /**
  * @param {Record<string, unknown>} base
@@ -149,6 +164,26 @@ function stripEmptyTiktokClientSecret(incoming) {
   if (!tt || typeof tt !== "object" || Array.isArray(tt)) return;
   if (typeof tt.oauthClientSecret === "string" && !tt.oauthClientSecret.trim()) {
     delete tt.oauthClientSecret;
+  }
+}
+
+/**
+ * @param {Record<string, unknown>} incoming
+ */
+function sanitizeTiktokDomainVerification(incoming) {
+  const syn = incoming.syndication;
+  if (!syn || typeof syn !== "object" || Array.isArray(syn)) return;
+  const tt = /** @type {Record<string, unknown>} */ (syn).tiktok;
+  if (!tt || typeof tt !== "object" || Array.isArray(tt)) return;
+  if ("domainVerificationPath" in tt) {
+    tt.domainVerificationPath = normalizePublicFilePath(String(tt.domainVerificationPath ?? ""));
+  }
+  if ("domainVerificationFileContent" in tt) {
+    tt.domainVerificationFileContent = String(tt.domainVerificationFileContent ?? "");
+  }
+  if ("domainVerificationContentType" in tt) {
+    const nextType = String(tt.domainVerificationContentType ?? "").trim();
+    tt.domainVerificationContentType = nextType || "text/plain; charset=utf-8";
   }
 }
 
@@ -332,6 +367,38 @@ export async function getTiktokSyndicationDefaults() {
 }
 
 /**
+ * @returns {Promise<{ path: string; content: string; contentType: string }>}
+ */
+export async function getResolvedTiktokDomainVerificationFile() {
+  const fromEnvPath = normalizePublicFilePath(config.tiktok.domainVerificationPath);
+  const fromEnvContent = String(config.tiktok.domainVerificationFileContent || "");
+  const fromEnvContentType = String(config.tiktok.domainVerificationContentType || "").trim() || "text/plain; charset=utf-8";
+  const fallback = {
+    path: fromEnvPath,
+    content: fromEnvContent,
+    contentType: fromEnvContentType,
+  };
+  const sequelize = getSequelize();
+  if (!sequelize) return fallback;
+  try {
+    const merged = await loadMergedSettingsFromDb();
+    const synd = merged.syndication && typeof merged.syndication === "object" && !Array.isArray(merged.syndication) ? merged.syndication : {};
+    const ttRaw = /** @type {Record<string, unknown>} */ (synd).tiktok;
+    const tt = ttRaw && typeof ttRaw === "object" && !Array.isArray(ttRaw) ? ttRaw : {};
+    const dbPath = normalizePublicFilePath(String(tt.domainVerificationPath ?? ""));
+    const dbContent = String(tt.domainVerificationFileContent ?? "");
+    const dbContentType = String(tt.domainVerificationContentType ?? "").trim();
+    return {
+      path: dbPath || fallback.path,
+      content: dbContent || fallback.content,
+      contentType: dbContentType || fallback.contentType,
+    };
+  } catch {
+    return fallback;
+  }
+}
+
+/**
  * @param {Record<string, unknown>} merged
  */
 function youtubeClientSecretStoredInDb(merged) {
@@ -437,6 +504,7 @@ export async function adminPatchAppSettings(body) {
   stripEmptyFacebookClientSecret(incoming);
   stripEmptyInstagramClientSecret(incoming);
   stripEmptyTiktokClientSecret(incoming);
+  sanitizeTiktokDomainVerification(incoming);
   const next = deepMergeSettings(
     deepMergeSettings(DEFAULT_SETTINGS, /** @type {Record<string, unknown>} */ (prev)),
     incoming,
