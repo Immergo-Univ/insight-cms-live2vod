@@ -1,4 +1,5 @@
-import { App, Button, Form, Input, Select, Typography } from "antd";
+import { App, Button, Form, Input, Typography } from "antd";
+import { AppSelect } from "@/components/base/select/app-select";
 import { useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { getAdminClient } from "@/admin/admin-api";
@@ -49,7 +50,8 @@ export function AdminProfilePage() {
           <Input />
         </Form.Item>
         <Form.Item name="language" label={t("profile.language")}>
-          <Select
+          <AppSelect
+            skipThemeProvider
             options={[
               { value: "es", label: "ES" },
               { value: "en", label: "EN" },

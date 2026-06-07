@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { UploadOutlined } from "@ant-design/icons";
-import { App, Button, Collapse, Form, Input, Select, Spin, Switch, Tabs, Typography, Upload } from "antd";
+import { App, Button, Collapse, Form, Input, Spin, Switch, Tabs, Typography, Upload } from "antd";
 import type { UploadProps } from "antd";
+import { AppSelect } from "@/components/base/select/app-select";
 import { useTranslation } from "react-i18next";
 import { getAdminClient } from "@/admin/admin-api";
 import { useAdminAuth } from "@/admin/admin-auth-context";
@@ -398,7 +399,8 @@ export function AdminSettingsPage() {
                               <Input.Password autoComplete="new-password" />
                             </Form.Item>
                             <Form.Item name="ytDefaultPrivacy" label={t("settings.ytDefaultPrivacy")}>
-                              <Select
+                              <AppSelect
+                                skipThemeProvider
                                 options={[
                                   { value: "private", label: "Private" },
                                   { value: "unlisted", label: "Unlisted" },
@@ -410,7 +412,8 @@ export function AdminSettingsPage() {
                               <Input />
                             </Form.Item>
                             <Form.Item name="ytLicense" label={t("settings.ytLicense")}>
-                              <Select
+                              <AppSelect
+                                skipThemeProvider
                                 options={[
                                   { value: "youtube", label: "Standard YouTube" },
                                   { value: "creativeCommon", label: "Creative Commons" },
@@ -591,7 +594,8 @@ export function AdminSettingsPage() {
                               <Input.Password autoComplete="new-password" />
                             </Form.Item>
                             <Form.Item name="ttDefaultPrivacyLevel" label={t("settings.ttDefaultPrivacyLevel")}>
-                              <Select
+                              <AppSelect
+                                skipThemeProvider
                                 options={[
                                   { value: "SELF_ONLY", label: "Self only" },
                                   { value: "MUTUAL_FOLLOW_FRIENDS", label: "Mutual follow friends" },

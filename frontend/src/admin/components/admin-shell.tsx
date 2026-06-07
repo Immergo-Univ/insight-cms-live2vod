@@ -1,7 +1,8 @@
 import { useMemo } from "react";
 import { Link, Outlet, useLocation, useNavigate } from "react-router";
-import { Avatar, Dropdown, Layout, Menu, Select, Typography } from "antd";
+import { Avatar, Dropdown, Layout, Menu, Typography } from "antd";
 import type { MenuProps } from "antd";
+import { AppSelect } from "@/components/base/select/app-select";
 import {
   AppstoreOutlined,
   TeamOutlined,
@@ -115,7 +116,8 @@ export function AdminShell() {
       </Sider>
       <Layout className="admin-main-layout">
         <Header className="admin-header">
-          <Select
+          <AppSelect
+            skipThemeProvider
             value={i18n.language}
             style={{ width: 100 }}
             options={[

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { ModalOverlay, Modal, Dialog } from "@/components/application/modals/modal";
 import { Tabs } from "@/components/application/tabs/tabs";
 import { CloseButton } from "@/components/base/buttons/close-button";
+import { AppSelect } from "@/components/base/select/app-select";
 import { Checkbox } from "@/components/base/checkbox/checkbox";
 import type { EditorSubtitleSettings } from "@/types/editor";
 import {
@@ -159,23 +160,20 @@ export function EditorSubtitleStyleModal({
 
               <label className="flex flex-col gap-1.5">
                 <span className="text-xs font-medium text-secondary">Video language (speech)</span>
-                <select
+                <AppSelect
                   value={draft.whisperSourceLanguage}
-                  onChange={(e) =>
+                  onChange={(value) =>
                     setDraft((d) => ({
                       ...d,
-                      whisperSourceLanguage: e.target.value as WhisperLanguageCode,
+                      whisperSourceLanguage: value as WhisperLanguageCode,
                     }))
                   }
-                  className="rounded-lg border border-secondary bg-primary px-3 py-2 text-sm text-primary"
                   aria-label="Video language"
-                >
-                  {WHISPER_SOURCE_LANGUAGE_OPTIONS.map((opt) => (
-                    <option key={opt.code} value={opt.code}>
-                      {opt.label}
-                    </option>
-                  ))}
-                </select>
+                  options={WHISPER_SOURCE_LANGUAGE_OPTIONS.map((opt) => ({
+                    value: opt.code,
+                    label: opt.label,
+                  }))}
+                />
                 <span className="text-xs text-tertiary">
                   Passed to the transcription API as the spoken-language hint. Use a fixed language when auto-detect is
                   wrong (e.g. Hebrew).
@@ -184,23 +182,20 @@ export function EditorSubtitleStyleModal({
 
               <label className="flex flex-col gap-1.5">
                 <span className="text-xs font-medium text-secondary">Subtitle language (output)</span>
-                <select
+                <AppSelect
                   value={draft.whisperOutputLanguage}
-                  onChange={(e) =>
+                  onChange={(value) =>
                     setDraft((d) => ({
                       ...d,
-                      whisperOutputLanguage: e.target.value as WhisperSubtitleOutputLanguage,
+                      whisperOutputLanguage: value as WhisperSubtitleOutputLanguage,
                     }))
                   }
-                  className="rounded-lg border border-secondary bg-primary px-3 py-2 text-sm text-primary"
                   aria-label="Subtitle language"
-                >
-                  {WHISPER_OUTPUT_LANGUAGE_OPTIONS.map((opt) => (
-                    <option key={opt.code} value={opt.code}>
-                      {opt.label}
-                    </option>
-                  ))}
-                </select>
+                  options={WHISPER_OUTPUT_LANGUAGE_OPTIONS.map((opt) => ({
+                    value: opt.code,
+                    label: opt.label,
+                  }))}
+                />
                 <span className={`text-xs ${pairOk ? "text-tertiary" : "text-error-primary"}`}>{pairHint}</span>
               </label>
 

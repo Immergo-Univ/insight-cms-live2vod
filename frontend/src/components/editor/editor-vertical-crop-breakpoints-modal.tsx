@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Trash01 } from "@untitledui/icons";
 import { ModalOverlay, Modal, Dialog } from "@/components/application/modals/modal";
 import { CloseButton } from "@/components/base/buttons/close-button";
+import { AppSelect } from "@/components/base/select/app-select";
 import { Toggle } from "@/components/base/toggle/toggle";
 import {
   dedupeVerticalBreakpointsByTime,
@@ -201,35 +202,29 @@ export function EditorVerticalCropBreakpointsModal({
                   <span className="text-xs font-medium text-secondary">Motion between keyframes</span>
                   <label className="flex flex-col gap-1">
                     <span className="text-[10px] font-medium text-tertiary">Pan style</span>
-                    <select
+                    <AppSelect
                       value={panMode}
                       disabled={readOnly}
-                      onChange={(e) => setPanMode(e.target.value as EditorVerticalCropPanMode)}
-                      className={cx(
-                        "rounded-md border border-secondary px-2 py-2 text-sm text-primary",
-                        readOnly ? "cursor-not-allowed opacity-50" : "bg-primary",
-                      )}
-                    >
-                      <option value="smooth">Smooth (interpolate)</option>
-                      <option value="step">Step (hold until next keyframe)</option>
-                    </select>
+                      onChange={(value) => setPanMode(value as EditorVerticalCropPanMode)}
+                      options={[
+                        { value: "smooth", label: "Smooth (interpolate)" },
+                        { value: "step", label: "Step (hold until next keyframe)" },
+                      ]}
+                    />
                   </label>
                   {panMode === "smooth" ? (
                     <>
                       <label className="flex flex-col gap-1">
                         <span className="text-[10px] font-medium text-tertiary">Easing</span>
-                        <select
+                        <AppSelect
                           value={panEasing}
                           disabled={readOnly}
-                          onChange={(e) => setPanEasing(e.target.value as EditorVerticalCropPanEasing)}
-                          className={cx(
-                            "rounded-md border border-secondary px-2 py-2 text-sm text-primary",
-                            readOnly ? "cursor-not-allowed opacity-50" : "bg-primary",
-                          )}
-                        >
-                          <option value="ease-in-out">Ease-in-out</option>
-                          <option value="linear">Linear</option>
-                        </select>
+                          onChange={(value) => setPanEasing(value as EditorVerticalCropPanEasing)}
+                          options={[
+                            { value: "ease-in-out", label: "Ease-in-out" },
+                            { value: "linear", label: "Linear" },
+                          ]}
+                        />
                       </label>
                       <label className="flex flex-col gap-1">
                         <span className="text-[10px] font-medium text-tertiary">

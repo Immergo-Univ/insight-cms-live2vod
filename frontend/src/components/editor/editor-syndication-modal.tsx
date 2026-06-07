@@ -3,6 +3,7 @@ import { Image01 } from "@untitledui/icons";
 import { ModalOverlay, Modal, Dialog } from "@/components/application/modals/modal";
 import { Tabs } from "@/components/application/tabs/tabs";
 import { CloseButton } from "@/components/base/buttons/close-button";
+import { AppSelect } from "@/components/base/select/app-select";
 import { Toggle } from "@/components/base/toggle/toggle";
 import {
   fetchTenantSyndicationStatus,
@@ -754,18 +755,18 @@ export function EditorSyndicationModal({
                     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                       <label className="flex flex-col gap-1 text-xs font-medium text-secondary">
                         Privacy
-                        <select
+                        <AppSelect
                           disabled={readOnly || !ytDraft.enabled}
                           value={ytDraft.options.privacyStatus || "private"}
-                          onChange={(e) =>
-                            setOpt({ privacyStatus: e.target.value as EditorYoutubePrivacyStatus })
+                          onChange={(value) =>
+                            setOpt({ privacyStatus: value as EditorYoutubePrivacyStatus })
                           }
-                          className="rounded-lg border border-secondary bg-primary px-2 py-2 text-sm text-primary"
-                        >
-                          <option value="private">Private</option>
-                          <option value="unlisted">Unlisted</option>
-                          <option value="public">Public</option>
-                        </select>
+                          options={[
+                            { value: "private", label: "Private" },
+                            { value: "unlisted", label: "Unlisted" },
+                            { value: "public", label: "Public" },
+                          ]}
+                        />
                       </label>
                       <label className="flex flex-col gap-1 text-xs font-medium text-secondary">
                         Category ID
@@ -780,15 +781,17 @@ export function EditorSyndicationModal({
                       </label>
                       <label className="flex flex-col gap-1 text-xs font-medium text-secondary">
                         License
-                        <select
+                        <AppSelect
                           disabled={readOnly || !ytDraft.enabled}
                           value={ytDraft.options.license || "youtube"}
-                          onChange={(e) => setOpt({ license: e.target.value as "youtube" | "creativeCommon" })}
-                          className="rounded-lg border border-secondary bg-primary px-2 py-2 text-sm text-primary"
-                        >
-                          <option value="youtube">Standard YouTube</option>
-                          <option value="creativeCommon">Creative Commons</option>
-                        </select>
+                          onChange={(value) =>
+                            setOpt({ license: value as "youtube" | "creativeCommon" })
+                          }
+                          options={[
+                            { value: "youtube", label: "Standard YouTube" },
+                            { value: "creativeCommon", label: "Creative Commons" },
+                          ]}
+                        />
                       </label>
                       <label className="flex flex-col gap-1 text-xs font-medium text-secondary">
                         Default language (BCP-47, optional)
@@ -1108,19 +1111,14 @@ export function EditorSyndicationModal({
                     ) : (
                       <label className="flex flex-col gap-1 text-xs font-medium text-secondary">
                         Facebook Page
-                        <select
+                        <AppSelect
                           disabled={readOnly || pageBusy}
-                          value={selectedPageId}
-                          onChange={(e) => setSelectedPageId(e.target.value)}
-                          className="rounded-lg border border-secondary bg-primary px-2 py-2 text-sm text-primary"
-                        >
-                          <option value="">Select a Page…</option>
-                          {facebookPages.map((p) => (
-                            <option key={p.id} value={p.id}>
-                              {p.name}
-                            </option>
-                          ))}
-                        </select>
+                          value={selectedPageId || undefined}
+                          onChange={(value) => setSelectedPageId(value ?? "")}
+                          placeholder="Select a Page…"
+                          allowClear
+                          options={facebookPages.map((p) => ({ value: p.id, label: p.name }))}
+                        />
                       </label>
                     )}
                     <button
@@ -1252,20 +1250,17 @@ export function EditorSyndicationModal({
                     ) : (
                       <label className="flex flex-col gap-1 text-xs font-medium text-secondary">
                         Instagram account
-                        <select
+                        <AppSelect
                           disabled={readOnly || pageBusy}
-                          value={selectedIgAccountId}
-                          onChange={(e) => setSelectedIgAccountId(e.target.value)}
-                          className="rounded-lg border border-secondary bg-primary px-2 py-2 text-sm text-primary"
-                        >
-                          <option value="">Select an account…</option>
-                          {instagramAccounts.map((a) => (
-                            <option key={a.id} value={a.id}>
-                              @{a.username}
-                              {a.pageName ? ` (${a.pageName})` : ""}
-                            </option>
-                          ))}
-                        </select>
+                          value={selectedIgAccountId || undefined}
+                          onChange={(value) => setSelectedIgAccountId(value ?? "")}
+                          placeholder="Select an account…"
+                          allowClear
+                          options={instagramAccounts.map((a) => ({
+                            value: a.id,
+                            label: `@${a.username}${a.pageName ? ` (${a.pageName})` : ""}`,
+                          }))}
+                        />
                       </label>
                     )}
                     <button
@@ -1298,23 +1293,23 @@ export function EditorSyndicationModal({
                     />
                     <label className="flex flex-col gap-1 text-xs font-medium text-secondary">
                       Destination
-                      <select
+                      <AppSelect
                         disabled={readOnly || !igDraft.enabled}
                         value={igDraft.options.mediaType === "feed" ? "feed" : "reels"}
-                        onChange={(e) =>
+                        onChange={(value) =>
                           setIgDraft((d) => ({
                             ...d,
                             options: {
                               ...d.options,
-                              mediaType: e.target.value === "feed" ? "feed" : "reels",
+                              mediaType: value === "feed" ? "feed" : "reels",
                             },
                           }))
                         }
-                        className="rounded-lg border border-secondary bg-primary px-2 py-2 text-sm text-primary"
-                      >
-                        <option value="reels">Reels</option>
-                        <option value="feed">Feed (video post)</option>
-                      </select>
+                        options={[
+                          { value: "reels", label: "Reels" },
+                          { value: "feed", label: "Feed (video post)" },
+                        ]}
+                      />
                     </label>
                     <label className="flex flex-col gap-1 text-xs font-medium text-secondary">
                       Caption override (optional)
@@ -1419,26 +1414,23 @@ export function EditorSyndicationModal({
                     />
                     <label className="flex flex-col gap-1 text-xs font-medium text-secondary">
                       Privacy
-                      <select
+                      <AppSelect
                         disabled={readOnly || !ttDraft.enabled || creatorInfoBusy}
-                        value={ttDraft.options.privacyLevel || ""}
-                        onChange={(e) =>
+                        value={ttDraft.options.privacyLevel || undefined}
+                        onChange={(value) =>
                           setTtDraft((d) => ({
                             ...d,
-                            options: { ...d.options, privacyLevel: e.target.value },
+                            options: { ...d.options, privacyLevel: value ?? "" },
                           }))
                         }
-                        className="rounded-lg border border-secondary bg-primary px-2 py-2 text-sm text-primary"
-                      >
-                        {(tiktokCreatorInfo?.privacy_level_options?.length
+                        options={(tiktokCreatorInfo?.privacy_level_options?.length
                           ? tiktokCreatorInfo.privacy_level_options
                           : ["SELF_ONLY"]
-                        ).map((p) => (
-                          <option key={p} value={p}>
-                            {p.replace(/_/g, " ").toLowerCase()}
-                          </option>
-                        ))}
-                      </select>
+                        ).map((p) => ({
+                          value: p,
+                          label: p.replace(/_/g, " ").toLowerCase(),
+                        }))}
+                      />
                     </label>
                     <label className="flex flex-col gap-1 text-xs font-medium text-secondary">
                       Caption override (optional)

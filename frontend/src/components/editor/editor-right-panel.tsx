@@ -38,7 +38,7 @@ interface EditorRightPanelProps {
   onRemoveClip: (id: string) => void;
   onUpdateClipMetadata: (
     clipId: string,
-    patch: Pick<EditorSubClip, "title" | "description" | "posters" | "tags">,
+    patch: Pick<EditorSubClip, "title" | "description" | "posters" | "tags" | "mainCategory">,
   ) => void;
   onUpdateClipSyndication?: (clipId: string, syndication: EditorClipSyndication | undefined) => void;
   onSeek: (timeSeconds: number) => void;

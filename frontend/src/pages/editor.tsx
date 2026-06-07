@@ -48,6 +48,7 @@ import {
   DEFAULT_EDITOR_SUBTITLE_SETTINGS,
   defaultEditorSubClipEncodeFields,
   EDITOR_VERTICAL_CROP_BP_TIME_MERGE_SEC,
+  normalizeEditorClipMainCategoryIds,
   normalizeEditorClipTagsList,
   normalizeEditorSubtitleSettings,
   normalizeEditorVerticalCropPanSettings,
@@ -189,6 +190,7 @@ function editorSubClipToStateJsonClip(c: EditorSubClip): EditorStateJsonClip {
           centerX: sortedBps?.[0]?.centerX ?? c.cropWindow.centerX,
         }
       : c.cropWindow;
+  const mainCategoryIds = normalizeEditorClipMainCategoryIds(c.mainCategory ?? []);
   return {
     editorClientClipId: c.id,
     order: c.order,
@@ -198,6 +200,7 @@ function editorSubClipToStateJsonClip(c: EditorSubClip): EditorStateJsonClip {
       title: c.title?.trim() ?? "",
       description: c.description?.trim() ?? "",
       tags: normalizeEditorClipTagsList(c.tags ?? []),
+      ...(mainCategoryIds.length ? { mainCategory: mainCategoryIds } : {}),
     },
     ...(c.posters?.length ? { posters: c.posters } : {}),
     ...(c.verticalCropMode && cropForJson ? { cropWindow: { ...cropForJson } } : {}),
@@ -1108,7 +1111,7 @@ export function EditorPage() {
   const handleUpdateClipMetadata = useCallback(
     (
       clipId: string,
-      patch: Pick<EditorSubClip, "title" | "description" | "posters" | "tags">,
+      patch: Pick<EditorSubClip, "title" | "description" | "posters" | "tags" | "mainCategory">,
     ) => {
       setClips((prev) =>
         prev.map((c) => (c.id === clipId ? { ...c, ...patch } : c)),

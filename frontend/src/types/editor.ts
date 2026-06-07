@@ -49,12 +49,32 @@ export function normalizeEditorClipTagsList(raw: unknown): string[] {
   return out;
 }
 
-/** Per-clip / export metadata (title, description, tags). */
+/** Normalize mainCategory IDs from UI or hydrated JSON (always an array, even for a single id). */
+export function normalizeEditorClipMainCategoryIds(raw: unknown): string[] {
+  const items: unknown[] = Array.isArray(raw)
+    ? raw
+    : typeof raw === "string" && raw.trim().length > 0
+      ? [raw.trim()]
+      : [];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const item of items) {
+    const id = String(item).trim();
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    out.push(id);
+  }
+  return out;
+}
+
+/** Per-clip / export metadata (title, description, tags, main category). */
 export interface EditorVodMetadata {
   title: string;
   description: string;
   /** Keywords for this output clip (exported as JSON array). */
   tags: string[];
+  /** Insight mainCategory entity ids; exported under `metadata.mainCategory`. */
+  mainCategory?: string[];
 }
 
 /**
@@ -619,6 +639,8 @@ export interface EditorSubClip extends EditorSubClipEncodeOptions {
   description?: string;
   /** Keywords for this output clip; exported under `clips[].metadata.tags`. */
   tags?: string[];
+  /** Insight mainCategory entity ids; exported under `clips[].metadata.mainCategory`. */
+  mainCategory?: string[];
   posters?: EditorClipPoster[];
   /** Per-clip syndication targets (YouTube first); included in VOD job `editorSpec`. */
   syndication?: EditorClipSyndication;
@@ -745,6 +767,8 @@ export function normalizeEditorSubClip(c: EditorSubClip): EditorSubClip {
     subtitleMode: c.subtitleMode ?? d.subtitleMode,
     subtitleSettings: normalizeEditorSubtitleSettings(c.subtitleSettings ?? d.subtitleSettings),
     tags: c.tags !== undefined ? normalizeEditorClipTagsList(c.tags) : undefined,
+    mainCategory:
+      c.mainCategory !== undefined ? normalizeEditorClipMainCategoryIds(c.mainCategory) : undefined,
     posters: c.posters ? [...c.posters] : undefined,
     widgets: c.widgets?.length ? c.widgets.map(cloneEditorClipWidget) : undefined,
     syndication: c.syndication ? JSON.parse(JSON.stringify(c.syndication)) : undefined,

@@ -1,14 +1,21 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { ConfigProvider, Select, Tag, theme } from "antd";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Tag } from "antd";
 import { Image01, Upload01 } from "@untitledui/icons";
 import { ModalOverlay, Modal, Dialog } from "@/components/application/modals/modal";
 import { CloseButton } from "@/components/base/buttons/close-button";
+import { AppSelect } from "@/components/base/select/app-select";
+import { useMainCategories } from "@/hooks/use-main-categories";
 import {
   deleteEditorPoster,
   uploadEditorPosters,
 } from "@/services/editor-posters.service";
 import { httpClient } from "@/services/http-client";
-import { normalizeEditorClipTagsList, type EditorClipPoster, type EditorSubClip } from "@/types/editor";
+import {
+  normalizeEditorClipMainCategoryIds,
+  normalizeEditorClipTagsList,
+  type EditorClipPoster,
+  type EditorSubClip,
+} from "@/types/editor";
 import { cx } from "@/utils/cx";
 import { buildThumbnailUrl } from "./editor-constants";
 import { formatTime } from "./editor-timeline";
@@ -29,7 +36,7 @@ interface EditorClipMetadataModalProps {
   channelId: string;
   onSave: (
     clipId: string,
-    patch: Pick<EditorSubClip, "title" | "description" | "posters" | "tags">,
+    patch: Pick<EditorSubClip, "title" | "description" | "posters" | "tags" | "mainCategory">,
   ) => void;
   onSeek?: (timeSeconds: number) => void;
   /** When true, all fields are read-only (e.g. clip is encoding). Only Close is available. */
@@ -51,18 +58,10 @@ export function EditorClipMetadataModal({
   const [description, setDescription] = useState("");
   const [draftPosters, setDraftPosters] = useState<EditorClipPoster[]>([]);
   const [draftTags, setDraftTags] = useState<string[]>([]);
+  const [draftMainCategoryId, setDraftMainCategoryId] = useState<string | undefined>(undefined);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
-  const [antdDark, setAntdDark] = useState(false);
-
-  useEffect(() => {
-    const el = document.documentElement;
-    const sync = () => setAntdDark(el.classList.contains("dark-mode"));
-    sync();
-    const mo = new MutationObserver(sync);
-    mo.observe(el, { attributes: true, attributeFilter: ["class"] });
-    return () => mo.disconnect();
-  }, []);
+  const { mainCategories, loading: mainCategoriesLoading, error: mainCategoriesError } = useMainCategories(isOpen);
 
   useEffect(() => {
     if (!isOpen || !clip) return;
@@ -70,8 +69,21 @@ export function EditorClipMetadataModal({
     setDescription(clip.description ?? "");
     setDraftPosters(clonePosters(clip.posters));
     setDraftTags(normalizeEditorClipTagsList(clip.tags ?? []));
+    setDraftMainCategoryId(normalizeEditorClipMainCategoryIds(clip.mainCategory)[0]);
     setUploadError(null);
   }, [isOpen, clip]);
+
+  const mainCategoryOptions = useMemo(
+    () => mainCategories.map((category) => ({ value: category.id, label: category.title })),
+    [mainCategories],
+  );
+
+  const selectedMainCategoryLabel = useMemo(() => {
+    if (!draftMainCategoryId) return "";
+    return (
+      mainCategories.find((category) => category.id === draftMainCategoryId)?.title ?? draftMainCategoryId
+    );
+  }, [draftMainCategoryId, mainCategories]);
 
   const handleClose = useCallback(() => {
     onOpenChange(false);
@@ -79,14 +91,18 @@ export function EditorClipMetadataModal({
 
   const handleApply = useCallback(() => {
     if (!clip || readOnly) return;
+    const mainCategoryIds = normalizeEditorClipMainCategoryIds(
+      draftMainCategoryId ? [draftMainCategoryId] : [],
+    );
     onSave(clip.id, {
       title: title.slice(0, TITLE_MAX),
       description: description.slice(0, DESCRIPTION_MAX),
       posters: draftPosters,
       tags: normalizeEditorClipTagsList(draftTags),
+      mainCategory: mainCategoryIds.length ? mainCategoryIds : undefined,
     });
     onOpenChange(false);
-  }, [clip, readOnly, title, description, draftPosters, draftTags, onSave, onOpenChange]);
+  }, [clip, readOnly, title, description, draftPosters, draftTags, draftMainCategoryId, onSave, onOpenChange]);
 
   const removePoster = useCallback(
     async (p: EditorClipPoster) => {
@@ -155,7 +171,7 @@ export function EditorClipMetadataModal({
             <CloseButton slot="close" size="xs" label="Close" className="absolute top-3 right-3 z-10" />
             <h2 className="pr-10 text-lg font-semibold text-primary">Clip details</h2>
             <p className="mt-1 text-xs text-tertiary">
-              Title, description, tags, and posters for this sub-clip (order #{clip.order}).
+              Title, description, tags, main category, and posters for this sub-clip (order #{clip.order}).
             </p>
 
             {readOnly ? (
@@ -215,30 +231,40 @@ export function EditorClipMetadataModal({
                     </div>
                   )
                 ) : (
-                  <ConfigProvider
-                    theme={{
-                      algorithm: antdDark ? theme.darkAlgorithm : theme.defaultAlgorithm,
-                    }}
-                  >
-                    <Select
-                      mode="tags"
-                      value={draftTags}
-                      onChange={(next) => setDraftTags(normalizeEditorClipTagsList(next))}
-                      placeholder="Add tags (Enter or comma)"
-                      disabled={readOnly}
-                      className="w-full"
-                      tokenSeparators={[","]}
-                      styles={{
-                        popup: {
-                          root: { zIndex: 9990 },
-                        },
-                      }}
-                    />
-                  </ConfigProvider>
+                  <AppSelect
+                    mode="tags"
+                    value={draftTags}
+                    onChange={(next) => setDraftTags(normalizeEditorClipTagsList(next))}
+                    placeholder="Add tags (Enter or comma)"
+                    disabled={readOnly}
+                    tokenSeparators={[","]}
+                  />
                 )}
               </div>
 
-              <div className="flex flex-col gap-2">
+              <div className="relative z-10 flex flex-col gap-1.5">
+                <span className="text-xs font-medium text-secondary">Main Category</span>
+                {readOnly ? (
+                  <span className="text-xs text-secondary">{selectedMainCategoryLabel || "No main category"}</span>
+                ) : (
+                  <AppSelect
+                    allowClear
+                    value={draftMainCategoryId}
+                    onChange={(value) =>
+                      setDraftMainCategoryId(typeof value === "string" && value ? value : undefined)
+                    }
+                    placeholder={mainCategoriesLoading ? "Loading categories…" : "Select main category"}
+                    disabled={readOnly || mainCategoriesLoading}
+                    loading={mainCategoriesLoading}
+                    options={mainCategoryOptions}
+                  />
+                )}
+                {mainCategoriesError ? (
+                  <p className="text-xs text-error-primary">{mainCategoriesError}</p>
+                ) : null}
+              </div>
+
+              <div className="relative z-0 flex flex-col gap-2">
                 <span className="text-xs font-medium text-secondary">Posters</span>
                 <p className="text-[10px] text-tertiary">
                   Upload images to the same storage as channel logos (posters folder on the bucket), use the

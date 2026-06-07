@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
-import { App, Button, Drawer, Dropdown, Form, Input, Modal, Select, Table, Typography } from "antd";
+import { App, Button, Drawer, Dropdown, Form, Input, Modal, Table, Typography } from "antd";
+import { AppSelect } from "@/components/base/select/app-select";
 import { MoreOutlined } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
 import { useTranslation } from "react-i18next";
@@ -169,7 +170,7 @@ export function AdminUsersPage() {
             <Input.Password placeholder="(optional)" />
           </Form.Item>
           <Form.Item name="roleIds" label={t("users.roles")}>
-            <Select mode="multiple" options={roles.map((r) => ({ value: r.id, label: r.name }))} style={{ width: "100%" }} />
+            <AppSelect skipThemeProvider mode="multiple" options={roles.map((r) => ({ value: r.id, label: r.name }))} />
           </Form.Item>
         </Form>
       </Modal>
@@ -205,7 +206,7 @@ export function AdminUsersPage() {
             <Input />
           </Form.Item>
           <Form.Item name="roleIds" label={t("users.roles")}>
-            <Select mode="multiple" options={roles.map((r) => ({ value: r.id, label: r.name }))} style={{ width: "100%" }} />
+            <AppSelect skipThemeProvider mode="multiple" options={roles.map((r) => ({ value: r.id, label: r.name }))} />
           </Form.Item>
           <Button type="primary" htmlType="submit" block>
             {t("common.save")}

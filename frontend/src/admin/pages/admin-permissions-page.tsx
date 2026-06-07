@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
-import { App, Button, Checkbox, Select, Table, Typography } from "antd";
+import { App, Button, Checkbox, Table, Typography } from "antd";
+import { AppSelect } from "@/components/base/select/app-select";
 import type { ColumnsType } from "antd/es/table";
 import { useTranslation } from "react-i18next";
 import { getAdminClient } from "@/admin/admin-api";
@@ -80,7 +81,13 @@ export function AdminPermissionsPage() {
       <Typography.Title level={4}>{t("permissions.title")}</Typography.Title>
       <div style={{ marginBottom: 16, display: "flex", gap: 12, alignItems: "center" }}>
         <Typography.Text>{t("permissions.role")}</Typography.Text>
-        <Select style={{ minWidth: 220 }} value={roleId || undefined} options={roles.map((r) => ({ value: r.id, label: r.name }))} onChange={setRoleId} />
+        <AppSelect
+          skipThemeProvider
+          style={{ minWidth: 220 }}
+          value={roleId || undefined}
+          options={roles.map((r) => ({ value: r.id, label: r.name }))}
+          onChange={setRoleId}
+        />
         {can("permissions", "edit") ? (
           <Button
             type="primary"
