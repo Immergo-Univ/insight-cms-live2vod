@@ -1,4 +1,5 @@
 import { getSequelize } from "../db/sequelize.js";
+import { normalizeSyndicationAccountMaxByPlatform } from "./tenant-syndication-account-limits.service.js";
 
 /**
  * Create or update tenant row when the timeline (or app) is visited for a tenantId.
@@ -99,6 +100,7 @@ export function tenantRowToApi(plain) {
     syndicationTiktokDefaultEnabled: plain.syndicationTiktokDefaultEnabled === true,
     syndicationTiktokConnected: hasTiktokToken || plain.syndicationTiktokConnected === true,
     tiktokUsername,
+    syndicationAccountMaxByPlatform: normalizeSyndicationAccountMaxByPlatform(plain.syndicationAccountMaxByPlatform),
     timezoneLastSeen: plain.timezoneLastSeen ?? null,
     metadata: plain.metadata ?? null,
     firstSeenAt: plain.firstSeenAt,

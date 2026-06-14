@@ -8,6 +8,9 @@ type SyndicationAccountsPanelProps = {
   authBusy?: boolean;
   onAddAccount: () => void;
   addAccountLabel?: string;
+  canAddAccount?: boolean;
+  maxAccounts?: number;
+  accountCount?: number;
 };
 
 export function SyndicationAccountsPanel({
@@ -16,12 +19,23 @@ export function SyndicationAccountsPanel({
   authBusy = false,
   onAddAccount,
   addAccountLabel = "Add additional Account",
+  canAddAccount = true,
+  maxAccounts = 5,
+  accountCount,
 }: SyndicationAccountsPanelProps) {
   if (accounts.length === 0) return null;
 
+  const occupiedCount = accountCount ?? accounts.length;
+  const limitReached = !canAddAccount || occupiedCount >= maxAccounts;
+
   return (
     <div className="flex flex-col gap-3 border-t border-secondary pt-4">
-      <p className="text-xs font-medium text-secondary">Connected accounts</p>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-xs font-medium text-secondary">Connected accounts</p>
+        <p className="text-xs text-tertiary">
+          {occupiedCount}/{maxAccounts} accounts
+        </p>
+      </div>
       <TagGroup label="Connected accounts" size="sm">
         <TagList className="flex flex-wrap gap-2">
           {accounts.map((account) => (
@@ -38,17 +52,23 @@ export function SyndicationAccountsPanel({
           ))}
         </TagList>
       </TagGroup>
-      <button
-        type="button"
-        disabled={readOnly || authBusy}
-        onClick={onAddAccount}
-        className={cx(
-          "self-start rounded-lg border border-secondary bg-primary px-3 py-2 text-xs font-semibold text-primary transition-colors hover:bg-tertiary/40",
-          (readOnly || authBusy) && "cursor-not-allowed opacity-50",
-        )}
-      >
-        {authBusy ? "Redirecting…" : addAccountLabel}
-      </button>
+      {limitReached ? (
+        <p className="text-xs text-tertiary">
+          Account limit reached ({maxAccounts}). Contact your administrator to increase the limit.
+        </p>
+      ) : (
+        <button
+          type="button"
+          disabled={readOnly || authBusy}
+          onClick={onAddAccount}
+          className={cx(
+            "self-start rounded-lg border border-secondary bg-primary px-3 py-2 text-xs font-semibold text-primary transition-colors hover:bg-tertiary/40",
+            (readOnly || authBusy) && "cursor-not-allowed opacity-50",
+          )}
+        >
+          {authBusy ? "Redirecting…" : addAccountLabel}
+        </button>
+      )}
     </div>
   );
 }

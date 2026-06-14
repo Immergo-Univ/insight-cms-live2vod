@@ -120,7 +120,12 @@
     "syndicationAccountDisconnect": "Desconectar cuenta",
     "syndicationAccountDisconnectConfirmTitle": "¿Desconectar esta cuenta?",
     "syndicationAccountDisconnectConfirmDescription": "Eliminar {{name}} ({{platform}}) de este tenant. Las demás cuentas de la misma plataforma seguirán conectadas.",
-    "syndicationAccountDisconnected": "Cuenta desconectada"
+    "syndicationAccountDisconnected": "Cuenta desconectada",
+    "networkAccountsLabel": "Cuentas asociadas",
+    "networkAccountsHint": "{{count}} de {{max}} cuentas conectadas en esta red.",
+    "syndicationMaxAccountsLabel": "Máximo de cuentas",
+    "syndicationMaxAccountsHint": "Máximo de cuentas OAuth que este tenant puede conectar en esta red (predeterminado {{defaultMax}}). Guarda para aplicar.",
+    "syndicationAccountDisconnectNamed": "Desconectar {{name}}"
   },
   "clips": {
     "title": "Clips generados",

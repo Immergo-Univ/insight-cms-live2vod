@@ -1,5 +1,6 @@
 import crypto from "crypto";
 import { getSequelize } from "../db/sequelize.js";
+import { assertCanAddSyndicationAccount, getSyndicationAccountLimitSummary } from "./tenant-syndication-account-limits.service.js";
 
 /** @typedef {'youtube'|'twitter'|'facebook'|'instagram'|'tiktok'} SyndicationPlatform */
 
@@ -133,6 +134,8 @@ export async function createSyndicationAccount(opts) {
   const tenant = await Tenant.findByPk(tenantId);
   if (!tenant) throw new Error("Tenant not found");
 
+  await assertCanAddSyndicationAccount(tenantId, opts.platform);
+
   const accountId = newSyndicationAccountId();
   const externalAccountId = String(opts.externalAccountId || "").trim() || `pending-${accountId}`;
 
@@ -252,6 +255,11 @@ export async function buildPlatformStatusFromAccounts(tenantId, platform, mockAu
   } else if (platform === "tiktok") {
     base.username = activeAccounts[0]?.displayName ?? null;
   }
+
+  const limits = await getSyndicationAccountLimitSummary(tenantId, platform);
+  base.maxAccounts = limits.maxAccounts;
+  base.accountCount = limits.accountCount;
+  base.canAddAccount = limits.canAddAccount;
 
   return base;
 }

@@ -4,6 +4,7 @@ import {
   deleteSyndicationAccount,
   listAccountsForTenant,
 } from "./tenant-syndication-accounts.service.js";
+import { parseSyndicationAccountMaxByPlatformInput } from "./tenant-syndication-account-limits.service.js";
 import { tenantRowToApi } from "./tenant-visit.service.js";
 import { Op } from "sequelize";
 
@@ -165,6 +166,11 @@ export async function adminUpdateTenant(tenantId, body) {
   if (body.metadata !== undefined) {
     row.metadata =
       body.metadata && typeof body.metadata === "object" && !Array.isArray(body.metadata) ? body.metadata : null;
+  }
+  if (body.syndicationAccountMaxByPlatform !== undefined) {
+    row.syndicationAccountMaxByPlatform = parseSyndicationAccountMaxByPlatformInput(
+      body.syndicationAccountMaxByPlatform,
+    );
   }
   await row.save();
   return tenantRowToApi(row.get({ plain: true }));

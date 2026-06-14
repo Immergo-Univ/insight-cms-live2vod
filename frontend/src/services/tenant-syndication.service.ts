@@ -9,6 +9,9 @@ export type TenantSyndicationPlatformStatus = {
   accounts: SyndicationAccountSummary[];
   pendingAccountId?: string | null;
   mockAuthAvailable?: boolean;
+  maxAccounts?: number;
+  accountCount?: number;
+  canAddAccount?: boolean;
 };
 
 export type TenantSyndicationFacebookStatus = TenantSyndicationPlatformStatus & {
@@ -66,6 +69,10 @@ function normalizeAccounts(raw: unknown): SyndicationAccountSummary[] {
 }
 
 function normalizePlatform(data: Record<string, unknown> | undefined): TenantSyndicationPlatformStatus {
+  const maxAccountsRaw = Number(data?.maxAccounts);
+  const accountCountRaw = Number(data?.accountCount);
+  const maxAccounts = Number.isFinite(maxAccountsRaw) && maxAccountsRaw >= 1 ? Math.floor(maxAccountsRaw) : 5;
+  const accountCount = Number.isFinite(accountCountRaw) && accountCountRaw >= 0 ? Math.floor(accountCountRaw) : 0;
   return {
     connected: !!data?.connected,
     accounts: normalizeAccounts(data?.accounts),
@@ -74,6 +81,9 @@ function normalizePlatform(data: Record<string, unknown> | undefined): TenantSyn
         ? data.pendingAccountId.trim()
         : null,
     mockAuthAvailable: !!data?.mockAuthAvailable,
+    maxAccounts,
+    accountCount,
+    canAddAccount: data?.canAddAccount === false ? false : accountCount < maxAccounts,
   };
 }
 

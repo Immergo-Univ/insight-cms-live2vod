@@ -47,6 +47,8 @@ export function registerTenantModel(sequelize) {
       tiktokRefreshToken: { type: DataTypes.TEXT, allowNull: true },
       tiktokOpenId: { type: DataTypes.STRING(64), allowNull: true },
       tiktokUsername: { type: DataTypes.STRING(128), allowNull: true },
+      /** Max authorized syndication accounts per platform (JSONB map, default 5 in app code). */
+      syndicationAccountMaxByPlatform: { type: DataTypes.JSONB, allowNull: true },
       timezoneLastSeen: { type: DataTypes.STRING(128), allowNull: true },
       metadata: { type: DataTypes.JSONB, allowNull: true },
       firstSeenAt: { type: DataTypes.DATE, allowNull: true },

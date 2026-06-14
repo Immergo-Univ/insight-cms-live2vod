@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { App, Button, Card, Col, Form, Input, Popconfirm, Row, Space, Spin, Statistic, Switch, Table, Tabs, Tag, Typography } from "antd";
+import { App, Button, Card, Col, Form, Input, InputNumber, Popconfirm, Row, Space, Spin, Statistic, Switch, Table, Tabs, Tag, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useNavigate, useParams } from "react-router";
 import { useTranslation } from "react-i18next";
@@ -35,6 +35,7 @@ type TenantDetail = {
   syndicationTiktokDefaultEnabled?: boolean;
   syndicationTiktokConnected?: boolean;
   tiktokUsername?: string | null;
+  syndicationAccountMaxByPlatform?: Partial<SyndicationAccountMaxByPlatform> | null;
   metadata: Record<string, unknown> | null;
 };
 
@@ -51,11 +52,31 @@ type FormShape = {
   syndicationInstagramDefaultEnabled: boolean;
   syndicationTiktokEnabled: boolean;
   syndicationTiktokDefaultEnabled: boolean;
+  syndicationAccountMaxByPlatform: SyndicationAccountMaxByPlatform;
   metadataJson: string;
 };
 
 type FacebookPageOption = { id: string; name: string };
 type NetworkName = "youtube" | "twitter" | "facebook" | "instagram" | "tiktok";
+type SyndicationAccountMaxByPlatform = Record<NetworkName, number>;
+
+const DEFAULT_SYNDICATION_ACCOUNT_MAX = 5;
+
+function defaultSyndicationAccountMaxByPlatform(
+  raw?: Partial<SyndicationAccountMaxByPlatform> | null,
+): SyndicationAccountMaxByPlatform {
+  const read = (value: unknown) => {
+    const n = Number(value);
+    return Number.isFinite(n) && n >= 1 ? Math.floor(n) : DEFAULT_SYNDICATION_ACCOUNT_MAX;
+  };
+  return {
+    youtube: read(raw?.youtube),
+    twitter: read(raw?.twitter),
+    facebook: read(raw?.facebook),
+    instagram: read(raw?.instagram),
+    tiktok: read(raw?.tiktok),
+  };
+}
 
 type SyndicationAccountRow = {
   id: string;
@@ -123,6 +144,7 @@ export function AdminTenantSettingsPage() {
         syndicationInstagramDefaultEnabled: data.syndicationInstagramDefaultEnabled === true,
         syndicationTiktokEnabled: data.syndicationTiktokEnabled === true,
         syndicationTiktokDefaultEnabled: data.syndicationTiktokDefaultEnabled === true,
+        syndicationAccountMaxByPlatform: defaultSyndicationAccountMaxByPlatform(data.syndicationAccountMaxByPlatform),
         metadataJson: data.metadata && typeof data.metadata === "object" ? JSON.stringify(data.metadata, null, 2) : "",
       });
       setSelectedFacebookPageId(typeof data.facebookPageId === "string" ? data.facebookPageId : "");
@@ -236,6 +258,9 @@ export function AdminTenantSettingsPage() {
       syndicationInstagramDefaultEnabled: Boolean(form.getFieldValue("syndicationInstagramDefaultEnabled")),
       syndicationTiktokEnabled: Boolean(form.getFieldValue("syndicationTiktokEnabled")),
       syndicationTiktokDefaultEnabled: Boolean(form.getFieldValue("syndicationTiktokDefaultEnabled")),
+      syndicationAccountMaxByPlatform: defaultSyndicationAccountMaxByPlatform(
+        form.getFieldValue("syndicationAccountMaxByPlatform"),
+      ),
       metadata,
     };
 
@@ -243,7 +268,7 @@ export function AdminTenantSettingsPage() {
     try {
       await getAdminClient().patch(`/tenants/${encodeURIComponent(tenantId)}`, payload);
       message.success(t("tenants.saved"));
-      await Promise.all([loadTenant(), loadDashboard()]);
+      await Promise.all([loadTenant(), loadDashboard(), loadSyndicationAccounts()]);
     } catch (e: unknown) {
       message.error(readErrorMessage(e));
     } finally {
@@ -396,59 +421,75 @@ export function AdminTenantSettingsPage() {
     { name: "syndicationTiktokDefaultEnabled", label: t("tenants.syndicationTiktokDefaultEnabledLabel") },
   ];
 
-  const syndicationAccountsColumns: ColumnsType<SyndicationAccountRow> = useMemo(
-    () => [
-      {
-        title: t("tenants.syndicationAccountsPlatform"),
-        dataIndex: "platform",
-        key: "platform",
-        render: (value: string) => <Tag>{value}</Tag>,
-      },
-      {
-        title: t("tenants.syndicationAccountsName"),
-        dataIndex: "displayName",
-        key: "displayName",
-      },
-      {
-        title: t("tenants.syndicationAccountsExternalId"),
-        dataIndex: "externalAccountId",
-        key: "externalAccountId",
-        ellipsis: true,
-      },
-      {
-        title: t("tenants.syndicationAccountsStatus"),
-        dataIndex: "status",
-        key: "status",
-        render: (value: string) => (
-          <Tag color={value === "active" ? "green" : value === "pending_selection" ? "gold" : "default"}>
-            {value}
-          </Tag>
-        ),
-      },
-      {
-        title: t("tenants.actions"),
-        key: "actions",
-        render: (_value, row) =>
-          can("tenants", "edit") ? (
-            <Popconfirm
-              title={t("tenants.syndicationAccountDisconnectConfirmTitle")}
-              description={t("tenants.syndicationAccountDisconnectConfirmDescription", {
-                name: row.displayName,
-                platform: row.platform,
-              })}
-              okText={t("tenants.syndicationAccountDisconnect")}
-              okButtonProps={{ danger: true }}
-              cancelText={t("common.cancel")}
-              onConfirm={() => void disconnectSyndicationAccount(row.id)}
-            >
-              <Button danger size="small" loading={disconnectLoading === row.id}>
-                {t("tenants.syndicationAccountDisconnect")}
-              </Button>
-            </Popconfirm>
-          ) : null,
-      },
-    ],
-    [can, disconnectLoading, disconnectSyndicationAccount, t],
+  const renderNetworkSyndicationSection = useCallback(
+    (network: NetworkName) => {
+      const networkAccounts = syndicationAccounts.filter((account) => account.platform === network);
+      const maxAccounts =
+        form.getFieldValue(["syndicationAccountMaxByPlatform", network]) ??
+        detail?.syndicationAccountMaxByPlatform?.[network] ??
+        DEFAULT_SYNDICATION_ACCOUNT_MAX;
+
+      return (
+        <>
+          <Form.Item
+            label={t("tenants.networkAccountsLabel")}
+            extra={t("tenants.networkAccountsHint", {
+              count: networkAccounts.length,
+              max: maxAccounts,
+            })}
+          >
+            {syndicationAccountsLoading ? (
+              <Typography.Text type="secondary">{t("common.loading")}</Typography.Text>
+            ) : networkAccounts.length === 0 ? (
+              <Typography.Text type="secondary">{t("tenants.syndicationAccountsEmpty")}</Typography.Text>
+            ) : (
+              <Space direction="vertical" size={8} style={{ width: "100%" }}>
+                <Space wrap size={[8, 8]}>
+                  {networkAccounts.map((account) => (
+                    <Tag
+                      key={account.id}
+                      color={account.status === "active" ? "green" : account.status === "pending_selection" ? "gold" : "default"}
+                    >
+                      {account.displayName}
+                    </Tag>
+                  ))}
+                </Space>
+                {can("tenants", "edit") ? (
+                  <Space wrap>
+                    {networkAccounts.map((account) => (
+                      <Popconfirm
+                        key={`disconnect-${account.id}`}
+                        title={t("tenants.syndicationAccountDisconnectConfirmTitle")}
+                        description={t("tenants.syndicationAccountDisconnectConfirmDescription", {
+                          name: account.displayName,
+                          platform: account.platform,
+                        })}
+                        okText={t("tenants.syndicationAccountDisconnect")}
+                        okButtonProps={{ danger: true }}
+                        cancelText={t("common.cancel")}
+                        onConfirm={() => void disconnectSyndicationAccount(account.id)}
+                      >
+                        <Button danger size="small" loading={disconnectLoading === account.id}>
+                          {t("tenants.syndicationAccountDisconnectNamed", { name: account.displayName })}
+                        </Button>
+                      </Popconfirm>
+                    ))}
+                  </Space>
+                ) : null}
+              </Space>
+            )}
+          </Form.Item>
+          <Form.Item
+            label={t("tenants.syndicationMaxAccountsLabel")}
+            name={["syndicationAccountMaxByPlatform", network]}
+            extra={t("tenants.syndicationMaxAccountsHint", { defaultMax: DEFAULT_SYNDICATION_ACCOUNT_MAX })}
+          >
+            <InputNumber min={1} max={50} disabled={!can("tenants", "edit")} style={{ width: 140 }} />
+          </Form.Item>
+        </>
+      );
+    },
+    [can, detail?.syndicationAccountMaxByPlatform, disconnectLoading, disconnectSyndicationAccount, form, syndicationAccounts, syndicationAccountsLoading, t],
   );
 
   return (
@@ -603,28 +644,6 @@ export function AdminTenantSettingsPage() {
                         </Space>
                       </Form.Item>
                     ))}
-                    <Card
-                      title={t("tenants.syndicationAccountsTitle")}
-                      extra={
-                        <Button size="small" onClick={() => void loadSyndicationAccounts()} loading={syndicationAccountsLoading}>
-                          {t("tenants.facebookPagesReload")}
-                        </Button>
-                      }
-                      style={{ marginTop: 16 }}
-                    >
-                      <Typography.Paragraph type="secondary" style={{ marginBottom: 12 }}>
-                        {t("tenants.syndicationAccountsHint")}
-                      </Typography.Paragraph>
-                      <Table<SyndicationAccountRow>
-                        rowKey="id"
-                        size="small"
-                        loading={syndicationAccountsLoading}
-                        columns={syndicationAccountsColumns}
-                        dataSource={syndicationAccounts}
-                        pagination={false}
-                        locale={{ emptyText: t("tenants.syndicationAccountsEmpty") }}
-                      />
-                    </Card>
                   </div>
                 ),
               },
@@ -632,54 +651,60 @@ export function AdminTenantSettingsPage() {
                 key: "youtube",
                 label: "YouTube",
                 children: (
-                  <Form.Item label={t("tenants.youtubeConnectionLabel")} extra={t("tenants.youtubeConnectionHint")}>
-                    <Space wrap>
-                      <Tag className="admin-connection-pill" color={detail?.syndicationYoutubeConnected ? "green" : "default"}>
-                        {detail?.syndicationYoutubeConnected ? t("tenants.youtubeConnected") : t("tenants.youtubeNotConnected")}
-                      </Tag>
-                      {can("tenants", "edit") && detail?.syndicationYoutubeConnected ? (
-                        <Popconfirm
-                          title={t("tenants.youtubeDisconnectConfirmTitle")}
-                          description={t("tenants.youtubeDisconnectConfirmDescription")}
-                          okText={t("tenants.youtubeDisconnect")}
-                          okButtonProps={{ danger: true }}
-                          cancelText={t("common.cancel")}
-                          onConfirm={() => void disconnectNetwork("youtube")}
-                        >
-                          <Button className="admin-connection-pill" danger loading={disconnectLoading === "youtube"}>
-                            {t("tenants.youtubeDisconnect")}
-                          </Button>
-                        </Popconfirm>
-                      ) : null}
-                    </Space>
-                  </Form.Item>
+                  <div style={{ maxWidth: 900 }}>
+                    <Form.Item label={t("tenants.youtubeConnectionLabel")} extra={t("tenants.youtubeConnectionHint")}>
+                      <Space wrap>
+                        <Tag className="admin-connection-pill" color={detail?.syndicationYoutubeConnected ? "green" : "default"}>
+                          {detail?.syndicationYoutubeConnected ? t("tenants.youtubeConnected") : t("tenants.youtubeNotConnected")}
+                        </Tag>
+                        {can("tenants", "edit") && detail?.syndicationYoutubeConnected ? (
+                          <Popconfirm
+                            title={t("tenants.youtubeDisconnectConfirmTitle")}
+                            description={t("tenants.youtubeDisconnectConfirmDescription")}
+                            okText={t("tenants.youtubeDisconnect")}
+                            okButtonProps={{ danger: true }}
+                            cancelText={t("common.cancel")}
+                            onConfirm={() => void disconnectNetwork("youtube")}
+                          >
+                            <Button className="admin-connection-pill" danger loading={disconnectLoading === "youtube"}>
+                              {t("tenants.youtubeDisconnect")}
+                            </Button>
+                          </Popconfirm>
+                        ) : null}
+                      </Space>
+                    </Form.Item>
+                    {renderNetworkSyndicationSection("youtube")}
+                  </div>
                 ),
               },
               {
                 key: "twitter",
                 label: "X",
                 children: (
-                  <Form.Item label={t("tenants.twitterConnectionLabel")} extra={t("tenants.twitterConnectionHint")}>
-                    <Space wrap>
-                      <Tag className="admin-connection-pill" color={detail?.syndicationTwitterConnected ? "green" : "default"}>
-                        {detail?.syndicationTwitterConnected ? t("tenants.twitterConnected") : t("tenants.twitterNotConnected")}
-                      </Tag>
-                      {can("tenants", "edit") && detail?.syndicationTwitterConnected ? (
-                        <Popconfirm
-                          title={t("tenants.twitterDisconnectConfirmTitle")}
-                          description={t("tenants.twitterDisconnectConfirmDescription")}
-                          okText={t("tenants.twitterDisconnect")}
-                          okButtonProps={{ danger: true }}
-                          cancelText={t("common.cancel")}
-                          onConfirm={() => void disconnectNetwork("twitter")}
-                        >
-                          <Button className="admin-connection-pill" danger loading={disconnectLoading === "twitter"}>
-                            {t("tenants.twitterDisconnect")}
-                          </Button>
-                        </Popconfirm>
-                      ) : null}
-                    </Space>
-                  </Form.Item>
+                  <div style={{ maxWidth: 900 }}>
+                    <Form.Item label={t("tenants.twitterConnectionLabel")} extra={t("tenants.twitterConnectionHint")}>
+                      <Space wrap>
+                        <Tag className="admin-connection-pill" color={detail?.syndicationTwitterConnected ? "green" : "default"}>
+                          {detail?.syndicationTwitterConnected ? t("tenants.twitterConnected") : t("tenants.twitterNotConnected")}
+                        </Tag>
+                        {can("tenants", "edit") && detail?.syndicationTwitterConnected ? (
+                          <Popconfirm
+                            title={t("tenants.twitterDisconnectConfirmTitle")}
+                            description={t("tenants.twitterDisconnectConfirmDescription")}
+                            okText={t("tenants.twitterDisconnect")}
+                            okButtonProps={{ danger: true }}
+                            cancelText={t("common.cancel")}
+                            onConfirm={() => void disconnectNetwork("twitter")}
+                          >
+                            <Button className="admin-connection-pill" danger loading={disconnectLoading === "twitter"}>
+                              {t("tenants.twitterDisconnect")}
+                            </Button>
+                          </Popconfirm>
+                        ) : null}
+                      </Space>
+                    </Form.Item>
+                    {renderNetworkSyndicationSection("twitter")}
+                  </div>
                 ),
               },
               {
@@ -762,6 +787,7 @@ export function AdminTenantSettingsPage() {
                         </Space>
                       </Space>
                     </Form.Item>
+                    {renderNetworkSyndicationSection("facebook")}
                   </div>
                 ),
               },
@@ -769,35 +795,39 @@ export function AdminTenantSettingsPage() {
                 key: "instagram",
                 label: "Instagram",
                 children: (
-                  <Form.Item label={t("tenants.instagramConnectionLabel")} extra={t("tenants.instagramConnectionHint")}>
-                    <Space wrap>
-                      <Tag className="admin-connection-pill" color={detail?.syndicationInstagramConnected ? "green" : "default"}>
-                        {detail?.syndicationInstagramConnected ? t("tenants.instagramConnected") : t("tenants.instagramNotConnected")}
-                      </Tag>
-                      {detail?.instagramUsername ? <Tag color="purple">@{detail.instagramUsername}</Tag> : null}
-                      {can("tenants", "edit") && detail?.syndicationInstagramConnected ? (
-                        <Popconfirm
-                          title={t("tenants.instagramDisconnectConfirmTitle")}
-                          description={t("tenants.instagramDisconnectConfirmDescription")}
-                          okText={t("tenants.instagramDisconnect")}
-                          okButtonProps={{ danger: true }}
-                          cancelText={t("common.cancel")}
-                          onConfirm={() => void disconnectNetwork("instagram")}
-                        >
-                          <Button className="admin-connection-pill" danger loading={disconnectLoading === "instagram"}>
-                            {t("tenants.instagramDisconnect")}
-                          </Button>
-                        </Popconfirm>
-                      ) : null}
-                    </Space>
-                  </Form.Item>
+                  <div style={{ maxWidth: 900 }}>
+                    <Form.Item label={t("tenants.instagramConnectionLabel")} extra={t("tenants.instagramConnectionHint")}>
+                      <Space wrap>
+                        <Tag className="admin-connection-pill" color={detail?.syndicationInstagramConnected ? "green" : "default"}>
+                          {detail?.syndicationInstagramConnected ? t("tenants.instagramConnected") : t("tenants.instagramNotConnected")}
+                        </Tag>
+                        {detail?.instagramUsername ? <Tag color="purple">@{detail.instagramUsername}</Tag> : null}
+                        {can("tenants", "edit") && detail?.syndicationInstagramConnected ? (
+                          <Popconfirm
+                            title={t("tenants.instagramDisconnectConfirmTitle")}
+                            description={t("tenants.instagramDisconnectConfirmDescription")}
+                            okText={t("tenants.instagramDisconnect")}
+                            okButtonProps={{ danger: true }}
+                            cancelText={t("common.cancel")}
+                            onConfirm={() => void disconnectNetwork("instagram")}
+                          >
+                            <Button className="admin-connection-pill" danger loading={disconnectLoading === "instagram"}>
+                              {t("tenants.instagramDisconnect")}
+                            </Button>
+                          </Popconfirm>
+                        ) : null}
+                      </Space>
+                    </Form.Item>
+                    {renderNetworkSyndicationSection("instagram")}
+                  </div>
                 ),
               },
               {
                 key: "tiktok",
                 label: "TikTok",
                 children: (
-                  <Form.Item label={t("tenants.tiktokConnectionLabel")} extra={t("tenants.tiktokConnectionHint")}>
+                  <div style={{ maxWidth: 900 }}>
+                    <Form.Item label={t("tenants.tiktokConnectionLabel")} extra={t("tenants.tiktokConnectionHint")}>
                     <Space wrap>
                       <Tag className="admin-connection-pill" color={detail?.syndicationTiktokConnected ? "green" : "default"}>
                         {detail?.syndicationTiktokConnected ? t("tenants.tiktokConnected") : t("tenants.tiktokNotConnected")}
@@ -819,6 +849,8 @@ export function AdminTenantSettingsPage() {
                       ) : null}
                     </Space>
                   </Form.Item>
+                    {renderNetworkSyndicationSection("tiktok")}
+                  </div>
                 ),
               },
               {

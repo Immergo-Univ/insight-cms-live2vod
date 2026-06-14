@@ -24,6 +24,16 @@ import {
   queryTiktokCreatorInfoForTenant,
 } from "../services/tenant-syndication.service.js";
 import { config } from "../config.js";
+
+function mapSyndicationRouteError(e) {
+  const m = e instanceof Error ? e.message : String(e);
+  const err = /** @type {Error & { code?: string }} */ (e);
+  if (err.code === "ACCOUNT_LIMIT_REACHED") {
+    return { status: 403, message: m, code: err.code };
+  }
+  const status = m.includes("not available") ? 503 : 400;
+  return { status, message: m };
+}
 import {
   getResolvedYoutubeOAuth,
   getResolvedTwitterOAuth,
@@ -138,9 +148,9 @@ tenantsRouter.post("/ensure", async (req, res) => {
     const tenant = await ensureTenantVisited({ tenantId, timezone, metadata });
     res.json({ tenant });
   } catch (e) {
-    const m = e instanceof Error ? e.message : String(e);
-    const code = m.includes("not available") ? 503 : 400;
-    res.status(code).json({ error: m });
+    const out = mapSyndicationRouteError(e);
+    const body = out.code ? { error: out.message, code: out.code } : { error: out.message };
+    res.status(out.status).json(body);
   }
 });
 
@@ -316,9 +326,9 @@ tenantsRouter.get("/:tenantId/syndication/youtube/auth-url", async (req, res) =>
     const url = await buildYoutubeAuthorizationUrl(tenantId);
     res.json({ url });
   } catch (e) {
-    const m = e instanceof Error ? e.message : String(e);
-    const code = m.includes("not available") ? 503 : 400;
-    res.status(code).json({ error: m });
+    const out = mapSyndicationRouteError(e);
+    const body = out.code ? { error: out.message, code: out.code } : { error: out.message };
+    res.status(out.status).json(body);
   }
 });
 
@@ -329,9 +339,9 @@ tenantsRouter.post("/:tenantId/syndication/youtube/mock-authorize", async (req, 
     if (!status) return res.status(404).json({ error: "Tenant not found" });
     res.json(status);
   } catch (e) {
-    const m = e instanceof Error ? e.message : String(e);
-    const code = m.includes("not available") ? 503 : 400;
-    res.status(code).json({ error: m });
+    const out = mapSyndicationRouteError(e);
+    const body = out.code ? { error: out.message, code: out.code } : { error: out.message };
+    res.status(out.status).json(body);
   }
 });
 
@@ -343,9 +353,9 @@ tenantsRouter.get("/:tenantId/syndication/twitter/auth-url", async (req, res) =>
     const url = await buildTwitterAuthorizationUrl(tenantId);
     res.json({ url });
   } catch (e) {
-    const m = e instanceof Error ? e.message : String(e);
-    const code = m.includes("not available") ? 503 : 400;
-    res.status(code).json({ error: m });
+    const out = mapSyndicationRouteError(e);
+    const body = out.code ? { error: out.message, code: out.code } : { error: out.message };
+    res.status(out.status).json(body);
   }
 });
 
@@ -356,9 +366,9 @@ tenantsRouter.post("/:tenantId/syndication/twitter/mock-authorize", async (req, 
     if (!status) return res.status(404).json({ error: "Tenant not found" });
     res.json(status);
   } catch (e) {
-    const m = e instanceof Error ? e.message : String(e);
-    const code = m.includes("not available") ? 503 : 400;
-    res.status(code).json({ error: m });
+    const out = mapSyndicationRouteError(e);
+    const body = out.code ? { error: out.message, code: out.code } : { error: out.message };
+    res.status(out.status).json(body);
   }
 });
 
@@ -370,9 +380,9 @@ tenantsRouter.get("/:tenantId/syndication/facebook/auth-url", async (req, res) =
     const url = await buildFacebookAuthorizationUrl(tenantId);
     res.json({ url });
   } catch (e) {
-    const m = e instanceof Error ? e.message : String(e);
-    const code = m.includes("not available") ? 503 : 400;
-    res.status(code).json({ error: m });
+    const out = mapSyndicationRouteError(e);
+    const body = out.code ? { error: out.message, code: out.code } : { error: out.message };
+    res.status(out.status).json(body);
   }
 });
 
@@ -385,9 +395,9 @@ tenantsRouter.get("/:tenantId/syndication/facebook/pages", async (req, res) => {
     const pages = await listFacebookPagesForTenant(tenantId, accountId);
     res.json({ pages });
   } catch (e) {
-    const m = e instanceof Error ? e.message : String(e);
-    const code = m.includes("not available") ? 503 : 400;
-    res.status(code).json({ error: m });
+    const out = mapSyndicationRouteError(e);
+    const body = out.code ? { error: out.message, code: out.code } : { error: out.message };
+    res.status(out.status).json(body);
   }
 });
 
@@ -407,8 +417,9 @@ tenantsRouter.post("/:tenantId/syndication/facebook/select-page", async (req, re
     if (err.code === "DUPLICATE_ACCOUNT") {
       return res.status(409).json({ error: m, code: "DUPLICATE_ACCOUNT" });
     }
-    const code = m.includes("not available") ? 503 : 400;
-    res.status(code).json({ error: m });
+    const out = mapSyndicationRouteError(e);
+    const body = out.code ? { error: out.message, code: out.code } : { error: out.message };
+    return res.status(out.status).json(body);
   }
 });
 
@@ -419,9 +430,9 @@ tenantsRouter.post("/:tenantId/syndication/facebook/mock-authorize", async (req,
     if (!status) return res.status(404).json({ error: "Tenant not found" });
     res.json(status);
   } catch (e) {
-    const m = e instanceof Error ? e.message : String(e);
-    const code = m.includes("not available") ? 503 : 400;
-    res.status(code).json({ error: m });
+    const out = mapSyndicationRouteError(e);
+    const body = out.code ? { error: out.message, code: out.code } : { error: out.message };
+    res.status(out.status).json(body);
   }
 });
 
@@ -433,9 +444,9 @@ tenantsRouter.get("/:tenantId/syndication/instagram/auth-url", async (req, res) 
     const url = await buildInstagramAuthorizationUrl(tenantId);
     res.json({ url });
   } catch (e) {
-    const m = e instanceof Error ? e.message : String(e);
-    const code = m.includes("not available") ? 503 : 400;
-    res.status(code).json({ error: m });
+    const out = mapSyndicationRouteError(e);
+    const body = out.code ? { error: out.message, code: out.code } : { error: out.message };
+    res.status(out.status).json(body);
   }
 });
 
@@ -447,9 +458,9 @@ tenantsRouter.get("/:tenantId/syndication/instagram/accounts", async (req, res) 
     if (accounts === null) return res.status(404).json({ error: "Tenant not found" });
     res.json({ accounts });
   } catch (e) {
-    const m = e instanceof Error ? e.message : String(e);
-    const code = m.includes("not available") ? 503 : 400;
-    res.status(code).json({ error: m });
+    const out = mapSyndicationRouteError(e);
+    const body = out.code ? { error: out.message, code: out.code } : { error: out.message };
+    res.status(out.status).json(body);
   }
 });
 
@@ -469,8 +480,9 @@ tenantsRouter.post("/:tenantId/syndication/instagram/select-account", async (req
     if (err.code === "DUPLICATE_ACCOUNT") {
       return res.status(409).json({ error: m, code: "DUPLICATE_ACCOUNT" });
     }
-    const code = m.includes("not available") ? 503 : 400;
-    res.status(code).json({ error: m });
+    const out = mapSyndicationRouteError(e);
+    const body = out.code ? { error: out.message, code: out.code } : { error: out.message };
+    return res.status(out.status).json(body);
   }
 });
 
@@ -481,9 +493,9 @@ tenantsRouter.post("/:tenantId/syndication/instagram/mock-authorize", async (req
     if (!status) return res.status(404).json({ error: "Tenant not found" });
     res.json(status);
   } catch (e) {
-    const m = e instanceof Error ? e.message : String(e);
-    const code = m.includes("not available") ? 503 : 400;
-    res.status(code).json({ error: m });
+    const out = mapSyndicationRouteError(e);
+    const body = out.code ? { error: out.message, code: out.code } : { error: out.message };
+    res.status(out.status).json(body);
   }
 });
 
@@ -495,9 +507,9 @@ tenantsRouter.get("/:tenantId/syndication/tiktok/auth-url", async (req, res) => 
     const url = await buildTiktokAuthorizationUrl(tenantId);
     res.json({ url });
   } catch (e) {
-    const m = e instanceof Error ? e.message : String(e);
-    const code = m.includes("not available") ? 503 : 400;
-    res.status(code).json({ error: m });
+    const out = mapSyndicationRouteError(e);
+    const body = out.code ? { error: out.message, code: out.code } : { error: out.message };
+    res.status(out.status).json(body);
   }
 });
 
@@ -509,9 +521,9 @@ tenantsRouter.get("/:tenantId/syndication/tiktok/creator-info", async (req, res)
     const creatorInfo = await queryTiktokCreatorInfoForTenant(tenantId);
     res.json({ creatorInfo });
   } catch (e) {
-    const m = e instanceof Error ? e.message : String(e);
-    const code = m.includes("not available") ? 503 : 400;
-    res.status(code).json({ error: m });
+    const out = mapSyndicationRouteError(e);
+    const body = out.code ? { error: out.message, code: out.code } : { error: out.message };
+    res.status(out.status).json(body);
   }
 });
 
@@ -522,9 +534,9 @@ tenantsRouter.post("/:tenantId/syndication/tiktok/mock-authorize", async (req, r
     if (!status) return res.status(404).json({ error: "Tenant not found" });
     res.json(status);
   } catch (e) {
-    const m = e instanceof Error ? e.message : String(e);
-    const code = m.includes("not available") ? 503 : 400;
-    res.status(code).json({ error: m });
+    const out = mapSyndicationRouteError(e);
+    const body = out.code ? { error: out.message, code: out.code } : { error: out.message };
+    res.status(out.status).json(body);
   }
 });
 

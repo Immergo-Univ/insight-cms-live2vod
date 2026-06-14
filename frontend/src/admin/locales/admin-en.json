@@ -120,7 +120,12 @@
     "syndicationAccountDisconnect": "Disconnect account",
     "syndicationAccountDisconnectConfirmTitle": "Disconnect this account?",
     "syndicationAccountDisconnectConfirmDescription": "Remove {{name}} ({{platform}}) from this tenant. Other accounts on the same platform will stay connected.",
-    "syndicationAccountDisconnected": "Account disconnected"
+    "syndicationAccountDisconnected": "Account disconnected",
+    "networkAccountsLabel": "Associated accounts",
+    "networkAccountsHint": "{{count}} of {{max}} accounts connected for this network.",
+    "syndicationMaxAccountsLabel": "Maximum accounts",
+    "syndicationMaxAccountsHint": "Maximum OAuth accounts this tenant may connect on this network (default {{defaultMax}}). Save to apply.",
+    "syndicationAccountDisconnectNamed": "Disconnect {{name}}"
   },
   "clips": {
     "title": "Generated clips",

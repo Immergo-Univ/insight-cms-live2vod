@@ -25,6 +25,7 @@ import {
   syncTenantSyndicationConnectedFlags,
   updateSyndicationAccount,
 } from "./tenant-syndication-accounts.service.js";
+import { assertCanAddSyndicationAccount } from "./tenant-syndication-account-limits.service.js";
 
 /** @typedef {{ tenantId: string, outcome: 'connected'|'duplicate'|'pending', accountId?: string }} OAuthCallbackResult */
 
@@ -129,6 +130,7 @@ export async function getSyndicationStatusForTenant(tenantId) {
  */
 export async function buildYoutubeAuthorizationUrl(tenantId) {
   const id = String(tenantId || "").trim();
+  await assertCanAddSyndicationAccount(id, "youtube");
   const { clientId, clientSecret, redirectUri } = await getResolvedYoutubeOAuth();
   if (!clientId || !clientSecret || !redirectUri) {
     throw new Error(
@@ -449,6 +451,7 @@ function twitterPkceChallenge(codeVerifier) {
  */
 export async function buildTwitterAuthorizationUrl(tenantId) {
   const id = String(tenantId || "").trim();
+  await assertCanAddSyndicationAccount(id, "twitter");
   const { clientId, clientSecret, redirectUri } = await getResolvedTwitterOAuth();
   if (!clientId || !clientSecret || !redirectUri) {
     throw new Error(
@@ -880,6 +883,7 @@ async function facebookGraphGet(pathWithQuery) {
  */
 export async function buildFacebookAuthorizationUrl(tenantId) {
   const id = String(tenantId || "").trim();
+  await assertCanAddSyndicationAccount(id, "facebook");
   const { clientId, clientSecret, redirectUri } = await getResolvedFacebookOAuth();
   if (!clientId || !clientSecret || !redirectUri) {
     throw new Error(
@@ -1333,6 +1337,7 @@ async function instagramExchangeCodeForLongLivedToken(code, clientId, clientSecr
  */
 export async function buildInstagramAuthorizationUrl(tenantId) {
   const id = String(tenantId || "").trim();
+  await assertCanAddSyndicationAccount(id, "instagram");
   const { clientId, clientSecret, redirectUri } = await getResolvedInstagramOAuth();
   if (!clientId || !clientSecret || !redirectUri) {
     throw new Error(
@@ -1795,6 +1800,7 @@ async function tiktokApiPost(accessToken, path, body = {}) {
  */
 export async function buildTiktokAuthorizationUrl(tenantId) {
   const id = String(tenantId || "").trim();
+  await assertCanAddSyndicationAccount(id, "tiktok");
   const { clientKey, clientSecret, redirectUri } = await getResolvedTiktokOAuth();
   if (!clientKey || !clientSecret || !redirectUri) {
     throw new Error(

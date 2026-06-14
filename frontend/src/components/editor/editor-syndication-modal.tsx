@@ -342,6 +342,9 @@ export function EditorSyndicationModal({
   const [ttDraft, setTtDraft] = useState<EditorClipTiktokSyndication>(() =>
     clip ? defaultTiktokBranch(clip, syndicationTiktokDefaultEnabled) : { enabled: false, options: {} },
   );
+  const [platformLimits, setPlatformLimits] = useState<
+    Record<string, { maxAccounts: number; accountCount: number; canAddAccount: boolean }>
+  >({});
 
   const loadStatus = useCallback(async () => {
     const id = tenantId.trim();
@@ -369,6 +372,33 @@ export function EditorSyndicationModal({
       setTiktokConnected(s.tiktok.connected);
       setTiktokAccounts(s.tiktok.accounts ?? []);
       setTiktokMockAuthAvailable(!!s.tiktok.mockAuthAvailable);
+      setPlatformLimits({
+        youtube: {
+          maxAccounts: s.youtube.maxAccounts ?? 5,
+          accountCount: s.youtube.accountCount ?? (s.youtube.accounts?.length ?? 0),
+          canAddAccount: s.youtube.canAddAccount !== false,
+        },
+        twitter: {
+          maxAccounts: s.twitter.maxAccounts ?? 5,
+          accountCount: s.twitter.accountCount ?? (s.twitter.accounts?.length ?? 0),
+          canAddAccount: s.twitter.canAddAccount !== false,
+        },
+        facebook: {
+          maxAccounts: s.facebook.maxAccounts ?? 5,
+          accountCount: s.facebook.accountCount ?? (s.facebook.accounts?.length ?? 0),
+          canAddAccount: s.facebook.canAddAccount !== false,
+        },
+        instagram: {
+          maxAccounts: s.instagram.maxAccounts ?? 5,
+          accountCount: s.instagram.accountCount ?? (s.instagram.accounts?.length ?? 0),
+          canAddAccount: s.instagram.canAddAccount !== false,
+        },
+        tiktok: {
+          maxAccounts: s.tiktok.maxAccounts ?? 5,
+          accountCount: s.tiktok.accountCount ?? (s.tiktok.accounts?.length ?? 0),
+          canAddAccount: s.tiktok.canAddAccount !== false,
+        },
+      });
     } catch (e) {
       setStatusError(e instanceof Error ? e.message : "Failed to load syndication status");
       setYoutubeConnected(false);
@@ -1107,6 +1137,9 @@ export function EditorSyndicationModal({
                       readOnly={readOnly}
                       authBusy={authBusy}
                       onAddAccount={() => void handleStartOAuth()}
+                      canAddAccount={platformLimits.youtube?.canAddAccount !== false}
+                      maxAccounts={platformLimits.youtube?.maxAccounts ?? 5}
+                      accountCount={platformLimits.youtube?.accountCount}
                     />
                   </div>
                 )}
@@ -1168,6 +1201,9 @@ export function EditorSyndicationModal({
                       readOnly={readOnly}
                       authBusy={authBusy}
                       onAddAccount={() => void handleStartTwitterOAuth()}
+                      canAddAccount={platformLimits.twitter?.canAddAccount !== false}
+                      maxAccounts={platformLimits.twitter?.maxAccounts ?? 5}
+                      accountCount={platformLimits.twitter?.accountCount}
                     />
                   </div>
                 )}
@@ -1277,6 +1313,9 @@ export function EditorSyndicationModal({
                       readOnly={readOnly}
                       authBusy={authBusy}
                       onAddAccount={() => void handleStartFacebookOAuth()}
+                      canAddAccount={platformLimits.facebook?.canAddAccount !== false}
+                      maxAccounts={platformLimits.facebook?.maxAccounts ?? 5}
+                      accountCount={platformLimits.facebook?.accountCount}
                     />
                   </div>
                 )}
@@ -1393,6 +1432,9 @@ export function EditorSyndicationModal({
                       readOnly={readOnly}
                       authBusy={authBusy}
                       onAddAccount={() => void handleStartInstagramOAuth()}
+                      canAddAccount={platformLimits.instagram?.canAddAccount !== false}
+                      maxAccounts={platformLimits.instagram?.maxAccounts ?? 5}
+                      accountCount={platformLimits.instagram?.accountCount}
                     />
                   </div>
                 )}
@@ -1521,6 +1563,9 @@ export function EditorSyndicationModal({
                       readOnly={readOnly}
                       authBusy={authBusy}
                       onAddAccount={() => void handleStartTiktokOAuth()}
+                      canAddAccount={platformLimits.tiktok?.canAddAccount !== false}
+                      maxAccounts={platformLimits.tiktok?.maxAccounts ?? 5}
+                      accountCount={platformLimits.tiktok?.accountCount}
                     />
                   </div>
                 )}
