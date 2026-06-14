@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useLocation } from "react-router";
+import { toast } from "sonner";
 import { postTenantEnsure, type TenantDto } from "@/services/tenant-bff.service";
 
 type TenantSettingsContextValue = {
@@ -106,6 +107,32 @@ export function TenantSettingsProvider({ children }: { children: ReactNode }) {
       }
       if (q.get("tiktokConnected") === "1") {
         q.delete("tiktokConnected");
+        changed = true;
+      }
+      const duplicateChecks: Array<[string, string]> = [
+        ["youtubeDuplicate", "This YouTube account is already authorized."],
+        ["twitterDuplicate", "This X account is already authorized."],
+        ["facebookDuplicate", "This Facebook Page is already authorized."],
+        ["instagramDuplicate", "This Instagram account is already authorized."],
+        ["tiktokDuplicate", "This TikTok account is already authorized."],
+      ];
+      for (const [key, message] of duplicateChecks) {
+        if (q.get(key) === "1") {
+          toast.info(message);
+          q.delete(key);
+          changed = true;
+        }
+      }
+      if (q.get("facebookPending") === "1") {
+        q.delete("facebookPending");
+        changed = true;
+      }
+      if (q.get("instagramPending") === "1") {
+        q.delete("instagramPending");
+        changed = true;
+      }
+      if (q.get("accountId")) {
+        q.delete("accountId");
         changed = true;
       }
       if (changed) {

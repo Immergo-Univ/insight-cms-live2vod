@@ -62,104 +62,71 @@ function readGoogleOAuthCallbackQuery(req) {
   return { code, state };
 }
 
-function buildYoutubeOAuthSuccessRedirect(tenantId) {
+function buildOAuthRedirect(baseConfig, tenantId, params) {
   const tid = String(tenantId || "").trim();
-  const base = (config.youtube.oauthSuccessRedirect || "").trim();
+  const base = (baseConfig || "").trim();
+  const entries = Object.entries({ tenantId: tid, ...params });
   if (!base) {
-    return `/?youtubeConnected=1&tenantId=${encodeURIComponent(tid)}`;
+    const q = new URLSearchParams(entries.map(([k, v]) => [k, String(v)]));
+    return `/?${q.toString()}`;
   }
   try {
     if (/^https?:\/\//i.test(base)) {
       const u = new URL(base);
-      u.searchParams.set("youtubeConnected", "1");
-      u.searchParams.set("tenantId", tid);
+      for (const [k, v] of entries) u.searchParams.set(k, String(v));
       return u.toString();
     }
   } catch {
     /* fall through */
   }
   const sep = base.includes("?") ? "&" : "?";
-  return `${base}${sep}youtubeConnected=1&tenantId=${encodeURIComponent(tid)}`;
+  const q = entries.map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`).join("&");
+  return `${base}${sep}${q}`;
 }
 
-function buildTwitterOAuthSuccessRedirect(tenantId) {
-  const tid = String(tenantId || "").trim();
-  const base = (config.twitter.oauthSuccessRedirect || "").trim();
-  if (!base) {
-    return `/?twitterConnected=1&tenantId=${encodeURIComponent(tid)}`;
+function buildYoutubeOAuthSuccessRedirect(tenantId, outcome = "connected", accountId) {
+  if (outcome === "duplicate") {
+    return buildOAuthRedirect(config.youtube.oauthSuccessRedirect, tenantId, { youtubeDuplicate: "1" });
   }
-  try {
-    if (/^https?:\/\//i.test(base)) {
-      const u = new URL(base);
-      u.searchParams.set("twitterConnected", "1");
-      u.searchParams.set("tenantId", tid);
-      return u.toString();
-    }
-  } catch {
-    /* fall through */
-  }
-  const sep = base.includes("?") ? "&" : "?";
-  return `${base}${sep}twitterConnected=1&tenantId=${encodeURIComponent(tid)}`;
+  return buildOAuthRedirect(config.youtube.oauthSuccessRedirect, tenantId, { youtubeConnected: "1" });
 }
 
-function buildFacebookOAuthSuccessRedirect(tenantId) {
-  const tid = String(tenantId || "").trim();
-  const base = (config.facebook.oauthSuccessRedirect || "").trim();
-  if (!base) {
-    return `/?facebookConnected=1&tenantId=${encodeURIComponent(tid)}`;
+function buildTwitterOAuthSuccessRedirect(tenantId, outcome = "connected") {
+  if (outcome === "duplicate") {
+    return buildOAuthRedirect(config.twitter.oauthSuccessRedirect, tenantId, { twitterDuplicate: "1" });
   }
-  try {
-    if (/^https?:\/\//i.test(base)) {
-      const u = new URL(base);
-      u.searchParams.set("facebookConnected", "1");
-      u.searchParams.set("tenantId", tid);
-      return u.toString();
-    }
-  } catch {
-    /* fall through */
-  }
-  const sep = base.includes("?") ? "&" : "?";
-  return `${base}${sep}facebookConnected=1&tenantId=${encodeURIComponent(tid)}`;
+  return buildOAuthRedirect(config.twitter.oauthSuccessRedirect, tenantId, { twitterConnected: "1" });
 }
 
-function buildInstagramOAuthSuccessRedirect(tenantId) {
-  const tid = String(tenantId || "").trim();
-  const base = (config.instagram.oauthSuccessRedirect || "").trim();
-  if (!base) {
-    return `/?instagramConnected=1&tenantId=${encodeURIComponent(tid)}`;
+function buildFacebookOAuthSuccessRedirect(tenantId, outcome = "connected", accountId) {
+  if (outcome === "duplicate") {
+    return buildOAuthRedirect(config.facebook.oauthSuccessRedirect, tenantId, { facebookDuplicate: "1" });
   }
-  try {
-    if (/^https?:\/\//i.test(base)) {
-      const u = new URL(base);
-      u.searchParams.set("instagramConnected", "1");
-      u.searchParams.set("tenantId", tid);
-      return u.toString();
-    }
-  } catch {
-    /* fall through */
+  const params = { facebookConnected: "1" };
+  if (outcome === "pending" && accountId) {
+    params.facebookPending = "1";
+    params.accountId = accountId;
   }
-  const sep = base.includes("?") ? "&" : "?";
-  return `${base}${sep}instagramConnected=1&tenantId=${encodeURIComponent(tid)}`;
+  return buildOAuthRedirect(config.facebook.oauthSuccessRedirect, tenantId, params);
 }
 
-function buildTiktokOAuthSuccessRedirect(tenantId) {
-  const tid = String(tenantId || "").trim();
-  const base = (config.tiktok.oauthSuccessRedirect || "").trim();
-  if (!base) {
-    return `/?tiktokConnected=1&tenantId=${encodeURIComponent(tid)}`;
+function buildInstagramOAuthSuccessRedirect(tenantId, outcome = "connected", accountId) {
+  if (outcome === "duplicate") {
+    return buildOAuthRedirect(config.instagram.oauthSuccessRedirect, tenantId, { instagramDuplicate: "1" });
   }
-  try {
-    if (/^https?:\/\//i.test(base)) {
-      const u = new URL(base);
-      u.searchParams.set("tiktokConnected", "1");
-      u.searchParams.set("tenantId", tid);
-      return u.toString();
-    }
-  } catch {
-    /* fall through */
+  const params = { instagramConnected: "1" };
+  if (outcome === "pending" && accountId) {
+    params.instagramPending = "1";
+    params.accountId = accountId;
   }
-  const sep = base.includes("?") ? "&" : "?";
-  return `${base}${sep}tiktokConnected=1&tenantId=${encodeURIComponent(tid)}`;
+  return buildOAuthRedirect(config.instagram.oauthSuccessRedirect, tenantId, params);
+}
+
+function buildTiktokOAuthSuccessRedirect(tenantId, outcome = "connected") {
+  if (outcome === "duplicate") {
+    return buildOAuthRedirect(config.tiktok.oauthSuccessRedirect, tenantId, { tiktokDuplicate: "1" });
+  }
+  return buildOAuthRedirect(config.tiktok.oauthSuccessRedirect, tenantId, { tiktokConnected: "1" });
 }
 
 tenantsRouter.post("/ensure", async (req, res) => {
@@ -197,8 +164,11 @@ tenantsRouter.get("/oauth/youtube/callback", async (req, res) => {
           "Otherwise check that your reverse proxy forwards the full query string and that the OAuth client is a “Web application” type.",
       );
     }
-    const tenantId = await completeYoutubeOAuthCallback(code, state);
-    res.redirect(302, buildYoutubeOAuthSuccessRedirect(tenantId));
+    const result = await completeYoutubeOAuthCallback(code, state);
+    res.redirect(
+      302,
+      buildYoutubeOAuthSuccessRedirect(result.tenantId, result.outcome, result.accountId),
+    );
   } catch (e) {
     const m = e instanceof Error ? e.message : String(e);
     res.status(400).send(m);
@@ -224,8 +194,11 @@ tenantsRouter.get("/oauth/twitter/callback", async (req, res) => {
           "If you refreshed this page or opened the link manually, start authorization again (the code is one-time).",
       );
     }
-    const tenantId = await completeTwitterOAuthCallback(code, state);
-    res.redirect(302, buildTwitterOAuthSuccessRedirect(tenantId));
+    const result = await completeTwitterOAuthCallback(code, state);
+    res.redirect(
+      302,
+      buildTwitterOAuthSuccessRedirect(result.tenantId, result.outcome, result.accountId),
+    );
   } catch (e) {
     const m = e instanceof Error ? e.message : String(e);
     res.status(400).send(m);
@@ -251,8 +224,11 @@ tenantsRouter.get("/oauth/facebook/callback", async (req, res) => {
           "If you refreshed this page or opened the link manually, start authorization again (the code is one-time).",
       );
     }
-    const tenantId = await completeFacebookOAuthCallback(code, state);
-    res.redirect(302, buildFacebookOAuthSuccessRedirect(tenantId));
+    const result = await completeFacebookOAuthCallback(code, state);
+    res.redirect(
+      302,
+      buildFacebookOAuthSuccessRedirect(result.tenantId, result.outcome, result.accountId),
+    );
   } catch (e) {
     const m = e instanceof Error ? e.message : String(e);
     res.status(400).send(m);
@@ -278,8 +254,11 @@ tenantsRouter.get("/oauth/instagram/callback", async (req, res) => {
           "If you refreshed this page or opened the link manually, start authorization again (the code is one-time).",
       );
     }
-    const tenantId = await completeInstagramOAuthCallback(code, state);
-    res.redirect(302, buildInstagramOAuthSuccessRedirect(tenantId));
+    const result = await completeInstagramOAuthCallback(code, state);
+    res.redirect(
+      302,
+      buildInstagramOAuthSuccessRedirect(result.tenantId, result.outcome, result.accountId),
+    );
   } catch (e) {
     const m = e instanceof Error ? e.message : String(e);
     res.status(400).send(m);
@@ -305,8 +284,11 @@ tenantsRouter.get("/oauth/tiktok/callback", async (req, res) => {
           "If you refreshed this page or opened the link manually, start authorization again (the code is one-time).",
       );
     }
-    const tenantId = await completeTiktokOAuthCallback(code, state);
-    res.redirect(302, buildTiktokOAuthSuccessRedirect(tenantId));
+    const result = await completeTiktokOAuthCallback(code, state);
+    res.redirect(
+      302,
+      buildTiktokOAuthSuccessRedirect(result.tenantId, result.outcome, result.accountId),
+    );
   } catch (e) {
     const m = e instanceof Error ? e.message : String(e);
     res.status(400).send(m);
@@ -399,7 +381,8 @@ tenantsRouter.get("/:tenantId/syndication/facebook/pages", async (req, res) => {
     const tenantId = String(req.params.tenantId || "").trim();
     const tenant = await getTenantById(tenantId);
     if (!tenant) return res.status(404).json({ error: "Tenant not found" });
-    const pages = await listFacebookPagesForTenant(tenantId);
+    const accountId = String(req.query.accountId || "").trim() || undefined;
+    const pages = await listFacebookPagesForTenant(tenantId, accountId);
     res.json({ pages });
   } catch (e) {
     const m = e instanceof Error ? e.message : String(e);
@@ -413,12 +396,17 @@ tenantsRouter.post("/:tenantId/syndication/facebook/select-page", async (req, re
     const tenantId = String(req.params.tenantId || "").trim();
     const body = req.body && typeof req.body === "object" ? req.body : {};
     const pageId = String(body.pageId || "").trim();
+    const accountId = String(body.accountId || "").trim() || undefined;
     if (!pageId) return res.status(400).json({ error: "pageId is required" });
-    const status = await selectFacebookPageForTenant(tenantId, pageId);
+    const status = await selectFacebookPageForTenant(tenantId, pageId, accountId);
     if (!status) return res.status(404).json({ error: "Tenant not found" });
     res.json(status);
   } catch (e) {
     const m = e instanceof Error ? e.message : String(e);
+    const err = /** @type {Error & { code?: string }} */ (e);
+    if (err.code === "DUPLICATE_ACCOUNT") {
+      return res.status(409).json({ error: m, code: "DUPLICATE_ACCOUNT" });
+    }
     const code = m.includes("not available") ? 503 : 400;
     res.status(code).json({ error: m });
   }
@@ -454,7 +442,8 @@ tenantsRouter.get("/:tenantId/syndication/instagram/auth-url", async (req, res) 
 tenantsRouter.get("/:tenantId/syndication/instagram/accounts", async (req, res) => {
   try {
     const tenantId = String(req.params.tenantId || "").trim();
-    const accounts = await listInstagramAccountsForTenant(tenantId);
+    const accountId = String(req.query.accountId || "").trim() || undefined;
+    const accounts = await listInstagramAccountsForTenant(tenantId, accountId);
     if (accounts === null) return res.status(404).json({ error: "Tenant not found" });
     res.json({ accounts });
   } catch (e) {
@@ -469,12 +458,17 @@ tenantsRouter.post("/:tenantId/syndication/instagram/select-account", async (req
     const tenantId = String(req.params.tenantId || "").trim();
     const body = req.body && typeof req.body === "object" ? req.body : {};
     const businessAccountId = String(body.businessAccountId || "").trim();
+    const accountId = String(body.accountId || "").trim() || undefined;
     if (!businessAccountId) return res.status(400).json({ error: "businessAccountId is required" });
-    const status = await selectInstagramAccountForTenant(tenantId, businessAccountId);
+    const status = await selectInstagramAccountForTenant(tenantId, businessAccountId, accountId);
     if (!status) return res.status(404).json({ error: "Tenant not found" });
     res.json(status);
   } catch (e) {
     const m = e instanceof Error ? e.message : String(e);
+    const err = /** @type {Error & { code?: string }} */ (e);
+    if (err.code === "DUPLICATE_ACCOUNT") {
+      return res.status(409).json({ error: m, code: "DUPLICATE_ACCOUNT" });
+    }
     const code = m.includes("not available") ? 503 : 400;
     res.status(code).json({ error: m });
   }

@@ -2,12 +2,9 @@ import { getSequelize } from "../db/sequelize.js";
 import { isVodJobsPostgresEnabled } from "./vod-jobs-pg.repository.js";
 import { getJob, mergeJobEditorSpec } from "./vod-jobs.store.js";
 import { uploadVideoToFacebook } from "./tenant-syndication.service.js";
+import { getActiveAccountsForPublish } from "./tenant-syndication-accounts.service.js";
 import { vodEncodeStdout } from "../utils/vod-encode-log.js";
 
-/**
- * @param {Record<string, unknown>} spec
- * @param {string} editorClipId
- */
 function pickClipFromSpec(spec, editorClipId) {
   const clips = Array.isArray(spec?.clips) ? spec.clips : [];
   if (!clips.length) return null;
@@ -22,12 +19,7 @@ function pickClipFromSpec(spec, editorClipId) {
   return null;
 }
 
-/**
- * @param {Record<string, unknown>} spec
- * @param {string} editorClipId
- * @param {Record<string, unknown>} uploadPatch
- */
-function specWithFacebookSyndicationUploadPatch(spec, editorClipId, uploadPatch) {
+function specWithFacebookUploadPatch(spec, editorClipId, accountId, uploadPatch) {
   const base = spec && typeof spec === "object" && !Array.isArray(spec) ? { ...spec } : {};
   const clips = Array.isArray(base.clips) ? base.clips.map((c) => (c && typeof c === "object" ? { ...c } : c)) : [];
   const sid = String(editorClipId || "").trim();
@@ -43,19 +35,21 @@ function specWithFacebookSyndicationUploadPatch(spec, editorClipId, uploadPatch)
   const fb = {
     ...(synd.facebook && typeof synd.facebook === "object" && !Array.isArray(synd.facebook) ? synd.facebook : {}),
   };
-  const prevUp = fb.upload && typeof fb.upload === "object" && !Array.isArray(fb.upload) ? fb.upload : {};
-  fb.upload = { ...prevUp, ...uploadPatch };
+  const prevUploads =
+    fb.uploads && typeof fb.uploads === "object" && !Array.isArray(fb.uploads) ? { ...fb.uploads } : {};
+  const prevAccountUp =
+    prevUploads[accountId] && typeof prevUploads[accountId] === "object" && !Array.isArray(prevUploads[accountId])
+      ? prevUploads[accountId]
+      : {};
+  prevUploads[accountId] = { ...prevAccountUp, ...uploadPatch };
+  fb.uploads = prevUploads;
+  fb.upload = prevUploads[accountId];
   synd.facebook = fb;
   clip.syndication = synd;
   clips[idx] = clip;
   return { ...base, clips };
 }
 
-/**
- * After encoder marks job completed, optionally upload to Facebook Page (Postgres jobs with editorSpec only).
- *
- * @param {string} jobId
- */
 export async function tryFacebookSyndicationAfterJobCompleted(jobId) {
   if (!isVodJobsPostgresEnabled()) return;
   const job = await getJob(jobId);
@@ -68,18 +62,16 @@ export async function tryFacebookSyndicationAfterJobCompleted(jobId) {
   const { Tenant } = sequelize.models;
   const tenantRow = await Tenant.findByPk(job.tenantId);
   if (!tenantRow) return;
-  const tPlain = tenantRow.get({ plain: true });
-  if (tPlain.syndicationFacebookEnabled !== true) return;
-  if (!tPlain.facebookPageId || !tPlain.facebookPageAccessToken) return;
+  if (tenantRow.get({ plain: true }).syndicationFacebookEnabled !== true) return;
+
+  const accounts = await getActiveAccountsForPublish(job.tenantId, "facebook");
+  if (!accounts.length) return;
 
   const clip = pickClipFromSpec(spec, job.editorClipId || "");
   if (!clip) return;
   const synd = clip.syndication && typeof clip.syndication === "object" && !Array.isArray(clip.syndication) ? clip.syndication : {};
   const fb = synd.facebook && typeof synd.facebook === "object" && !Array.isArray(synd.facebook) ? synd.facebook : {};
   if (fb.enabled !== true) return;
-
-  const up = fb.upload && typeof fb.upload === "object" && !Array.isArray(fb.upload) ? fb.upload : {};
-  if (up.state === "published" || up.state === "uploading") return;
 
   const videoUrl =
     typeof job.outputUrl === "string" && /^https?:\/\//i.test(job.outputUrl.trim())
@@ -95,50 +87,61 @@ export async function tryFacebookSyndicationAfterJobCompleted(jobId) {
   const meta = clip.metadata && typeof clip.metadata === "object" && !Array.isArray(clip.metadata) ? clip.metadata : {};
   const titleFromMeta = typeof meta.title === "string" ? meta.title.trim() : "";
   const descFromMeta = typeof meta.description === "string" ? meta.description.trim() : "";
-
   const opt = fb.options && typeof fb.options === "object" && !Array.isArray(fb.options) ? fb.options : {};
   const titleOverride = typeof opt.titleOverride === "string" ? opt.titleOverride.trim() : "";
   const descriptionOverride = typeof opt.descriptionOverride === "string" ? opt.descriptionOverride.trim() : "";
   const videoTitle = titleOverride || titleFromMeta || "Untitled";
   const videoDescription = descriptionOverride || descFromMeta || "";
+  const uploadsMap =
+    fb.uploads && typeof fb.uploads === "object" && !Array.isArray(fb.uploads) ? fb.uploads : {};
 
-  const nowIso = new Date().toISOString();
-  await mergeJobEditorSpec(jobId, (prev) =>
-    specWithFacebookSyndicationUploadPatch(prev, job.editorClipId || "", {
-      state: "uploading",
-      message: "Uploading to Facebook…",
-      updatedAt: nowIso,
-    }),
-  );
-
-  try {
-    const result = await uploadVideoToFacebook({
-      tenantId: job.tenantId,
-      videoUrl,
-      title: videoTitle,
-      description: videoDescription,
-    });
+  for (const account of accounts) {
+    const accountId = String(account.get("id"));
+    const prevUp =
+      uploadsMap[accountId] && typeof uploadsMap[accountId] === "object" && !Array.isArray(uploadsMap[accountId])
+        ? uploadsMap[accountId]
+        : fb.upload && typeof fb.upload === "object" && !Array.isArray(fb.upload) && accounts.length === 1
+          ? fb.upload
+          : {};
+    if (prevUp.state === "published" || prevUp.state === "uploading") continue;
 
     await mergeJobEditorSpec(jobId, (prev) =>
-      specWithFacebookSyndicationUploadPatch(prev, job.editorClipId || "", {
-        state: "published",
-        message: "Published on Facebook",
-        postId: result.postId,
-        permalinkUrl: result.url,
+      specWithFacebookUploadPatch(prev, job.editorClipId || "", accountId, {
+        state: "uploading",
+        message: "Uploading to Facebook…",
         updatedAt: new Date().toISOString(),
       }),
     );
-    vodEncodeStdout(`facebook-syndication ok job=${jobId} postId=${result.postId}`);
-  } catch (e) {
-    const m = e instanceof Error ? e.message : String(e);
-    vodEncodeStdout(`facebook-syndication failed job=${jobId} err=${m.slice(0, 400)}`);
-    await mergeJobEditorSpec(jobId, (prev) =>
-      specWithFacebookSyndicationUploadPatch(prev, job.editorClipId || "", {
-        state: "failed",
-        message: "Facebook upload failed",
-        error: m.slice(0, 2000),
-        updatedAt: new Date().toISOString(),
-      }),
-    );
+
+    try {
+      const result = await uploadVideoToFacebook({
+        tenantId: job.tenantId,
+        accountId,
+        videoUrl,
+        title: videoTitle,
+        description: videoDescription,
+      });
+      await mergeJobEditorSpec(jobId, (prev) =>
+        specWithFacebookUploadPatch(prev, job.editorClipId || "", accountId, {
+          state: "published",
+          message: "Published on Facebook",
+          postId: result.postId,
+          permalinkUrl: result.url,
+          updatedAt: new Date().toISOString(),
+        }),
+      );
+      vodEncodeStdout(`facebook-syndication ok job=${jobId} account=${accountId} postId=${result.postId}`);
+    } catch (e) {
+      const m = e instanceof Error ? e.message : String(e);
+      vodEncodeStdout(`facebook-syndication failed job=${jobId} account=${accountId} err=${m.slice(0, 400)}`);
+      await mergeJobEditorSpec(jobId, (prev) =>
+        specWithFacebookUploadPatch(prev, job.editorClipId || "", accountId, {
+          state: "failed",
+          message: "Facebook upload failed",
+          error: m.slice(0, 2000),
+          updatedAt: new Date().toISOString(),
+        }),
+      );
+    }
   }
 }

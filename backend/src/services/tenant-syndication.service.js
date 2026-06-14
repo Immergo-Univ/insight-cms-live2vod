@@ -12,6 +12,21 @@ import {
   getTiktokSyndicationDefaults,
 } from "./admin-settings.service.js";
 import { buildSignedTiktokMediaProxyUrl } from "./tiktok-media-proxy.service.js";
+import {
+  buildPlatformStatusFromAccounts,
+  createSyndicationAccount,
+  deleteSyndicationAccount,
+  findAccountByExternalId,
+  getAccountById,
+  getAccountCredentials,
+  getActiveAccountsForPublish,
+  getPendingAccountForPlatform,
+  listAccountsForTenant,
+  syncTenantSyndicationConnectedFlags,
+  updateSyndicationAccount,
+} from "./tenant-syndication-accounts.service.js";
+
+/** @typedef {{ tenantId: string, outcome: 'connected'|'duplicate'|'pending', accountId?: string }} OAuthCallbackResult */
 
 function models() {
   const s = getSequelize();
@@ -78,55 +93,33 @@ export async function getSyndicationStatusForTenant(tenantId) {
   if (!id) return null;
   const row = await Tenant.findByPk(id);
   if (!row) return null;
-  const plain = row.get({ plain: true });
-  const hasYt = Boolean(plain.youtubeRefreshToken && String(plain.youtubeRefreshToken).trim());
-  const hasTw = Boolean(plain.twitterRefreshToken && String(plain.twitterRefreshToken).trim());
-  const hasFbUser = Boolean(plain.facebookUserAccessToken && String(plain.facebookUserAccessToken).trim());
-  const pageId = typeof plain.facebookPageId === "string" && plain.facebookPageId.trim() ? plain.facebookPageId.trim() : null;
-  const pageName =
-    typeof plain.facebookPageName === "string" && plain.facebookPageName.trim() ? plain.facebookPageName.trim() : null;
-  const hasFbPage = Boolean(plain.facebookPageAccessToken && String(plain.facebookPageAccessToken).trim());
-  const hasIgUser = Boolean(plain.instagramUserAccessToken && String(plain.instagramUserAccessToken).trim());
-  const igBusinessId =
-    typeof plain.instagramBusinessAccountId === "string" && plain.instagramBusinessAccountId.trim()
-      ? plain.instagramBusinessAccountId.trim()
-      : null;
-  const igUsername =
-    typeof plain.instagramUsername === "string" && plain.instagramUsername.trim()
-      ? plain.instagramUsername.trim()
-      : null;
-  const hasIgPageToken = Boolean(plain.instagramPageAccessToken && String(plain.instagramPageAccessToken).trim());
-  const hasTiktok = Boolean(plain.tiktokRefreshToken && String(plain.tiktokRefreshToken).trim());
-  const tiktokUsername =
-    typeof plain.tiktokUsername === "string" && plain.tiktokUsername.trim() ? plain.tiktokUsername.trim() : null;
+
   return {
-    youtube: {
-      connected: hasYt || plain.syndicationYoutubeConnected === true,
-      mockAuthAvailable: process.env.YOUTUBE_ALLOW_MOCK_AUTH === "true",
-    },
-    twitter: {
-      connected: hasTw || plain.syndicationTwitterConnected === true,
-      mockAuthAvailable: process.env.TWITTER_ALLOW_MOCK_AUTH === "true",
-    },
-    facebook: {
-      connected: hasFbUser || plain.syndicationFacebookConnected === true,
-      pageSelected: Boolean(pageId && hasFbPage),
-      pageId,
-      pageName,
-      mockAuthAvailable: process.env.FACEBOOK_ALLOW_MOCK_AUTH === "true",
-    },
-    instagram: {
-      connected: hasIgUser || plain.syndicationInstagramConnected === true,
-      accountSelected: Boolean(igBusinessId && hasIgPageToken),
-      businessAccountId: igBusinessId,
-      username: igUsername,
-      mockAuthAvailable: process.env.INSTAGRAM_ALLOW_MOCK_AUTH === "true",
-    },
-    tiktok: {
-      connected: hasTiktok || plain.syndicationTiktokConnected === true,
-      username: tiktokUsername,
-      mockAuthAvailable: process.env.TIKTOK_ALLOW_MOCK_AUTH === "true",
-    },
+    youtube: await buildPlatformStatusFromAccounts(
+      id,
+      "youtube",
+      process.env.YOUTUBE_ALLOW_MOCK_AUTH === "true",
+    ),
+    twitter: await buildPlatformStatusFromAccounts(
+      id,
+      "twitter",
+      process.env.TWITTER_ALLOW_MOCK_AUTH === "true",
+    ),
+    facebook: await buildPlatformStatusFromAccounts(
+      id,
+      "facebook",
+      process.env.FACEBOOK_ALLOW_MOCK_AUTH === "true",
+    ),
+    instagram: await buildPlatformStatusFromAccounts(
+      id,
+      "instagram",
+      process.env.INSTAGRAM_ALLOW_MOCK_AUTH === "true",
+    ),
+    tiktok: await buildPlatformStatusFromAccounts(
+      id,
+      "tiktok",
+      process.env.TIKTOK_ALLOW_MOCK_AUTH === "true",
+    ),
   };
 }
 
@@ -160,8 +153,43 @@ export async function buildYoutubeAuthorizationUrl(tenantId) {
 }
 
 /**
+ * @param {string} refreshToken
+ */
+async function resolveYoutubeChannelFromRefresh(refreshToken) {
+  const { clientId, clientSecret, redirectUri } = await getResolvedYoutubeOAuth();
+  const oauth2Client = new google.auth.OAuth2(clientId, clientSecret, redirectUri);
+  oauth2Client.setCredentials({ refresh_token: refreshToken });
+  const yt = google.youtube({ version: "v3", auth: oauth2Client });
+  const res = await yt.channels.list({ part: ["snippet"], mine: true });
+  const item = res?.data?.items?.[0];
+  return {
+    channelId: item?.id ? String(item.id).trim() : null,
+    channelTitle: item?.snippet?.title ? String(item.snippet.title).trim() : "YouTube channel",
+  };
+}
+
+/**
+ * @param {string} accessToken
+ */
+async function resolveTwitterUserFromAccess(accessToken) {
+  const res = await fetch("https://api.twitter.com/2/users/me", {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    return { userId: null, username: "X account" };
+  }
+  const data = json?.data;
+  return {
+    userId: data?.id ? String(data.id).trim() : null,
+    username: data?.username ? `@${String(data.username).trim()}` : "X account",
+  };
+}
+
+/**
  * @param {string} code
  * @param {string} state
+ * @returns {Promise<OAuthCallbackResult>}
  */
 export async function completeYoutubeOAuthCallback(code, state) {
   const tenantId = verifyYoutubeOAuthState(state);
@@ -181,12 +209,34 @@ export async function completeYoutubeOAuthCallback(code, state) {
   const { Tenant } = models();
   const row = await Tenant.findByPk(tenantId);
   if (!row) throw new Error("Tenant not found");
-  if (tokens.refresh_token) {
-    row.youtubeRefreshToken = tokens.refresh_token;
+
+  const refreshToken = tokens.refresh_token ? String(tokens.refresh_token).trim() : String(refresh).trim();
+  let channelId = null;
+  let channelTitle = "YouTube channel";
+  try {
+    const identity = await resolveYoutubeChannelFromRefresh(refreshToken);
+    channelId = identity.channelId;
+    channelTitle = identity.channelTitle;
+  } catch {
+    /* optional — fallback external id */
   }
-  row.syndicationYoutubeConnected = true;
-  await row.save();
-  return tenantId;
+  const externalId = channelId || `youtube-${tenantId}-${Date.now()}`;
+
+  const existing = await findAccountByExternalId(tenantId, "youtube", externalId);
+  if (existing) {
+    return { tenantId, outcome: "duplicate" };
+  }
+
+  await createSyndicationAccount({
+    tenantId,
+    platform: "youtube",
+    externalAccountId: externalId,
+    displayName: channelTitle,
+    credentials: { refreshToken, channelId, channelTitle },
+    status: "active",
+  });
+
+  return { tenantId, outcome: "connected" };
 }
 
 /**
@@ -198,14 +248,37 @@ export async function mockAuthorizeYoutubeSyndication(tenantId) {
   if (process.env.YOUTUBE_ALLOW_MOCK_AUTH !== "true") {
     throw new Error("Mock authorize disabled; use Google OAuth or set YOUTUBE_ALLOW_MOCK_AUTH=true for local dev");
   }
-  const { Tenant } = models();
   const id = String(tenantId || "").trim();
   if (!id) return null;
+  const { Tenant } = models();
   const row = await Tenant.findByPk(id);
   if (!row) return null;
-  row.syndicationYoutubeConnected = true;
-  await row.save();
+
+  const externalId = `mock-youtube-${id}-${Date.now()}`;
+  const existing = await findAccountByExternalId(id, "youtube", externalId);
+  if (!existing) {
+    await createSyndicationAccount({
+      tenantId: id,
+      platform: "youtube",
+      externalAccountId: externalId,
+      displayName: "Mock YouTube channel",
+      credentials: { refreshToken: "mock-youtube-refresh" },
+      status: "active",
+    });
+  }
   return getSyndicationStatusForTenant(id);
+}
+
+/**
+ * @param {string} accountId
+ * @returns {Promise<string | null>}
+ */
+export async function getYoutubeRefreshTokenForAccount(accountId) {
+  const row = await getAccountById(accountId);
+  if (!row || row.get("platform") !== "youtube") return null;
+  const cred = getAccountCredentials(row);
+  const t = cred.refreshToken;
+  return typeof t === "string" && t.trim() ? t.trim() : null;
 }
 
 /**
@@ -213,11 +286,9 @@ export async function mockAuthorizeYoutubeSyndication(tenantId) {
  * @returns {Promise<string | null>}
  */
 export async function getTenantYoutubeRefreshToken(tenantId) {
-  const { Tenant } = models();
-  const row = await Tenant.findByPk(String(tenantId || "").trim());
-  if (!row) return null;
-  const t = row.get("youtubeRefreshToken");
-  return typeof t === "string" && t.trim() ? t.trim() : null;
+  const accounts = await getActiveAccountsForPublish(tenantId, "youtube");
+  if (!accounts.length) return null;
+  return getYoutubeRefreshTokenForAccount(accounts[0].get("id"));
 }
 
 /**
@@ -231,9 +302,14 @@ export async function getTenantYoutubeRefreshToken(tenantId) {
  * @param {boolean} [opts.notifySubscribers]
  */
 export async function uploadVideoToYoutube(opts) {
-  const { tenantId, videoUrl, snippet, status, notifySubscribers = false } = opts;
-  const refresh = await getTenantYoutubeRefreshToken(tenantId);
-  if (!refresh) throw new Error("Tenant has no YouTube refresh token");
+  const { tenantId, accountId, videoUrl, snippet, status, notifySubscribers = false } = opts;
+  const aid = accountId
+    ? String(accountId).trim()
+    : (await getActiveAccountsForPublish(tenantId, "youtube"))[0]?.get("id");
+  if (!aid) throw new Error("No YouTube account available for this tenant");
+
+  const refresh = await getYoutubeRefreshTokenForAccount(aid);
+  if (!refresh) throw new Error("YouTube account has no refresh token");
 
   const { clientId, clientSecret, redirectUri } = await getResolvedYoutubeOAuth();
   const oauth2Client = new google.auth.OAuth2(clientId, clientSecret, redirectUri);
@@ -422,6 +498,7 @@ async function twitterTokenRequest(bodyParams, clientId, clientSecret) {
 /**
  * @param {string} code
  * @param {string} state
+ * @returns {Promise<OAuthCallbackResult>}
  */
 export async function completeTwitterOAuthCallback(code, state) {
   const parsed = verifyTwitterOAuthState(state);
@@ -452,12 +529,33 @@ export async function completeTwitterOAuthCallback(code, state) {
   const { Tenant } = models();
   const row = await Tenant.findByPk(parsed.tenantId);
   if (!row) throw new Error("Tenant not found");
-  if (json.refresh_token) {
-    row.twitterRefreshToken = json.refresh_token;
+
+  const refreshToken = json.refresh_token ? String(json.refresh_token).trim() : String(refresh).trim();
+  const accessForIdentity = json.access_token && typeof json.access_token === "string" ? json.access_token.trim() : null;
+  let userId = null;
+  let username = "X account";
+  if (accessForIdentity) {
+    const identity = await resolveTwitterUserFromAccess(accessForIdentity);
+    userId = identity.userId;
+    username = identity.username;
   }
-  row.syndicationTwitterConnected = true;
-  await row.save();
-  return parsed.tenantId;
+  const externalId = userId || `twitter-${parsed.tenantId}-${Date.now()}`;
+
+  const existing = await findAccountByExternalId(parsed.tenantId, "twitter", externalId);
+  if (existing) {
+    return { tenantId: parsed.tenantId, outcome: "duplicate" };
+  }
+
+  await createSyndicationAccount({
+    tenantId: parsed.tenantId,
+    platform: "twitter",
+    externalAccountId: externalId,
+    displayName: username,
+    credentials: { refreshToken, userId, username },
+    status: "active",
+  });
+
+  return { tenantId: parsed.tenantId, outcome: "connected" };
 }
 
 /**
@@ -469,14 +567,34 @@ export async function mockAuthorizeTwitterSyndication(tenantId) {
   if (process.env.TWITTER_ALLOW_MOCK_AUTH !== "true") {
     throw new Error("Mock authorize disabled; use X OAuth or set TWITTER_ALLOW_MOCK_AUTH=true for local dev");
   }
-  const { Tenant } = models();
   const id = String(tenantId || "").trim();
   if (!id) return null;
+  const { Tenant } = models();
   const row = await Tenant.findByPk(id);
   if (!row) return null;
-  row.syndicationTwitterConnected = true;
-  await row.save();
+
+  const externalId = `mock-twitter-${id}-${Date.now()}`;
+  await createSyndicationAccount({
+    tenantId: id,
+    platform: "twitter",
+    externalAccountId: externalId,
+    displayName: "Mock X account",
+    credentials: { refreshToken: "mock-twitter-refresh" },
+    status: "active",
+  });
   return getSyndicationStatusForTenant(id);
+}
+
+/**
+ * @param {string} accountId
+ * @returns {Promise<string | null>}
+ */
+export async function getTwitterRefreshTokenForAccount(accountId) {
+  const row = await getAccountById(accountId);
+  if (!row || row.get("platform") !== "twitter") return null;
+  const cred = getAccountCredentials(row);
+  const t = cred.refreshToken;
+  return typeof t === "string" && t.trim() ? t.trim() : null;
 }
 
 /**
@@ -484,44 +602,28 @@ export async function mockAuthorizeTwitterSyndication(tenantId) {
  * @returns {Promise<string | null>}
  */
 export async function getTenantTwitterRefreshToken(tenantId) {
-  const { Tenant } = models();
-  const row = await Tenant.findByPk(String(tenantId || "").trim());
-  if (!row) return null;
-  const t = row.get("twitterRefreshToken");
-  return typeof t === "string" && t.trim() ? t.trim() : null;
+  const accounts = await getActiveAccountsForPublish(tenantId, "twitter");
+  if (!accounts.length) return null;
+  return getTwitterRefreshTokenForAccount(accounts[0].get("id"));
 }
 
 /**
- * X rotates refresh tokens on every successful refresh and invalidates the previous one.
- * If concurrent encoder jobs both refresh, only the first persists; later jobs see "invalid token".
- * If the user revoked the app, or 6 months passed without use, the token is also dead.
- * In any of those cases the only fix is forcing the user to re-authorize, so clear the connection.
- *
- * @param {string} tenantId
+ * @param {string} accountId
  */
-async function markTwitterDisconnected(tenantId) {
-  const id = String(tenantId || "").trim();
+async function markTwitterAccountDisconnected(accountId) {
+  const id = String(accountId || "").trim();
   if (!id) return;
   try {
-    const { Tenant } = models();
-    const row = await Tenant.findByPk(id);
-    if (!row) return;
-    row.twitterRefreshToken = null;
-    row.syndicationTwitterConnected = false;
-    await row.save();
+    await deleteSyndicationAccount(id);
   } catch {
     // ignore — best-effort cleanup so the UI surfaces "reconnect"
   }
 }
 
-/**
- * @param {string} tenantId
- * @returns {Promise<string>} user access token
- */
-export async function getTwitterAccessTokenForTenant(tenantId) {
-  const id = String(tenantId || "").trim();
-  const refresh = await getTenantTwitterRefreshToken(id);
-  if (!refresh) throw new Error("Tenant has no X refresh token; reconnect X in Tenant settings");
+export async function getTwitterAccessTokenForAccount(accountId) {
+  const id = String(accountId || "").trim();
+  const refresh = await getTwitterRefreshTokenForAccount(id);
+  if (!refresh) throw new Error("X account has no refresh token; reconnect in Syndication settings");
 
   const { clientId, clientSecret } = await getResolvedTwitterOAuth();
   if (!clientId || !clientSecret) throw new Error("X / Twitter OAuth is not configured");
@@ -539,9 +641,8 @@ export async function getTwitterAccessTokenForTenant(tenantId) {
     );
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    // 400 from /oauth2/token on refresh_token grant always means the token is unusable.
     if (/\b400\b/.test(msg) || /invalid[_ ]grant/i.test(msg) || /token was invalid/i.test(msg)) {
-      await markTwitterDisconnected(id);
+      await markTwitterAccountDisconnected(id);
       throw new Error(
         "X refresh token is invalid or revoked — reconnect X in Tenant settings (Syndication → Connect X).",
       );
@@ -553,17 +654,27 @@ export async function getTwitterAccessTokenForTenant(tenantId) {
     throw new Error("X token refresh did not return access_token");
   }
 
-  // X rotates refresh tokens on every refresh; persist the new one or the chain breaks.
   if (json.refresh_token && typeof json.refresh_token === "string") {
-    const { Tenant } = models();
-    const row = await Tenant.findByPk(id);
+    const row = await getAccountById(id);
     if (row) {
-      row.twitterRefreshToken = json.refresh_token;
-      await row.save();
+      const cred = getAccountCredentials(row);
+      await updateSyndicationAccount(id, {
+        credentials: { ...cred, refreshToken: json.refresh_token },
+      });
     }
   }
 
   return access.trim();
+}
+
+/**
+ * @param {string} tenantId
+ * @returns {Promise<string>} user access token
+ */
+export async function getTwitterAccessTokenForTenant(tenantId) {
+  const accounts = await getActiveAccountsForPublish(tenantId, "twitter");
+  if (!accounts.length) throw new Error("Tenant has no X accounts; reconnect X in Tenant settings");
+  return getTwitterAccessTokenForAccount(accounts[0].get("id"));
 }
 
 /**
@@ -575,8 +686,13 @@ export async function getTwitterAccessTokenForTenant(tenantId) {
  * @param {string} opts.text Tweet text (max 280 chars for legacy length)
  */
 export async function uploadVideoToTwitter(opts) {
-  const { tenantId, videoUrl, text } = opts;
-  const access = await getTwitterAccessTokenForTenant(tenantId);
+  const { tenantId, accountId, videoUrl, text } = opts;
+  const aid = accountId
+    ? String(accountId).trim()
+    : (await getActiveAccountsForPublish(tenantId, "twitter"))[0]?.get("id");
+  if (!aid) throw new Error("No X account available for this tenant");
+
+  const access = await getTwitterAccessTokenForAccount(aid);
 
   const resVideo = await fetch(String(videoUrl));
   if (!resVideo.ok) throw new Error(`Failed to download encoded video: ${resVideo.status}`);
@@ -817,6 +933,7 @@ async function facebookExchangeCodeForLongLivedToken(code, clientId, clientSecre
 /**
  * @param {string} code
  * @param {string} state
+ * @returns {Promise<OAuthCallbackResult>}
  */
 export async function completeFacebookOAuthCallback(code, state) {
   const tenantId = verifyFacebookOAuthState(state);
@@ -832,13 +949,17 @@ export async function completeFacebookOAuthCallback(code, state) {
   const { Tenant } = models();
   const row = await Tenant.findByPk(tenantId);
   if (!row) throw new Error("Tenant not found");
-  row.facebookUserAccessToken = longToken;
-  row.syndicationFacebookConnected = true;
-  row.facebookPageId = null;
-  row.facebookPageAccessToken = null;
-  row.facebookPageName = null;
-  await row.save();
-  return tenantId;
+
+  const account = await createSyndicationAccount({
+    tenantId,
+    platform: "facebook",
+    externalAccountId: `pending-${Date.now()}`,
+    displayName: "Facebook (pending Page selection)",
+    credentials: { userAccessToken: longToken },
+    status: "pending_selection",
+  });
+
+  return { tenantId, outcome: "pending", accountId: account.get("id") };
 }
 
 /**
@@ -848,18 +969,39 @@ export async function mockAuthorizeFacebookSyndication(tenantId) {
   if (process.env.FACEBOOK_ALLOW_MOCK_AUTH !== "true") {
     throw new Error("Mock authorize disabled; use Facebook OAuth or set FACEBOOK_ALLOW_MOCK_AUTH=true for local dev");
   }
-  const { Tenant } = models();
   const id = String(tenantId || "").trim();
   if (!id) return null;
+  const { Tenant } = models();
   const row = await Tenant.findByPk(id);
   if (!row) return null;
-  row.syndicationFacebookConnected = true;
-  row.facebookUserAccessToken = "mock-facebook-user-token";
-  row.facebookPageId = "mock-page-id";
-  row.facebookPageAccessToken = "mock-page-token";
-  row.facebookPageName = "Mock Facebook Page";
-  await row.save();
+
+  const pageId = `mock-page-id-${Date.now()}`;
+  await createSyndicationAccount({
+    tenantId: id,
+    platform: "facebook",
+    externalAccountId: pageId,
+    displayName: "Mock Facebook Page",
+    credentials: {
+      userAccessToken: "mock-facebook-user-token",
+      pageId,
+      pageAccessToken: "mock-page-token",
+      pageName: "Mock Facebook Page",
+    },
+    status: "active",
+  });
   return getSyndicationStatusForTenant(id);
+}
+
+/**
+ * @param {string} accountId
+ * @returns {Promise<string | null>}
+ */
+async function getFacebookUserAccessTokenForAccount(accountId) {
+  const row = await getAccountById(accountId);
+  if (!row || row.get("platform") !== "facebook") return null;
+  const cred = getAccountCredentials(row);
+  const t = cred.userAccessToken;
+  return typeof t === "string" && t.trim() ? t.trim() : null;
 }
 
 /**
@@ -867,23 +1009,37 @@ export async function mockAuthorizeFacebookSyndication(tenantId) {
  * @returns {Promise<string | null>}
  */
 export async function getTenantFacebookUserAccessToken(tenantId) {
-  const { Tenant } = models();
-  const row = await Tenant.findByPk(String(tenantId || "").trim());
-  if (!row) return null;
-  const t = row.get("facebookUserAccessToken");
-  return typeof t === "string" && t.trim() ? t.trim() : null;
+  const pending = await getPendingAccountForPlatform(tenantId, "facebook");
+  if (pending) return getFacebookUserAccessTokenForAccount(pending.get("id"));
+  const accounts = await getActiveAccountsForPublish(tenantId, "facebook");
+  if (!accounts.length) return null;
+  return getFacebookUserAccessTokenForAccount(accounts[0].get("id"));
 }
 
 /**
  * @param {string} tenantId
+ * @param {string} [accountId]
  * @returns {Promise<Array<{ id: string; name: string }>>}
  */
-export async function listFacebookPagesForTenant(tenantId) {
-  const userToken = await getTenantFacebookUserAccessToken(tenantId);
-  if (!userToken) throw new Error("Tenant has no Facebook user access token");
+export async function listFacebookPagesForTenant(tenantId, accountId) {
+  let aid = accountId ? String(accountId).trim() : "";
+  if (!aid) {
+    const pending = await getPendingAccountForPlatform(tenantId, "facebook");
+    aid = pending?.get("id") || "";
+  }
+  if (!aid) throw new Error("No pending Facebook authorization found");
+
+  const userToken = await getFacebookUserAccessTokenForAccount(aid);
+  if (!userToken) throw new Error("Facebook account has no user access token");
+
+  const connectedIds = new Set(
+    (await listAccountsForTenant(tenantId, "facebook"))
+      .filter((a) => a.status === "active")
+      .map((a) => a.externalAccountId),
+  );
 
   if (userToken === "mock-facebook-user-token") {
-    return [{ id: "mock-page-id", name: "Mock Facebook Page" }];
+    return [{ id: "mock-page-id", name: "Mock Facebook Page" }].filter((p) => !connectedIds.has(p.id));
   }
 
   const json = await facebookGraphGet(
@@ -895,7 +1051,8 @@ export async function listFacebookPagesForTenant(tenantId) {
       if (!p || typeof p !== "object") return null;
       const id = String(/** @type {{ id?: string }} */ (p).id || "").trim();
       const name = String(/** @type {{ name?: string }} */ (p).name || id).trim();
-      return id ? { id, name: name || id } : null;
+      if (!id || connectedIds.has(id)) return null;
+      return { id, name: name || id };
     })
     .filter(Boolean);
 }
@@ -903,20 +1060,34 @@ export async function listFacebookPagesForTenant(tenantId) {
 /**
  * @param {string} tenantId
  * @param {string} pageId
+ * @param {string} [accountId]
  */
-export async function selectFacebookPageForTenant(tenantId, pageId) {
+export async function selectFacebookPageForTenant(tenantId, pageId, accountId) {
   const id = String(tenantId || "").trim();
   const pid = String(pageId || "").trim();
   if (!id || !pid) throw new Error("tenantId and pageId are required");
 
-  const userToken = await getTenantFacebookUserAccessToken(id);
-  if (!userToken) throw new Error("Tenant has no Facebook user access token");
+  let aid = accountId ? String(accountId).trim() : "";
+  if (!aid) {
+    const pending = await getPendingAccountForPlatform(id, "facebook");
+    aid = pending?.get("id") || "";
+  }
+  if (!aid) throw new Error("accountId is required for Facebook Page selection");
+
+  const existing = await findAccountByExternalId(id, "facebook", pid);
+  if (existing && existing.get("status") === "active") {
+    const err = new Error("This Facebook Page is already authorized");
+    /** @type {Error & { code?: string }} */ (err).code = "DUPLICATE_ACCOUNT";
+    throw err;
+  }
+
+  const userToken = await getFacebookUserAccessTokenForAccount(aid);
+  if (!userToken) throw new Error("Facebook account has no user access token");
 
   let pageName = pid;
   let pageAccessToken = userToken;
 
   if (userToken === "mock-facebook-user-token") {
-    if (pid !== "mock-page-id") throw new Error("Invalid mock page id");
     pageName = "Mock Facebook Page";
     pageAccessToken = "mock-page-token";
   } else {
@@ -938,14 +1109,36 @@ export async function selectFacebookPageForTenant(tenantId, pageId) {
     pageAccessToken = pat.trim();
   }
 
-  const { Tenant } = models();
-  const row = await Tenant.findByPk(id);
-  if (!row) throw new Error("Tenant not found");
-  row.facebookPageId = pid;
-  row.facebookPageAccessToken = pageAccessToken;
-  row.facebookPageName = pageName;
-  await row.save();
+  const cred = getAccountCredentials(await getAccountById(aid));
+  await updateSyndicationAccount(aid, {
+    externalAccountId: pid,
+    displayName: pageName,
+    credentials: {
+      ...cred,
+      userAccessToken: userToken,
+      pageId: pid,
+      pageAccessToken,
+      pageName,
+    },
+    status: "active",
+  });
+
   return getSyndicationStatusForTenant(id);
+}
+
+/**
+ * @param {string} accountId
+ * @returns {Promise<{ pageId: string; pageAccessToken: string }>}
+ */
+async function getFacebookPageCredentialsForAccount(accountId) {
+  const row = await getAccountById(accountId);
+  if (!row || row.get("platform") !== "facebook") throw new Error("Facebook account not found");
+  const cred = getAccountCredentials(row);
+  const pageId = typeof cred.pageId === "string" && cred.pageId.trim() ? cred.pageId.trim() : "";
+  const pageToken =
+    typeof cred.pageAccessToken === "string" && cred.pageAccessToken.trim() ? cred.pageAccessToken.trim() : "";
+  if (!pageId || !pageToken) throw new Error("Facebook account has no Page selected");
+  return { pageId, pageAccessToken: pageToken };
 }
 
 /**
@@ -953,15 +1146,9 @@ export async function selectFacebookPageForTenant(tenantId, pageId) {
  * @returns {Promise<{ pageId: string; pageAccessToken: string }>}
  */
 async function getTenantFacebookPageCredentials(tenantId) {
-  const { Tenant } = models();
-  const row = await Tenant.findByPk(String(tenantId || "").trim());
-  if (!row) throw new Error("Tenant not found");
-  const pageId = row.get("facebookPageId");
-  const pageToken = row.get("facebookPageAccessToken");
-  const pid = typeof pageId === "string" && pageId.trim() ? pageId.trim() : "";
-  const pt = typeof pageToken === "string" && pageToken.trim() ? pageToken.trim() : "";
-  if (!pid || !pt) throw new Error("Tenant has no Facebook Page selected");
-  return { pageId: pid, pageAccessToken: pt };
+  const accounts = await getActiveAccountsForPublish(tenantId, "facebook");
+  if (!accounts.length) throw new Error("Tenant has no Facebook Page selected");
+  return getFacebookPageCredentialsForAccount(accounts[0].get("id"));
 }
 
 /**
@@ -974,8 +1161,13 @@ async function getTenantFacebookPageCredentials(tenantId) {
  * @param {string} opts.description
  */
 export async function uploadVideoToFacebook(opts) {
-  const { tenantId, videoUrl, title, description } = opts;
-  const { pageId, pageAccessToken } = await getTenantFacebookPageCredentials(tenantId);
+  const { tenantId, accountId, videoUrl, title, description } = opts;
+  const aid = accountId
+    ? String(accountId).trim()
+    : (await getActiveAccountsForPublish(tenantId, "facebook"))[0]?.get("id");
+  if (!aid) throw new Error("No Facebook account available for this tenant");
+
+  const { pageId, pageAccessToken } = await getFacebookPageCredentialsForAccount(aid);
 
   if (pageAccessToken === "mock-page-token") {
     return {
@@ -1160,6 +1352,7 @@ export async function buildInstagramAuthorizationUrl(tenantId) {
 /**
  * @param {string} code
  * @param {string} state
+ * @returns {Promise<OAuthCallbackResult>}
  */
 export async function completeInstagramOAuthCallback(code, state) {
   const tenantId = verifyInstagramOAuthState(state);
@@ -1175,14 +1368,17 @@ export async function completeInstagramOAuthCallback(code, state) {
   const { Tenant } = models();
   const row = await Tenant.findByPk(tenantId);
   if (!row) throw new Error("Tenant not found");
-  row.instagramUserAccessToken = longToken;
-  row.syndicationInstagramConnected = true;
-  row.instagramBusinessAccountId = null;
-  row.instagramUsername = null;
-  row.instagramPageId = null;
-  row.instagramPageAccessToken = null;
-  await row.save();
-  return tenantId;
+
+  const account = await createSyndicationAccount({
+    tenantId,
+    platform: "instagram",
+    externalAccountId: `pending-${Date.now()}`,
+    displayName: "Instagram (pending account selection)",
+    credentials: { userAccessToken: longToken },
+    status: "pending_selection",
+  });
+
+  return { tenantId, outcome: "pending", accountId: account.get("id") };
 }
 
 /**
@@ -1192,19 +1388,40 @@ export async function mockAuthorizeInstagramSyndication(tenantId) {
   if (process.env.INSTAGRAM_ALLOW_MOCK_AUTH !== "true") {
     throw new Error("Mock authorize disabled; use Instagram OAuth or set INSTAGRAM_ALLOW_MOCK_AUTH=true for local dev");
   }
-  const { Tenant } = models();
   const id = String(tenantId || "").trim();
   if (!id) return null;
+  const { Tenant } = models();
   const row = await Tenant.findByPk(id);
   if (!row) return null;
-  row.syndicationInstagramConnected = true;
-  row.instagramUserAccessToken = "mock-instagram-user-token";
-  row.instagramBusinessAccountId = "mock-ig-business-id";
-  row.instagramUsername = "mock_instagram";
-  row.instagramPageId = "mock-page-id";
-  row.instagramPageAccessToken = "mock-page-token";
-  await row.save();
+
+  const businessId = `mock-ig-business-id-${Date.now()}`;
+  await createSyndicationAccount({
+    tenantId: id,
+    platform: "instagram",
+    externalAccountId: businessId,
+    displayName: "@mock_instagram",
+    credentials: {
+      userAccessToken: "mock-instagram-user-token",
+      businessAccountId: businessId,
+      username: "@mock_instagram",
+      pageId: "mock-page-id",
+      pageAccessToken: "mock-page-token",
+    },
+    status: "active",
+  });
   return getSyndicationStatusForTenant(id);
+}
+
+/**
+ * @param {string} accountId
+ * @returns {Promise<string | null>}
+ */
+async function getInstagramUserAccessTokenForAccount(accountId) {
+  const row = await getAccountById(accountId);
+  if (!row || row.get("platform") !== "instagram") return null;
+  const cred = getAccountCredentials(row);
+  const t = cred.userAccessToken;
+  return typeof t === "string" && t.trim() ? t.trim() : null;
 }
 
 /**
@@ -1212,23 +1429,39 @@ export async function mockAuthorizeInstagramSyndication(tenantId) {
  * @returns {Promise<string | null>}
  */
 export async function getTenantInstagramUserAccessToken(tenantId) {
-  const { Tenant } = models();
-  const row = await Tenant.findByPk(String(tenantId || "").trim());
-  if (!row) return null;
-  const t = row.get("instagramUserAccessToken");
-  return typeof t === "string" && t.trim() ? t.trim() : null;
+  const pending = await getPendingAccountForPlatform(tenantId, "instagram");
+  if (pending) return getInstagramUserAccessTokenForAccount(pending.get("id"));
+  const accounts = await getActiveAccountsForPublish(tenantId, "instagram");
+  if (!accounts.length) return null;
+  return getInstagramUserAccessTokenForAccount(accounts[0].get("id"));
 }
 
 /**
  * @param {string} tenantId
+ * @param {string} [accountId]
  * @returns {Promise<Array<{ id: string; username: string; pageName: string }>>}
  */
-export async function listInstagramAccountsForTenant(tenantId) {
-  const userToken = await getTenantInstagramUserAccessToken(tenantId);
-  if (!userToken) throw new Error("Tenant has no Instagram user access token");
+export async function listInstagramAccountsForTenant(tenantId, accountId) {
+  let aid = accountId ? String(accountId).trim() : "";
+  if (!aid) {
+    const pending = await getPendingAccountForPlatform(tenantId, "instagram");
+    aid = pending?.get("id") || "";
+  }
+  if (!aid) throw new Error("No pending Instagram authorization found");
+
+  const userToken = await getInstagramUserAccessTokenForAccount(aid);
+  if (!userToken) throw new Error("Instagram account has no user access token");
+
+  const connectedIds = new Set(
+    (await listAccountsForTenant(tenantId, "instagram"))
+      .filter((a) => a.status === "active")
+      .map((a) => a.externalAccountId),
+  );
 
   if (userToken === "mock-instagram-user-token") {
-    return [{ id: "mock-ig-business-id", username: "mock_instagram", pageName: "Mock Page" }];
+    return [{ id: "mock-ig-business-id", username: "mock_instagram", pageName: "Mock Page" }].filter(
+      (a) => !connectedIds.has(a.id),
+    );
   }
 
   const json = await metaGraphGet(
@@ -1242,13 +1475,13 @@ export async function listInstagramAccountsForTenant(tenantId) {
     const ig = /** @type {{ instagram_business_account?: { id?: string; username?: string } }} */ (p)
       .instagram_business_account;
     if (!ig || typeof ig !== "object") continue;
-    const id = String(ig.id || "").trim();
-    const username = String(ig.username || id).trim();
-    if (!id) continue;
+    const igAccountId = String(ig.id || "").trim();
+    const username = String(ig.username || igAccountId).trim();
+    if (!igAccountId || connectedIds.has(igAccountId)) continue;
     out.push({
-      id,
+      id: igAccountId,
       username: username.startsWith("@") ? username : `@${username}`,
-      pageName: pageName || id,
+      pageName: pageName || igAccountId,
     });
   }
   return out;
@@ -1257,14 +1490,29 @@ export async function listInstagramAccountsForTenant(tenantId) {
 /**
  * @param {string} tenantId
  * @param {string} businessAccountId
+ * @param {string} [accountId]
  */
-export async function selectInstagramAccountForTenant(tenantId, businessAccountId) {
+export async function selectInstagramAccountForTenant(tenantId, businessAccountId, accountId) {
   const id = String(tenantId || "").trim();
   const igId = String(businessAccountId || "").trim();
   if (!id || !igId) throw new Error("tenantId and businessAccountId are required");
 
-  const userToken = await getTenantInstagramUserAccessToken(id);
-  if (!userToken) throw new Error("Tenant has no Instagram user access token");
+  let aid = accountId ? String(accountId).trim() : "";
+  if (!aid) {
+    const pending = await getPendingAccountForPlatform(id, "instagram");
+    aid = pending?.get("id") || "";
+  }
+  if (!aid) throw new Error("accountId is required for Instagram account selection");
+
+  const existing = await findAccountByExternalId(id, "instagram", igId);
+  if (existing && existing.get("status") === "active") {
+    const err = new Error("This Instagram account is already authorized");
+    /** @type {Error & { code?: string }} */ (err).code = "DUPLICATE_ACCOUNT";
+    throw err;
+  }
+
+  const userToken = await getInstagramUserAccessTokenForAccount(aid);
+  if (!userToken) throw new Error("Instagram account has no user access token");
 
   let username = igId;
   let pageId = "";
@@ -1272,8 +1520,7 @@ export async function selectInstagramAccountForTenant(tenantId, businessAccountI
   let pageAccessToken = userToken;
 
   if (userToken === "mock-instagram-user-token") {
-    if (igId !== "mock-ig-business-id") throw new Error("Invalid mock Instagram account id");
-    username = "mock_instagram";
+    username = "@mock_instagram";
     pageName = "Mock Page";
     pageId = "mock-page-id";
     pageAccessToken = "mock-page-token";
@@ -1307,30 +1554,48 @@ export async function selectInstagramAccountForTenant(tenantId, businessAccountI
     username = un ? (un.startsWith("@") ? un : `@${un}`) : igId;
   }
 
-  const { Tenant } = models();
-  const row = await Tenant.findByPk(id);
-  if (!row) throw new Error("Tenant not found");
-  row.instagramBusinessAccountId = igId;
-  row.instagramUsername = username;
-  row.instagramPageId = pageId;
-  row.instagramPageAccessToken = pageAccessToken;
-  await row.save();
+  const cred = getAccountCredentials(await getAccountById(aid));
+  await updateSyndicationAccount(aid, {
+    externalAccountId: igId,
+    displayName: username,
+    credentials: {
+      ...cred,
+      userAccessToken: userToken,
+      businessAccountId: igId,
+      username,
+      pageId,
+      pageAccessToken,
+    },
+    status: "active",
+  });
+
   return getSyndicationStatusForTenant(id);
+}
+
+/**
+ * @param {string} accountId
+ */
+async function getInstagramCredentialsForAccount(accountId) {
+  const row = await getAccountById(accountId);
+  if (!row || row.get("platform") !== "instagram") throw new Error("Instagram account not found");
+  const cred = getAccountCredentials(row);
+  const igUserId =
+    typeof cred.businessAccountId === "string" && cred.businessAccountId.trim()
+      ? cred.businessAccountId.trim()
+      : "";
+  const pageToken =
+    typeof cred.pageAccessToken === "string" && cred.pageAccessToken.trim() ? cred.pageAccessToken.trim() : "";
+  if (!igUserId || !pageToken) throw new Error("Instagram account is not fully configured");
+  return { igUserId, pageAccessToken: pageToken };
 }
 
 /**
  * @param {string} tenantId
  */
 async function getTenantInstagramCredentials(tenantId) {
-  const { Tenant } = models();
-  const row = await Tenant.findByPk(String(tenantId || "").trim());
-  if (!row) throw new Error("Tenant not found");
-  const igUserId = row.get("instagramBusinessAccountId");
-  const pageToken = row.get("instagramPageAccessToken");
-  const igId = typeof igUserId === "string" && igUserId.trim() ? igUserId.trim() : "";
-  const pt = typeof pageToken === "string" && pageToken.trim() ? pageToken.trim() : "";
-  if (!igId || !pt) throw new Error("Tenant has no Instagram Business account selected");
-  return { igUserId: igId, pageAccessToken: pt };
+  const accounts = await getActiveAccountsForPublish(tenantId, "instagram");
+  if (!accounts.length) throw new Error("Tenant has no Instagram Business account selected");
+  return getInstagramCredentialsForAccount(accounts[0].get("id"));
 }
 
 /**
@@ -1365,8 +1630,13 @@ async function waitForInstagramContainerReady(creationId, pageAccessToken) {
  * @param {"reels"|"feed"} opts.mediaType
  */
 export async function uploadVideoToInstagram(opts) {
-  const { tenantId, videoUrl, caption, mediaType = "reels" } = opts;
-  const { igUserId, pageAccessToken } = await getTenantInstagramCredentials(tenantId);
+  const { tenantId, accountId, videoUrl, caption, mediaType = "reels" } = opts;
+  const aid = accountId
+    ? String(accountId).trim()
+    : (await getActiveAccountsForPublish(tenantId, "instagram"))[0]?.get("id");
+  if (!aid) throw new Error("No Instagram account available for this tenant");
+
+  const { igUserId, pageAccessToken } = await getInstagramCredentialsForAccount(aid);
   const mt = mediaType === "feed" ? "feed" : "reels";
 
   if (pageAccessToken === "mock-page-token") {
@@ -1564,6 +1834,7 @@ async function fetchTiktokUsername(accessToken) {
 /**
  * @param {string} code
  * @param {string} state
+ * @returns {Promise<OAuthCallbackResult>}
  */
 export async function completeTiktokOAuthCallback(code, state) {
   const tenantId = verifyTiktokOAuthState(state);
@@ -1592,18 +1863,34 @@ export async function completeTiktokOAuthCallback(code, state) {
   }
 
   const access = json.access_token;
+  const openId = typeof json.open_id === "string" ? json.open_id.trim() : null;
   const username =
     access && typeof access === "string" ? await fetchTiktokUsername(access.trim()) : null;
+  const externalId = openId || `tiktok-${tenantId}-${Date.now()}`;
+
+  const existing = openId ? await findAccountByExternalId(tenantId, "tiktok", externalId) : null;
+  if (existing) {
+    return { tenantId, outcome: "duplicate" };
+  }
 
   const { Tenant } = models();
   const row = await Tenant.findByPk(tenantId);
   if (!row) throw new Error("Tenant not found");
-  row.tiktokRefreshToken = refresh;
-  row.tiktokOpenId = typeof json.open_id === "string" ? json.open_id : null;
-  row.tiktokUsername = username;
-  row.syndicationTiktokConnected = true;
-  await row.save();
-  return tenantId;
+
+  await createSyndicationAccount({
+    tenantId,
+    platform: "tiktok",
+    externalAccountId: externalId,
+    displayName: username ? `@${username.replace(/^@/, "")}` : "TikTok account",
+    credentials: {
+      refreshToken: refresh,
+      openId,
+      username,
+    },
+    status: "active",
+  });
+
+  return { tenantId, outcome: "connected" };
 }
 
 /**
@@ -1615,17 +1902,38 @@ export async function mockAuthorizeTiktokSyndication(tenantId) {
   if (process.env.TIKTOK_ALLOW_MOCK_AUTH !== "true") {
     throw new Error("Mock authorize disabled; use TikTok OAuth or set TIKTOK_ALLOW_MOCK_AUTH=true for local dev");
   }
-  const { Tenant } = models();
   const id = String(tenantId || "").trim();
   if (!id) return null;
+  const { Tenant } = models();
   const row = await Tenant.findByPk(id);
   if (!row) return null;
-  row.tiktokRefreshToken = "mock-tiktok-refresh-token";
-  row.tiktokOpenId = "mock-tiktok-open-id";
-  row.tiktokUsername = "mock_tiktok";
-  row.syndicationTiktokConnected = true;
-  await row.save();
+
+  const openId = `mock-tiktok-open-id-${Date.now()}`;
+  await createSyndicationAccount({
+    tenantId: id,
+    platform: "tiktok",
+    externalAccountId: openId,
+    displayName: "@mock_tiktok",
+    credentials: {
+      refreshToken: "mock-tiktok-refresh-token",
+      openId,
+      username: "mock_tiktok",
+    },
+    status: "active",
+  });
   return getSyndicationStatusForTenant(id);
+}
+
+/**
+ * @param {string} accountId
+ * @returns {Promise<string | null>}
+ */
+export async function getTiktokRefreshTokenForAccount(accountId) {
+  const row = await getAccountById(accountId);
+  if (!row || row.get("platform") !== "tiktok") return null;
+  const cred = getAccountCredentials(row);
+  const t = cred.refreshToken;
+  return typeof t === "string" && t.trim() ? t.trim() : null;
 }
 
 /**
@@ -1633,20 +1941,18 @@ export async function mockAuthorizeTiktokSyndication(tenantId) {
  * @returns {Promise<string | null>}
  */
 export async function getTenantTiktokRefreshToken(tenantId) {
-  const { Tenant } = models();
-  const row = await Tenant.findByPk(String(tenantId || "").trim());
-  if (!row) return null;
-  const t = row.get("tiktokRefreshToken");
-  return typeof t === "string" && t.trim() ? t.trim() : null;
+  const accounts = await getActiveAccountsForPublish(tenantId, "tiktok");
+  if (!accounts.length) return null;
+  return getTiktokRefreshTokenForAccount(accounts[0].get("id"));
 }
 
 /**
- * @param {string} tenantId
+ * @param {string} accountId
  * @returns {Promise<string>} user access token
  */
-export async function getTiktokAccessTokenForTenant(tenantId) {
-  const refresh = await getTenantTiktokRefreshToken(tenantId);
-  if (!refresh) throw new Error("Tenant has no TikTok refresh token");
+export async function getTiktokAccessTokenForAccount(accountId) {
+  const refresh = await getTiktokRefreshTokenForAccount(accountId);
+  if (!refresh) throw new Error("TikTok account has no refresh token");
   if (refresh === "mock-tiktok-refresh-token") return "mock-tiktok-access-token";
 
   const { clientKey, clientSecret } = await getResolvedTiktokOAuth();
@@ -1669,11 +1975,12 @@ export async function getTiktokAccessTokenForTenant(tenantId) {
   }
 
   if (json.refresh_token && typeof json.refresh_token === "string") {
-    const { Tenant } = models();
-    const row = await Tenant.findByPk(String(tenantId || "").trim());
+    const row = await getAccountById(accountId);
     if (row) {
-      row.tiktokRefreshToken = json.refresh_token;
-      await row.save();
+      const cred = getAccountCredentials(row);
+      await updateSyndicationAccount(accountId, {
+        credentials: { ...cred, refreshToken: json.refresh_token },
+      });
     }
   }
 
@@ -1682,9 +1989,25 @@ export async function getTiktokAccessTokenForTenant(tenantId) {
 
 /**
  * @param {string} tenantId
+ * @returns {Promise<string>} user access token
  */
-export async function queryTiktokCreatorInfoForTenant(tenantId) {
-  const access = await getTiktokAccessTokenForTenant(tenantId);
+export async function getTiktokAccessTokenForTenant(tenantId) {
+  const accounts = await getActiveAccountsForPublish(tenantId, "tiktok");
+  if (!accounts.length) throw new Error("Tenant has no TikTok accounts");
+  return getTiktokAccessTokenForAccount(accounts[0].get("id"));
+}
+
+/**
+ * @param {string} tenantId
+ * @param {string} [accountId]
+ */
+export async function queryTiktokCreatorInfoForTenant(tenantId, accountId) {
+  const aid = accountId
+    ? String(accountId).trim()
+    : (await getActiveAccountsForPublish(tenantId, "tiktok"))[0]?.get("id");
+  if (!aid) throw new Error("No TikTok account available");
+
+  const access = await getTiktokAccessTokenForAccount(aid);
   if (access === "mock-tiktok-access-token") {
     return {
       creator_username: "mock_tiktok",
@@ -1746,6 +2069,7 @@ async function waitForTiktokPublishComplete(publishId, accessToken) {
 export async function uploadVideoToTiktok(opts) {
   const {
     tenantId,
+    accountId,
     jobId = "",
     videoUrl,
     caption,
@@ -1757,7 +2081,12 @@ export async function uploadVideoToTiktok(opts) {
     brandOrganicToggle = false,
   } = opts;
 
-  const access = await getTiktokAccessTokenForTenant(tenantId);
+  const aid = accountId
+    ? String(accountId).trim()
+    : (await getActiveAccountsForPublish(tenantId, "tiktok"))[0]?.get("id");
+  if (!aid) throw new Error("No TikTok account available for this tenant");
+
+  const access = await getTiktokAccessTokenForAccount(aid);
   if (access === "mock-tiktok-access-token") {
     return {
       publishId: "mock-tiktok-publish-id",
@@ -1766,7 +2095,7 @@ export async function uploadVideoToTiktok(opts) {
     };
   }
 
-  const creator = await queryTiktokCreatorInfoForTenant(tenantId);
+  const creator = await queryTiktokCreatorInfoForTenant(tenantId, aid);
   const options = Array.isArray(creator.privacy_level_options) ? creator.privacy_level_options : [];
   let privacy = String(privacyLevel || "").trim();
   if (!privacy || !options.includes(privacy)) {

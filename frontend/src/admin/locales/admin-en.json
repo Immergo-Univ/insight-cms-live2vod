@@ -109,7 +109,18 @@
     "tiktokDisconnect": "Disconnect TikTok",
     "tiktokDisconnectConfirmTitle": "Disconnect TikTok?",
     "tiktokDisconnectConfirmDescription": "The stored refresh token will be removed. TikTok publishing will be disabled until it is authorized again.",
-    "tiktokDisconnected": "TikTok disconnected"
+    "tiktokDisconnected": "TikTok disconnected",
+    "syndicationAccountsTitle": "Connected syndication accounts",
+    "syndicationAccountsHint": "Each row is an OAuth-connected account for this tenant. Disconnect removes only that account; use the network tabs to disconnect all accounts on a platform.",
+    "syndicationAccountsPlatform": "Platform",
+    "syndicationAccountsName": "Display name",
+    "syndicationAccountsExternalId": "External ID",
+    "syndicationAccountsStatus": "Status",
+    "syndicationAccountsEmpty": "No syndication accounts connected",
+    "syndicationAccountDisconnect": "Disconnect account",
+    "syndicationAccountDisconnectConfirmTitle": "Disconnect this account?",
+    "syndicationAccountDisconnectConfirmDescription": "Remove {{name}} ({{platform}}) from this tenant. Other accounts on the same platform will stay connected.",
+    "syndicationAccountDisconnected": "Account disconnected"
   },
   "clips": {
     "title": "Generated clips",

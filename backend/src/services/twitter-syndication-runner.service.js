@@ -2,12 +2,9 @@ import { getSequelize } from "../db/sequelize.js";
 import { isVodJobsPostgresEnabled } from "./vod-jobs-pg.repository.js";
 import { getJob, mergeJobEditorSpec } from "./vod-jobs.store.js";
 import { uploadVideoToTwitter } from "./tenant-syndication.service.js";
+import { getActiveAccountsForPublish } from "./tenant-syndication-accounts.service.js";
 import { vodEncodeStdout } from "../utils/vod-encode-log.js";
 
-/**
- * @param {Record<string, unknown>} spec
- * @param {string} editorClipId
- */
 function pickClipFromSpec(spec, editorClipId) {
   const clips = Array.isArray(spec?.clips) ? spec.clips : [];
   if (!clips.length) return null;
@@ -22,12 +19,7 @@ function pickClipFromSpec(spec, editorClipId) {
   return null;
 }
 
-/**
- * @param {Record<string, unknown>} spec
- * @param {string} editorClipId
- * @param {Record<string, unknown>} uploadPatch
- */
-function specWithTwitterSyndicationUploadPatch(spec, editorClipId, uploadPatch) {
+function specWithTwitterUploadPatch(spec, editorClipId, accountId, uploadPatch) {
   const base = spec && typeof spec === "object" && !Array.isArray(spec) ? { ...spec } : {};
   const clips = Array.isArray(base.clips) ? base.clips.map((c) => (c && typeof c === "object" ? { ...c } : c)) : [];
   const sid = String(editorClipId || "").trim();
@@ -43,19 +35,21 @@ function specWithTwitterSyndicationUploadPatch(spec, editorClipId, uploadPatch) 
   const tw = {
     ...(synd.twitter && typeof synd.twitter === "object" && !Array.isArray(synd.twitter) ? synd.twitter : {}),
   };
-  const prevUp = tw.upload && typeof tw.upload === "object" && !Array.isArray(tw.upload) ? tw.upload : {};
-  tw.upload = { ...prevUp, ...uploadPatch };
+  const prevUploads =
+    tw.uploads && typeof tw.uploads === "object" && !Array.isArray(tw.uploads) ? { ...tw.uploads } : {};
+  const prevAccountUp =
+    prevUploads[accountId] && typeof prevUploads[accountId] === "object" && !Array.isArray(prevUploads[accountId])
+      ? prevUploads[accountId]
+      : {};
+  prevUploads[accountId] = { ...prevAccountUp, ...uploadPatch };
+  tw.uploads = prevUploads;
+  tw.upload = prevUploads[accountId];
   synd.twitter = tw;
   clip.syndication = synd;
   clips[idx] = clip;
   return { ...base, clips };
 }
 
-/**
- * After encoder marks job completed, optionally upload to X (Postgres jobs with editorSpec only).
- *
- * @param {string} jobId
- */
 export async function tryTwitterSyndicationAfterJobCompleted(jobId) {
   if (!isVodJobsPostgresEnabled()) return;
   const job = await getJob(jobId);
@@ -68,8 +62,7 @@ export async function tryTwitterSyndicationAfterJobCompleted(jobId) {
   const { Tenant } = sequelize.models;
   const tenantRow = await Tenant.findByPk(job.tenantId);
   if (!tenantRow) return;
-  const tPlain = tenantRow.get({ plain: true });
-  if (tPlain.syndicationTwitterEnabled !== true) return;
+  if (tenantRow.get({ plain: true }).syndicationTwitterEnabled !== true) return;
 
   const clip = pickClipFromSpec(spec, job.editorClipId || "");
   if (!clip) return;
@@ -77,8 +70,8 @@ export async function tryTwitterSyndicationAfterJobCompleted(jobId) {
   const tw = synd.twitter && typeof synd.twitter === "object" && !Array.isArray(synd.twitter) ? synd.twitter : {};
   if (tw.enabled !== true) return;
 
-  const up = tw.upload && typeof tw.upload === "object" && !Array.isArray(tw.upload) ? tw.upload : {};
-  if (up.state === "published" || up.state === "uploading") return;
+  const accounts = await getActiveAccountsForPublish(job.tenantId, "twitter");
+  if (!accounts.length) return;
 
   const videoUrl =
     typeof job.outputUrl === "string" && /^https?:\/\//i.test(job.outputUrl.trim())
@@ -93,47 +86,58 @@ export async function tryTwitterSyndicationAfterJobCompleted(jobId) {
 
   const meta = clip.metadata && typeof clip.metadata === "object" && !Array.isArray(clip.metadata) ? clip.metadata : {};
   const titleFromMeta = typeof meta.title === "string" ? meta.title.trim() : "";
-
   const opt = tw.options && typeof tw.options === "object" && !Array.isArray(tw.options) ? tw.options : {};
   const textOverride = typeof opt.textOverride === "string" ? opt.textOverride.trim() : "";
   const tweetText = textOverride || titleFromMeta || " ";
+  const uploadsMap =
+    tw.uploads && typeof tw.uploads === "object" && !Array.isArray(tw.uploads) ? tw.uploads : {};
 
-  const nowIso = new Date().toISOString();
-  await mergeJobEditorSpec(jobId, (prev) =>
-    specWithTwitterSyndicationUploadPatch(prev, job.editorClipId || "", {
-      state: "uploading",
-      message: "Uploading to X…",
-      updatedAt: nowIso,
-    }),
-  );
-
-  try {
-    const result = await uploadVideoToTwitter({
-      tenantId: job.tenantId,
-      videoUrl,
-      text: tweetText,
-    });
+  for (const account of accounts) {
+    const accountId = String(account.get("id"));
+    const prevUp =
+      uploadsMap[accountId] && typeof uploadsMap[accountId] === "object" && !Array.isArray(uploadsMap[accountId])
+        ? uploadsMap[accountId]
+        : tw.upload && typeof tw.upload === "object" && !Array.isArray(tw.upload) && accounts.length === 1
+          ? tw.upload
+          : {};
+    if (prevUp.state === "published" || prevUp.state === "uploading") continue;
 
     await mergeJobEditorSpec(jobId, (prev) =>
-      specWithTwitterSyndicationUploadPatch(prev, job.editorClipId || "", {
-        state: "published",
-        message: "Published on X",
-        tweetId: result.tweetId,
-        tweetUrl: result.url,
+      specWithTwitterUploadPatch(prev, job.editorClipId || "", accountId, {
+        state: "uploading",
+        message: "Uploading to X…",
         updatedAt: new Date().toISOString(),
       }),
     );
-    vodEncodeStdout(`twitter-syndication ok job=${jobId} tweetId=${result.tweetId}`);
-  } catch (e) {
-    const m = e instanceof Error ? e.message : String(e);
-    vodEncodeStdout(`twitter-syndication failed job=${jobId} err=${m.slice(0, 400)}`);
-    await mergeJobEditorSpec(jobId, (prev) =>
-      specWithTwitterSyndicationUploadPatch(prev, job.editorClipId || "", {
-        state: "failed",
-        message: "X upload failed",
-        error: m.slice(0, 2000),
-        updatedAt: new Date().toISOString(),
-      }),
-    );
+
+    try {
+      const result = await uploadVideoToTwitter({
+        tenantId: job.tenantId,
+        accountId,
+        videoUrl,
+        text: tweetText,
+      });
+      await mergeJobEditorSpec(jobId, (prev) =>
+        specWithTwitterUploadPatch(prev, job.editorClipId || "", accountId, {
+          state: "published",
+          message: "Published on X",
+          tweetId: result.tweetId,
+          tweetUrl: result.url,
+          updatedAt: new Date().toISOString(),
+        }),
+      );
+      vodEncodeStdout(`twitter-syndication ok job=${jobId} account=${accountId} tweetId=${result.tweetId}`);
+    } catch (e) {
+      const m = e instanceof Error ? e.message : String(e);
+      vodEncodeStdout(`twitter-syndication failed job=${jobId} account=${accountId} err=${m.slice(0, 400)}`);
+      await mergeJobEditorSpec(jobId, (prev) =>
+        specWithTwitterUploadPatch(prev, job.editorClipId || "", accountId, {
+          state: "failed",
+          message: "X upload failed",
+          error: m.slice(0, 2000),
+          updatedAt: new Date().toISOString(),
+        }),
+      );
+    }
   }
 }

@@ -1,28 +1,35 @@
-export type TenantSyndicationFacebookStatus = {
+export type SyndicationAccountSummary = {
+  id: string;
+  displayName: string;
+  status: "active" | "pending_selection";
+};
+
+export type TenantSyndicationPlatformStatus = {
   connected: boolean;
+  accounts: SyndicationAccountSummary[];
+  pendingAccountId?: string | null;
+  mockAuthAvailable?: boolean;
+};
+
+export type TenantSyndicationFacebookStatus = TenantSyndicationPlatformStatus & {
   pageSelected: boolean;
   pageId: string | null;
   pageName: string | null;
-  mockAuthAvailable?: boolean;
 };
 
-export type TenantSyndicationInstagramStatus = {
-  connected: boolean;
+export type TenantSyndicationInstagramStatus = TenantSyndicationPlatformStatus & {
   accountSelected: boolean;
   businessAccountId: string | null;
   username: string | null;
-  mockAuthAvailable?: boolean;
 };
 
-export type TenantSyndicationTiktokStatus = {
-  connected: boolean;
+export type TenantSyndicationTiktokStatus = TenantSyndicationPlatformStatus & {
   username: string | null;
-  mockAuthAvailable?: boolean;
 };
 
 export type TenantSyndicationStatus = {
-  youtube: { connected: boolean; mockAuthAvailable?: boolean };
-  twitter: { connected: boolean; mockAuthAvailable?: boolean };
+  youtube: TenantSyndicationPlatformStatus;
+  twitter: TenantSyndicationPlatformStatus;
   facebook: TenantSyndicationFacebookStatus;
   instagram: TenantSyndicationInstagramStatus;
   tiktok: TenantSyndicationTiktokStatus;
@@ -41,36 +48,73 @@ export type TiktokCreatorInfo = {
   max_video_post_duration_sec?: number;
 };
 
-function normalizeStatus(data: TenantSyndicationStatus & { error?: string }): TenantSyndicationStatus {
+function normalizeAccounts(raw: unknown): SyndicationAccountSummary[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((item) => {
+      if (!item || typeof item !== "object") return null;
+      const row = item as Record<string, unknown>;
+      const id = typeof row.id === "string" ? row.id.trim() : "";
+      if (!id) return null;
+      return {
+        id,
+        displayName: typeof row.displayName === "string" && row.displayName.trim() ? row.displayName.trim() : id,
+        status: row.status === "pending_selection" ? "pending_selection" : "active",
+      };
+    })
+    .filter(Boolean) as SyndicationAccountSummary[];
+}
+
+function normalizePlatform(data: Record<string, unknown> | undefined): TenantSyndicationPlatformStatus {
   return {
-    youtube: {
-      connected: !!data.youtube?.connected,
-      mockAuthAvailable: !!data.youtube?.mockAuthAvailable,
-    },
-    twitter: {
-      connected: !!data.twitter?.connected,
-      mockAuthAvailable: !!data.twitter?.mockAuthAvailable,
-    },
+    connected: !!data?.connected,
+    accounts: normalizeAccounts(data?.accounts),
+    pendingAccountId:
+      typeof data?.pendingAccountId === "string" && data.pendingAccountId.trim()
+        ? data.pendingAccountId.trim()
+        : null,
+    mockAuthAvailable: !!data?.mockAuthAvailable,
+  };
+}
+
+function normalizeStatus(data: TenantSyndicationStatus & { error?: string }): TenantSyndicationStatus {
+  const youtube = normalizePlatform(data.youtube as Record<string, unknown>);
+  const twitter = normalizePlatform(data.twitter as Record<string, unknown>);
+  const facebookRaw = (data.facebook ?? {}) as Record<string, unknown>;
+  const instagramRaw = (data.instagram ?? {}) as Record<string, unknown>;
+  const tiktokRaw = (data.tiktok ?? {}) as Record<string, unknown>;
+  const facebook = normalizePlatform(facebookRaw);
+  const instagram = normalizePlatform(instagramRaw);
+  const tiktok = normalizePlatform(tiktokRaw);
+
+  return {
+    youtube,
+    twitter,
     facebook: {
-      connected: !!data.facebook?.connected,
-      pageSelected: !!data.facebook?.pageSelected,
-      pageId: data.facebook?.pageId ?? null,
-      pageName: data.facebook?.pageName ?? null,
-      mockAuthAvailable: !!data.facebook?.mockAuthAvailable,
+      ...facebook,
+      pageSelected: !!facebookRaw.pageSelected,
+      pageId: typeof facebookRaw.pageId === "string" ? facebookRaw.pageId : null,
+      pageName: typeof facebookRaw.pageName === "string" ? facebookRaw.pageName : null,
     },
     instagram: {
-      connected: !!data.instagram?.connected,
-      accountSelected: !!data.instagram?.accountSelected,
-      businessAccountId: data.instagram?.businessAccountId ?? null,
-      username: data.instagram?.username ?? null,
-      mockAuthAvailable: !!data.instagram?.mockAuthAvailable,
+      ...instagram,
+      accountSelected: !!instagramRaw.accountSelected,
+      businessAccountId: typeof instagramRaw.businessAccountId === "string" ? instagramRaw.businessAccountId : null,
+      username: typeof instagramRaw.username === "string" ? instagramRaw.username : null,
     },
     tiktok: {
-      connected: !!data.tiktok?.connected,
-      username: data.tiktok?.username ?? null,
-      mockAuthAvailable: !!data.tiktok?.mockAuthAvailable,
+      ...tiktok,
+      username: typeof tiktokRaw.username === "string" ? tiktokRaw.username : null,
     },
   };
+}
+
+export class SyndicationDuplicateAccountError extends Error {
+  code = "DUPLICATE_ACCOUNT" as const;
+  constructor(message = "This account is already authorized") {
+    super(message);
+    this.name = "SyndicationDuplicateAccountError";
+  }
 }
 
 export async function fetchTenantSyndicationStatus(tenantId: string): Promise<TenantSyndicationStatus> {
@@ -136,9 +180,13 @@ export async function fetchTenantSyndicationFacebookAuthUrl(tenantId: string): P
   return data.url;
 }
 
-export async function fetchTenantSyndicationFacebookPages(tenantId: string): Promise<FacebookPageOption[]> {
+export async function fetchTenantSyndicationFacebookPages(
+  tenantId: string,
+  accountId?: string,
+): Promise<FacebookPageOption[]> {
   const id = tenantId.trim();
-  const res = await fetch(`/api/tenants/${encodeURIComponent(id)}/syndication/facebook/pages`);
+  const q = accountId?.trim() ? `?accountId=${encodeURIComponent(accountId.trim())}` : "";
+  const res = await fetch(`/api/tenants/${encodeURIComponent(id)}/syndication/facebook/pages${q}`);
   const data = (await res.json()) as { pages?: FacebookPageOption[]; error?: string };
   if (!res.ok) throw new Error(data.error || res.statusText);
   return Array.isArray(data.pages) ? data.pages : [];
@@ -147,14 +195,18 @@ export async function fetchTenantSyndicationFacebookPages(tenantId: string): Pro
 export async function postTenantSyndicationFacebookSelectPage(
   tenantId: string,
   pageId: string,
+  accountId?: string,
 ): Promise<TenantSyndicationStatus> {
   const id = tenantId.trim();
   const res = await fetch(`/api/tenants/${encodeURIComponent(id)}/syndication/facebook/select-page`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ pageId }),
+    body: JSON.stringify({ pageId, ...(accountId?.trim() ? { accountId: accountId.trim() } : {}) }),
   });
-  const data = (await res.json()) as TenantSyndicationStatus & { error?: string };
+  const data = (await res.json()) as TenantSyndicationStatus & { error?: string; code?: string };
+  if (res.status === 409 || data.code === "DUPLICATE_ACCOUNT") {
+    throw new SyndicationDuplicateAccountError(data.error || "This Facebook Page is already authorized");
+  }
   if (!res.ok) throw new Error(data.error || res.statusText);
   return normalizeStatus(data);
 }
@@ -184,9 +236,11 @@ export async function fetchTenantSyndicationInstagramAuthUrl(tenantId: string): 
 
 export async function fetchTenantSyndicationInstagramAccounts(
   tenantId: string,
+  accountId?: string,
 ): Promise<InstagramAccountOption[]> {
   const id = tenantId.trim();
-  const res = await fetch(`/api/tenants/${encodeURIComponent(id)}/syndication/instagram/accounts`);
+  const q = accountId?.trim() ? `?accountId=${encodeURIComponent(accountId.trim())}` : "";
+  const res = await fetch(`/api/tenants/${encodeURIComponent(id)}/syndication/instagram/accounts${q}`);
   const data = (await res.json()) as { accounts?: InstagramAccountOption[]; error?: string };
   if (!res.ok) throw new Error(data.error || res.statusText);
   return Array.isArray(data.accounts) ? data.accounts : [];
@@ -195,14 +249,21 @@ export async function fetchTenantSyndicationInstagramAccounts(
 export async function postTenantSyndicationInstagramSelectAccount(
   tenantId: string,
   businessAccountId: string,
+  accountId?: string,
 ): Promise<TenantSyndicationStatus> {
   const id = tenantId.trim();
   const res = await fetch(`/api/tenants/${encodeURIComponent(id)}/syndication/instagram/select-account`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ businessAccountId }),
+    body: JSON.stringify({
+      businessAccountId,
+      ...(accountId?.trim() ? { accountId: accountId.trim() } : {}),
+    }),
   });
-  const data = (await res.json()) as TenantSyndicationStatus & { error?: string };
+  const data = (await res.json()) as TenantSyndicationStatus & { error?: string; code?: string };
+  if (res.status === 409 || data.code === "DUPLICATE_ACCOUNT") {
+    throw new SyndicationDuplicateAccountError(data.error || "This Instagram account is already authorized");
+  }
   if (!res.ok) throw new Error(data.error || res.statusText);
   return normalizeStatus(data);
 }

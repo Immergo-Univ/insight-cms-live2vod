@@ -109,7 +109,18 @@
     "tiktokDisconnect": "Desconectar TikTok",
     "tiktokDisconnectConfirmTitle": "¿Desconectar TikTok?",
     "tiktokDisconnectConfirmDescription": "Se eliminará el refresh token guardado. La publicación a TikTok quedará deshabilitada hasta que se vuelva a autorizar.",
-    "tiktokDisconnected": "TikTok desconectado"
+    "tiktokDisconnected": "TikTok desconectado",
+    "syndicationAccountsTitle": "Cuentas de syndication conectadas",
+    "syndicationAccountsHint": "Cada fila es una cuenta OAuth conectada para este tenant. Desconectar elimina solo esa cuenta; usa las pestañas de red para desconectar todas las cuentas de una plataforma.",
+    "syndicationAccountsPlatform": "Plataforma",
+    "syndicationAccountsName": "Nombre visible",
+    "syndicationAccountsExternalId": "ID externo",
+    "syndicationAccountsStatus": "Estado",
+    "syndicationAccountsEmpty": "No hay cuentas de syndication conectadas",
+    "syndicationAccountDisconnect": "Desconectar cuenta",
+    "syndicationAccountDisconnectConfirmTitle": "¿Desconectar esta cuenta?",
+    "syndicationAccountDisconnectConfirmDescription": "Eliminar {{name}} ({{platform}}) de este tenant. Las demás cuentas de la misma plataforma seguirán conectadas.",
+    "syndicationAccountDisconnected": "Cuenta desconectada"
   },
   "clips": {
     "title": "Clips generados",

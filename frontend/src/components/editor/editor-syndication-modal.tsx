@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { toast } from "sonner";
 import { Image01 } from "@untitledui/icons";
 import { ModalOverlay, Modal, Dialog } from "@/components/application/modals/modal";
 import { Tabs } from "@/components/application/tabs/tabs";
@@ -22,12 +23,15 @@ import {
   fetchTenantSyndicationTiktokAuthUrl,
   fetchTenantSyndicationTiktokCreatorInfo,
   postTenantSyndicationTiktokMockAuthorize,
+  SyndicationDuplicateAccountError,
 } from "@/services/tenant-syndication.service";
 import type {
   FacebookPageOption,
   InstagramAccountOption,
+  SyndicationAccountSummary,
   TiktokCreatorInfo,
 } from "@/services/tenant-syndication.service";
+import { SyndicationAccountsPanel, SyndicationOAuthBlock } from "@/components/editor/syndication-accounts-panel";
 import type {
   EditorClipSyndication,
   EditorClipFacebookSyndication,
@@ -44,6 +48,105 @@ import { normalizeEditorClipTagsList } from "@/types/editor";
 import { cx } from "@/utils/cx";
 import { buildThumbnailUrl } from "./editor-constants";
 import { formatTime } from "./editor-timeline";
+
+type SyndicationUploadEntry = {
+  state?: string;
+  message?: string;
+  error?: string;
+  watchUrl?: string;
+  tweetUrl?: string;
+  permalinkUrl?: string;
+  shareUrl?: string;
+};
+
+type SyndicationUploadBranch = {
+  upload?: SyndicationUploadEntry;
+  uploads?: Record<string, SyndicationUploadEntry>;
+};
+
+function collectSyndicationUploadEntries(
+  branch: SyndicationUploadBranch,
+): Array<{ accountId: string | null; upload: SyndicationUploadEntry }> {
+  if (branch.uploads && Object.keys(branch.uploads).length > 0) {
+    return Object.entries(branch.uploads).map(([accountId, upload]) => ({ accountId, upload }));
+  }
+  if (branch.upload?.state) {
+    return [{ accountId: null, upload: branch.upload }];
+  }
+  return [];
+}
+
+function syndicationUploadTabSuffix(branch: SyndicationUploadBranch, accountCount: number): string {
+  const entries = collectSyndicationUploadEntries(branch);
+  if (!entries.length) return "";
+  const total = Math.max(accountCount, entries.length);
+  const published = entries.filter((e) => e.upload.state === "published").length;
+  const failed = entries.filter((e) => e.upload.state === "failed").length;
+  if (failed > 0) return ` (${published}/${total}, ${failed} failed)`;
+  if (published > 0) return ` (${published}/${total} published)`;
+  const active = entries.filter((e) => e.upload.state === "uploading" || e.upload.state === "pending").length;
+  if (active > 0) return ` (${active}/${total} in progress)`;
+  return "";
+}
+
+function SyndicationUploadStatusBlock({
+  branch,
+  accounts,
+  linkLabel,
+  linkUrlKey,
+}: {
+  branch: SyndicationUploadBranch;
+  accounts: SyndicationAccountSummary[];
+  linkLabel: string;
+  linkUrlKey: "watchUrl" | "tweetUrl" | "permalinkUrl" | "shareUrl";
+}) {
+  const entries = collectSyndicationUploadEntries(branch);
+  if (!entries.length) return null;
+
+  const accountLabel = (accountId: string | null) => {
+    if (!accountId) return "Account";
+    const match = accounts.find((a) => a.id === accountId);
+    return match?.displayName || accountId.slice(0, 8);
+  };
+
+  const total = Math.max(accounts.length, entries.length);
+  const published = entries.filter((e) => e.upload.state === "published").length;
+  const showSummary = entries.length > 1 || accounts.length > 1;
+
+  return (
+    <div className="flex flex-col gap-2">
+      {showSummary ? (
+        <p className="text-xs font-medium text-secondary">
+          Upload progress: {published}/{total} published
+        </p>
+      ) : null}
+      {entries.map(({ accountId, upload }) => {
+        const linkUrl = upload[linkUrlKey];
+        return (
+          <p
+            key={accountId || "legacy"}
+            className="rounded-md border border-secondary bg-secondary px-2 py-2 text-xs text-secondary"
+          >
+            {entries.length > 1 || accountId ? (
+              <span className="mb-0.5 block font-medium text-primary">{accountLabel(accountId)}</span>
+            ) : null}
+            Upload status: <strong className="text-primary">{upload.state}</strong>
+            {upload.message ? ` — ${upload.message}` : ""}
+            {linkUrl ? (
+              <>
+                {" "}
+                <a href={linkUrl} target="_blank" rel="noreferrer" className="text-brand-secondary underline">
+                  {linkLabel}
+                </a>
+              </>
+            ) : null}
+            {upload.error ? <span className="mt-1 block text-error-primary">{upload.error}</span> : null}
+          </p>
+        );
+      })}
+    </div>
+  );
+}
 
 function clipMetadataDefaults(clip: EditorSubClip) {
   const title = clip.title?.trim() || `Clip ${clip.order}`;
@@ -76,6 +179,7 @@ function defaultYoutubeBranch(
       defaultAudioLanguage: existing?.options?.defaultAudioLanguage ?? "",
     },
     upload: existing?.upload ? { ...existing.upload } : undefined,
+    uploads: existing?.uploads ? { ...existing.uploads } : undefined,
   };
 }
 
@@ -91,6 +195,7 @@ function defaultTwitterBranch(
       textOverride: existing?.options?.textOverride?.trim() || defaults.combinedText || defaults.title,
     },
     upload: existing?.upload ? { ...existing.upload } : undefined,
+    uploads: existing?.uploads ? { ...existing.uploads } : undefined,
   };
 }
 
@@ -107,6 +212,7 @@ function defaultFacebookBranch(
       descriptionOverride: existing?.options?.descriptionOverride?.trim() || defaults.description,
     },
     upload: existing?.upload ? { ...existing.upload } : undefined,
+    uploads: existing?.uploads ? { ...existing.uploads } : undefined,
   };
 }
 
@@ -125,6 +231,7 @@ function defaultInstagramBranch(
       mediaType,
     },
     upload: existing?.upload ? { ...existing.upload } : undefined,
+    uploads: existing?.uploads ? { ...existing.uploads } : undefined,
   };
 }
 
@@ -146,6 +253,7 @@ function defaultTiktokBranch(
       brandOrganicToggle: existing?.options?.brandOrganicToggle === true,
     },
     upload: existing?.upload ? { ...existing.upload } : undefined,
+    uploads: existing?.uploads ? { ...existing.uploads } : undefined,
   };
 }
 
@@ -192,22 +300,27 @@ export function EditorSyndicationModal({
 }: EditorSyndicationModalProps) {
   const [statusLoading, setStatusLoading] = useState(false);
   const [statusError, setStatusError] = useState<string | null>(null);
+  const [youtubeAccounts, setYoutubeAccounts] = useState<SyndicationAccountSummary[]>([]);
+  const [twitterAccounts, setTwitterAccounts] = useState<SyndicationAccountSummary[]>([]);
+  const [facebookAccounts, setFacebookAccounts] = useState<SyndicationAccountSummary[]>([]);
+  const [instagramAccounts, setInstagramAccounts] = useState<SyndicationAccountSummary[]>([]);
+  const [tiktokAccounts, setTiktokAccounts] = useState<SyndicationAccountSummary[]>([]);
+  const [facebookPendingAccountId, setFacebookPendingAccountId] = useState<string | null>(null);
+  const [instagramPendingAccountId, setInstagramPendingAccountId] = useState<string | null>(null);
   const [youtubeConnected, setYoutubeConnected] = useState(false);
   const [twitterConnected, setTwitterConnected] = useState(false);
   const [facebookConnected, setFacebookConnected] = useState(false);
   const [facebookPageSelected, setFacebookPageSelected] = useState(false);
-  const [facebookPageName, setFacebookPageName] = useState<string | null>(null);
   const [youtubeMockAuthAvailable, setYoutubeMockAuthAvailable] = useState(false);
   const [twitterMockAuthAvailable, setTwitterMockAuthAvailable] = useState(false);
   const [facebookMockAuthAvailable, setFacebookMockAuthAvailable] = useState(false);
   const [instagramConnected, setInstagramConnected] = useState(false);
   const [instagramAccountSelected, setInstagramAccountSelected] = useState(false);
-  const [instagramUsername, setInstagramUsername] = useState<string | null>(null);
   const [instagramMockAuthAvailable, setInstagramMockAuthAvailable] = useState(false);
   const [authBusy, setAuthBusy] = useState(false);
   const [pageBusy, setPageBusy] = useState(false);
   const [facebookPages, setFacebookPages] = useState<FacebookPageOption[]>([]);
-  const [instagramAccounts, setInstagramAccounts] = useState<InstagramAccountOption[]>([]);
+  const [instagramPickerAccounts, setInstagramPickerAccounts] = useState<InstagramAccountOption[]>([]);
   const [selectedPageId, setSelectedPageId] = useState("");
   const [selectedIgAccountId, setSelectedIgAccountId] = useState("");
   const [ytDraft, setYtDraft] = useState<EditorClipYoutubeSyndication>(() =>
@@ -223,7 +336,6 @@ export function EditorSyndicationModal({
     clip ? defaultInstagramBranch(clip, syndicationInstagramDefaultEnabled) : { enabled: false, options: { mediaType: "reels" } },
   );
   const [tiktokConnected, setTiktokConnected] = useState(false);
-  const [tiktokUsername, setTiktokUsername] = useState<string | null>(null);
   const [tiktokMockAuthAvailable, setTiktokMockAuthAvailable] = useState(false);
   const [tiktokCreatorInfo, setTiktokCreatorInfo] = useState<TiktokCreatorInfo | null>(null);
   const [creatorInfoBusy, setCreatorInfoBusy] = useState(false);
@@ -239,36 +351,44 @@ export function EditorSyndicationModal({
     try {
       const s = await fetchTenantSyndicationStatus(id);
       setYoutubeConnected(s.youtube.connected);
+      setYoutubeAccounts(s.youtube.accounts ?? []);
       setTwitterConnected(s.twitter.connected);
+      setTwitterAccounts(s.twitter.accounts ?? []);
       setFacebookConnected(s.facebook.connected);
+      setFacebookAccounts(s.facebook.accounts ?? []);
       setFacebookPageSelected(s.facebook.pageSelected);
-      setFacebookPageName(s.facebook.pageName);
+      setFacebookPendingAccountId(s.facebook.pendingAccountId ?? null);
       setYoutubeMockAuthAvailable(!!s.youtube.mockAuthAvailable);
       setTwitterMockAuthAvailable(!!s.twitter.mockAuthAvailable);
       setFacebookMockAuthAvailable(!!s.facebook.mockAuthAvailable);
       setInstagramConnected(s.instagram.connected);
+      setInstagramAccounts(s.instagram.accounts ?? []);
       setInstagramAccountSelected(s.instagram.accountSelected);
-      setInstagramUsername(s.instagram.username);
+      setInstagramPendingAccountId(s.instagram.pendingAccountId ?? null);
       setInstagramMockAuthAvailable(!!s.instagram.mockAuthAvailable);
       setTiktokConnected(s.tiktok.connected);
-      setTiktokUsername(s.tiktok.username);
+      setTiktokAccounts(s.tiktok.accounts ?? []);
       setTiktokMockAuthAvailable(!!s.tiktok.mockAuthAvailable);
     } catch (e) {
       setStatusError(e instanceof Error ? e.message : "Failed to load syndication status");
       setYoutubeConnected(false);
       setTwitterConnected(false);
       setFacebookConnected(false);
+      setYoutubeAccounts([]);
+      setTwitterAccounts([]);
+      setFacebookAccounts([]);
+      setInstagramAccounts([]);
+      setTiktokAccounts([]);
+      setFacebookPendingAccountId(null);
+      setInstagramPendingAccountId(null);
       setFacebookPageSelected(false);
-      setFacebookPageName(null);
       setInstagramConnected(false);
       setInstagramAccountSelected(false);
-      setInstagramUsername(null);
       setYoutubeMockAuthAvailable(false);
       setTwitterMockAuthAvailable(false);
       setFacebookMockAuthAvailable(false);
       setInstagramMockAuthAvailable(false);
       setTiktokConnected(false);
-      setTiktokUsername(null);
       setTiktokMockAuthAvailable(false);
     } finally {
       setStatusLoading(false);
@@ -304,7 +424,7 @@ export function EditorSyndicationModal({
 
   const loadTiktokCreatorInfo = useCallback(async () => {
     const id = tenantId.trim();
-    if (!id || !tiktokConnected) return;
+    if (!id || tiktokAccounts.length === 0) return;
     setCreatorInfoBusy(true);
     setStatusError(null);
     try {
@@ -324,20 +444,21 @@ export function EditorSyndicationModal({
     } finally {
       setCreatorInfoBusy(false);
     }
-  }, [tenantId, tiktokConnected, ttDraft.options.privacyLevel]);
+  }, [tenantId, tiktokAccounts.length, ttDraft.options.privacyLevel]);
 
   useEffect(() => {
-    if (!isOpen || !tiktokConnected) return;
+    if (!isOpen || tiktokAccounts.length === 0) return;
     void loadTiktokCreatorInfo();
-  }, [isOpen, tiktokConnected, loadTiktokCreatorInfo]);
+  }, [isOpen, tiktokAccounts.length, loadTiktokCreatorInfo]);
 
   const loadFacebookPages = useCallback(async () => {
     const id = tenantId.trim();
-    if (!id || !facebookConnected) return;
+    const pendingId = facebookPendingAccountId?.trim();
+    if (!id || !pendingId) return;
     setPageBusy(true);
     setStatusError(null);
     try {
-      const pages = await fetchTenantSyndicationFacebookPages(id);
+      const pages = await fetchTenantSyndicationFacebookPages(id, pendingId);
       setFacebookPages(pages);
       if (pages.length === 1) setSelectedPageId(pages[0].id);
     } catch (e) {
@@ -346,34 +467,35 @@ export function EditorSyndicationModal({
     } finally {
       setPageBusy(false);
     }
-  }, [tenantId, facebookConnected]);
+  }, [tenantId, facebookPendingAccountId]);
 
   useEffect(() => {
-    if (!isOpen || !facebookConnected || facebookPageSelected) return;
+    if (!isOpen || !facebookPendingAccountId) return;
     void loadFacebookPages();
-  }, [isOpen, facebookConnected, facebookPageSelected, loadFacebookPages]);
+  }, [isOpen, facebookPendingAccountId, loadFacebookPages]);
 
   const loadInstagramAccounts = useCallback(async () => {
     const id = tenantId.trim();
-    if (!id || !instagramConnected) return;
+    const pendingId = instagramPendingAccountId?.trim();
+    if (!id || !pendingId) return;
     setPageBusy(true);
     setStatusError(null);
     try {
-      const accounts = await fetchTenantSyndicationInstagramAccounts(id);
-      setInstagramAccounts(accounts);
+      const accounts = await fetchTenantSyndicationInstagramAccounts(id, pendingId);
+      setInstagramPickerAccounts(accounts);
       if (accounts.length === 1) setSelectedIgAccountId(accounts[0].id);
     } catch (e) {
       setStatusError(e instanceof Error ? e.message : "Failed to load Instagram accounts");
-      setInstagramAccounts([]);
+      setInstagramPickerAccounts([]);
     } finally {
       setPageBusy(false);
     }
-  }, [tenantId, instagramConnected]);
+  }, [tenantId, instagramPendingAccountId]);
 
   useEffect(() => {
-    if (!isOpen || !instagramConnected || instagramAccountSelected) return;
+    if (!isOpen || !instagramPendingAccountId) return;
     void loadInstagramAccounts();
-  }, [isOpen, instagramConnected, instagramAccountSelected, loadInstagramAccounts]);
+  }, [isOpen, instagramPendingAccountId, loadInstagramAccounts]);
 
   const handleStartOAuth = useCallback(async () => {
     if (readOnly || !tenantId.trim()) return;
@@ -464,15 +586,26 @@ export function EditorSyndicationModal({
     setPageBusy(true);
     setStatusError(null);
     try {
-      const s = await postTenantSyndicationFacebookSelectPage(tenantId.trim(), selectedPageId.trim());
+      const s = await postTenantSyndicationFacebookSelectPage(
+        tenantId.trim(),
+        selectedPageId.trim(),
+        facebookPendingAccountId ?? undefined,
+      );
       setFacebookPageSelected(s.facebook.pageSelected);
-      setFacebookPageName(s.facebook.pageName);
+      setFacebookAccounts(s.facebook.accounts ?? []);
+      setFacebookPendingAccountId(s.facebook.pendingAccountId ?? null);
+      setSelectedPageId("");
+      setFacebookPages([]);
     } catch (e) {
+      if (e instanceof SyndicationDuplicateAccountError) {
+        toast.info(e.message);
+        return;
+      }
       setStatusError(e instanceof Error ? e.message : "Failed to save Facebook Page");
     } finally {
       setPageBusy(false);
     }
-  }, [tenantId, readOnly, selectedPageId]);
+  }, [tenantId, readOnly, selectedPageId, facebookPendingAccountId]);
 
   const handleStartInstagramOAuth = useCallback(async () => {
     if (readOnly || !tenantId.trim()) return;
@@ -507,15 +640,26 @@ export function EditorSyndicationModal({
     setPageBusy(true);
     setStatusError(null);
     try {
-      const s = await postTenantSyndicationInstagramSelectAccount(tenantId.trim(), selectedIgAccountId.trim());
+      const s = await postTenantSyndicationInstagramSelectAccount(
+        tenantId.trim(),
+        selectedIgAccountId.trim(),
+        instagramPendingAccountId ?? undefined,
+      );
       setInstagramAccountSelected(s.instagram.accountSelected);
-      setInstagramUsername(s.instagram.username);
+      setInstagramAccounts(s.instagram.accounts ?? []);
+      setInstagramPendingAccountId(s.instagram.pendingAccountId ?? null);
+      setSelectedIgAccountId("");
+      setInstagramPickerAccounts([]);
     } catch (e) {
+      if (e instanceof SyndicationDuplicateAccountError) {
+        toast.info(e.message);
+        return;
+      }
       setStatusError(e instanceof Error ? e.message : "Failed to save Instagram account");
     } finally {
       setPageBusy(false);
     }
-  }, [tenantId, readOnly, selectedIgAccountId]);
+  }, [tenantId, readOnly, selectedIgAccountId, instagramPendingAccountId]);
 
   const handleStartTiktokOAuth = useCallback(async () => {
     if (readOnly || !tenantId.trim()) return;
@@ -658,12 +802,27 @@ export function EditorSyndicationModal({
     instagram: syndicationInstagramEnabled,
     tiktok: syndicationTiktokEnabled,
   };
+  const hasYoutubeAccounts = youtubeAccounts.length > 0;
+  const hasTwitterAccounts = twitterAccounts.length > 0;
+  const hasFacebookAccounts = facebookAccounts.length > 0;
+  const hasInstagramAccounts = instagramAccounts.length > 0;
+  const hasTiktokAccounts = tiktokAccounts.length > 0;
   const tabItems = [
-    enabledNetworks.youtube ? { id: "youtube", label: "YouTube", children: "YouTube" } : null,
-    enabledNetworks.twitter ? { id: "twitter", label: "Twitter / X", children: "Twitter / X" } : null,
-    enabledNetworks.facebook ? { id: "facebook", label: "Facebook", children: "Facebook" } : null,
-    enabledNetworks.instagram ? { id: "instagram", label: "Instagram", children: "Instagram" } : null,
-    enabledNetworks.tiktok ? { id: "tiktok", label: "TikTok", children: "TikTok" } : null,
+    enabledNetworks.youtube
+      ? { id: "youtube", label: `YouTube${syndicationUploadTabSuffix(ytDraft, youtubeAccounts.length)}`, children: "YouTube" }
+      : null,
+    enabledNetworks.twitter
+      ? { id: "twitter", label: `Twitter / X${syndicationUploadTabSuffix(twDraft, twitterAccounts.length)}`, children: "Twitter / X" }
+      : null,
+    enabledNetworks.facebook
+      ? { id: "facebook", label: `Facebook${syndicationUploadTabSuffix(fbDraft, facebookAccounts.length)}`, children: "Facebook" }
+      : null,
+    enabledNetworks.instagram
+      ? { id: "instagram", label: `Instagram${syndicationUploadTabSuffix(igDraft, instagramAccounts.length)}`, children: "Instagram" }
+      : null,
+    enabledNetworks.tiktok
+      ? { id: "tiktok", label: `TikTok${syndicationUploadTabSuffix(ttDraft, tiktokAccounts.length)}`, children: "TikTok" }
+      : null,
   ].filter(Boolean) as Array<{ id: string; label: string; children: string }>;
   const defaultTabId = tabItems[0]?.id || "youtube";
 
@@ -714,33 +873,17 @@ export function EditorSyndicationModal({
               <Tabs.Panel id="youtube" className="pt-2">
                 {statusLoading ? (
                   <p className="text-sm text-tertiary">Loading connection status…</p>
-                ) : !youtubeConnected ? (
-                  <div className="flex flex-col gap-3 rounded-lg border border-secondary bg-secondary/40 p-4">
-                    <p className="text-sm text-primary">
-                      Sign in with Google to allow Immergo to upload finished encodes to your YouTube channel.
-                    </p>
-                    <button
-                      type="button"
-                      disabled={readOnly || authBusy}
-                      onClick={() => void handleStartOAuth()}
-                      className={cx(
-                        "rounded-lg bg-brand-solid px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-brand-solid-hover",
-                        (readOnly || authBusy) && "cursor-not-allowed opacity-50",
-                      )}
-                    >
-                      {authBusy ? "Redirecting…" : "Authorize with Google"}
-                    </button>
-                    {youtubeMockAuthAvailable ? (
-                      <button
-                        type="button"
-                        disabled={readOnly || authBusy}
-                        onClick={() => void handleMockAuthorizeYoutube()}
-                        className="rounded-lg border border-secondary bg-primary px-3 py-2 text-xs font-medium text-secondary hover:bg-tertiary/40"
-                      >
-                        Dev: mock connected (no Google)
-                      </button>
-                    ) : null}
-                  </div>
+                ) : !hasYoutubeAccounts ? (
+                  <SyndicationOAuthBlock
+                    description="Sign in with Google to allow Immergo to upload finished encodes to your YouTube channel."
+                    authorizeLabel="Authorize with Google"
+                    readOnly={readOnly}
+                    authBusy={authBusy}
+                    onAuthorize={() => void handleStartOAuth()}
+                    mockAuthAvailable={youtubeMockAuthAvailable}
+                    onMockAuthorize={() => void handleMockAuthorizeYoutube()}
+                    mockLabel="Dev: mock connected (no Google)"
+                  />
                 ) : (
                   <div className="flex flex-col gap-4">
                     <Toggle
@@ -953,28 +1096,18 @@ export function EditorSyndicationModal({
                       </dl>
                     </div>
 
-                    {ytDraft.upload?.state ? (
-                      <p className="rounded-md border border-secondary bg-secondary px-2 py-2 text-xs text-secondary">
-                        Upload status: <strong className="text-primary">{ytDraft.upload.state}</strong>
-                        {ytDraft.upload.message ? ` — ${ytDraft.upload.message}` : ""}
-                        {ytDraft.upload.watchUrl ? (
-                          <>
-                            {" "}
-                            <a
-                              href={ytDraft.upload.watchUrl}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="text-brand-secondary underline"
-                            >
-                              Open video
-                            </a>
-                          </>
-                        ) : null}
-                        {ytDraft.upload.error ? (
-                          <span className="mt-1 block text-error-primary">{ytDraft.upload.error}</span>
-                        ) : null}
-                      </p>
-                    ) : null}
+                    <SyndicationUploadStatusBlock
+                      branch={ytDraft}
+                      accounts={youtubeAccounts}
+                      linkLabel="Open video"
+                      linkUrlKey="watchUrl"
+                    />
+                    <SyndicationAccountsPanel
+                      accounts={youtubeAccounts}
+                      readOnly={readOnly}
+                      authBusy={authBusy}
+                      onAddAccount={() => void handleStartOAuth()}
+                    />
                   </div>
                 )}
               </Tabs.Panel>
@@ -983,33 +1116,17 @@ export function EditorSyndicationModal({
               <Tabs.Panel id="twitter" className="pt-2">
                 {statusLoading ? (
                   <p className="text-sm text-tertiary">Loading connection status…</p>
-                ) : !twitterConnected ? (
-                  <div className="flex flex-col gap-3 rounded-lg border border-secondary bg-secondary/40 p-4">
-                    <p className="text-sm text-primary">
-                      Authorize Immergo with X to post the finished encode as a video tweet on your account.
-                    </p>
-                    <button
-                      type="button"
-                      disabled={readOnly || authBusy}
-                      onClick={() => void handleStartTwitterOAuth()}
-                      className={cx(
-                        "rounded-lg bg-brand-solid px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-brand-solid-hover",
-                        (readOnly || authBusy) && "cursor-not-allowed opacity-50",
-                      )}
-                    >
-                      {authBusy ? "Redirecting…" : "Authorize with X"}
-                    </button>
-                    {twitterMockAuthAvailable ? (
-                      <button
-                        type="button"
-                        disabled={readOnly || authBusy}
-                        onClick={() => void handleMockAuthorizeTwitter()}
-                        className="rounded-lg border border-secondary bg-primary px-3 py-2 text-xs font-medium text-secondary hover:bg-tertiary/40"
-                      >
-                        Dev: mock connected (no X)
-                      </button>
-                    ) : null}
-                  </div>
+                ) : !hasTwitterAccounts ? (
+                  <SyndicationOAuthBlock
+                    description="Authorize Immergo with X to post the finished encode as a video tweet on your account."
+                    authorizeLabel="Authorize with X"
+                    readOnly={readOnly}
+                    authBusy={authBusy}
+                    onAuthorize={() => void handleStartTwitterOAuth()}
+                    mockAuthAvailable={twitterMockAuthAvailable}
+                    onMockAuthorize={() => void handleMockAuthorizeTwitter()}
+                    mockLabel="Dev: mock connected (no X)"
+                  />
                 ) : (
                   <div className="flex flex-col gap-4">
                     <Toggle
@@ -1040,28 +1157,18 @@ export function EditorSyndicationModal({
                       Default tweet text is the clip title when override is empty. X may enforce length and media
                       limits per your developer plan.
                     </p>
-                    {twDraft.upload?.state ? (
-                      <p className="rounded-md border border-secondary bg-secondary px-2 py-2 text-xs text-secondary">
-                        Upload status: <strong className="text-primary">{twDraft.upload.state}</strong>
-                        {twDraft.upload.message ? ` — ${twDraft.upload.message}` : ""}
-                        {twDraft.upload.tweetUrl ? (
-                          <>
-                            {" "}
-                            <a
-                              href={twDraft.upload.tweetUrl}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="text-brand-secondary underline"
-                            >
-                              Open post
-                            </a>
-                          </>
-                        ) : null}
-                        {twDraft.upload.error ? (
-                          <span className="mt-1 block text-error-primary">{twDraft.upload.error}</span>
-                        ) : null}
-                      </p>
-                    ) : null}
+                    <SyndicationUploadStatusBlock
+                      branch={twDraft}
+                      accounts={twitterAccounts}
+                      linkLabel="Open post"
+                      linkUrlKey="tweetUrl"
+                    />
+                    <SyndicationAccountsPanel
+                      accounts={twitterAccounts}
+                      readOnly={readOnly}
+                      authBusy={authBusy}
+                      onAddAccount={() => void handleStartTwitterOAuth()}
+                    />
                   </div>
                 )}
               </Tabs.Panel>
@@ -1070,43 +1177,16 @@ export function EditorSyndicationModal({
               <Tabs.Panel id="facebook" className="pt-2">
                 {statusLoading ? (
                   <p className="text-sm text-tertiary">Loading connection status…</p>
-                ) : !facebookConnected ? (
+                ) : facebookPendingAccountId ? (
                   <div className="flex flex-col gap-3 rounded-lg border border-secondary bg-secondary/40 p-4">
                     <p className="text-sm text-primary">
-                      Sign in with Facebook to publish finished encodes to a Facebook Page you manage.
-                    </p>
-                    <button
-                      type="button"
-                      disabled={readOnly || authBusy}
-                      onClick={() => void handleStartFacebookOAuth()}
-                      className={cx(
-                        "rounded-lg bg-brand-solid px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-brand-solid-hover",
-                        (readOnly || authBusy) && "cursor-not-allowed opacity-50",
-                      )}
-                    >
-                      {authBusy ? "Redirecting…" : "Authorize with Facebook"}
-                    </button>
-                    {facebookMockAuthAvailable ? (
-                      <button
-                        type="button"
-                        disabled={readOnly || authBusy}
-                        onClick={() => void handleMockAuthorizeFacebook()}
-                        className="rounded-lg border border-secondary bg-primary px-3 py-2 text-xs font-medium text-secondary hover:bg-tertiary/40"
-                      >
-                        Dev: mock connected (no Facebook)
-                      </button>
-                    ) : null}
-                  </div>
-                ) : !facebookPageSelected ? (
-                  <div className="flex flex-col gap-3 rounded-lg border border-secondary bg-secondary/40 p-4">
-                    <p className="text-sm text-primary">
-                      Choose which Facebook Page should receive syndicated videos for this tenant.
+                      Choose which Facebook Page should receive syndicated videos for this authorization.
                     </p>
                     {pageBusy && facebookPages.length === 0 ? (
                       <p className="text-xs text-tertiary">Loading Pages…</p>
                     ) : facebookPages.length === 0 ? (
                       <p className="text-xs text-tertiary">
-                        No Pages found. Ensure your Facebook account manages at least one Page.
+                        No Pages found, or all available Pages are already authorized.
                       </p>
                     ) : (
                       <label className="flex flex-col gap-1 text-xs font-medium text-secondary">
@@ -1133,11 +1213,19 @@ export function EditorSyndicationModal({
                       {pageBusy ? "Saving…" : "Save Page"}
                     </button>
                   </div>
+                ) : !hasFacebookAccounts ? (
+                  <SyndicationOAuthBlock
+                    description="Sign in with Facebook to publish finished encodes to a Facebook Page you manage."
+                    authorizeLabel="Authorize with Facebook"
+                    readOnly={readOnly}
+                    authBusy={authBusy}
+                    onAuthorize={() => void handleStartFacebookOAuth()}
+                    mockAuthAvailable={facebookMockAuthAvailable}
+                    onMockAuthorize={() => void handleMockAuthorizeFacebook()}
+                    mockLabel="Dev: mock connected (no Facebook)"
+                  />
                 ) : (
                   <div className="flex flex-col gap-4">
-                    <p className="text-xs text-secondary">
-                      Connected Page: <strong className="text-primary">{facebookPageName || "—"}</strong>
-                    </p>
                     <Toggle
                       isSelected={fbDraft.enabled}
                       onChange={(v) => setFbDraft((d) => ({ ...d, enabled: v }))}
@@ -1178,28 +1266,18 @@ export function EditorSyndicationModal({
                         className="rounded-lg border border-secondary bg-primary px-2 py-2 text-sm text-primary"
                       />
                     </label>
-                    {fbDraft.upload?.state ? (
-                      <p className="rounded-md border border-secondary bg-secondary px-2 py-2 text-xs text-secondary">
-                        Upload status: <strong className="text-primary">{fbDraft.upload.state}</strong>
-                        {fbDraft.upload.message ? ` — ${fbDraft.upload.message}` : ""}
-                        {fbDraft.upload.permalinkUrl ? (
-                          <>
-                            {" "}
-                            <a
-                              href={fbDraft.upload.permalinkUrl}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="text-brand-secondary underline"
-                            >
-                              Open post
-                            </a>
-                          </>
-                        ) : null}
-                        {fbDraft.upload.error ? (
-                          <span className="mt-1 block text-error-primary">{fbDraft.upload.error}</span>
-                        ) : null}
-                      </p>
-                    ) : null}
+                    <SyndicationUploadStatusBlock
+                      branch={fbDraft}
+                      accounts={facebookAccounts}
+                      linkLabel="Open post"
+                      linkUrlKey="permalinkUrl"
+                    />
+                    <SyndicationAccountsPanel
+                      accounts={facebookAccounts}
+                      readOnly={readOnly}
+                      authBusy={authBusy}
+                      onAddAccount={() => void handleStartFacebookOAuth()}
+                    />
                   </div>
                 )}
               </Tabs.Panel>
@@ -1208,44 +1286,16 @@ export function EditorSyndicationModal({
               <Tabs.Panel id="instagram" className="pt-2">
                 {statusLoading ? (
                   <p className="text-sm text-tertiary">Loading connection status…</p>
-                ) : !instagramConnected ? (
+                ) : instagramPendingAccountId ? (
                   <div className="flex flex-col gap-3 rounded-lg border border-secondary bg-secondary/40 p-4">
                     <p className="text-sm text-primary">
-                      Sign in with Meta to publish finished encodes to an Instagram Business or Creator account linked
-                      to a Facebook Page.
+                      Choose which Instagram account should receive syndicated videos for this authorization.
                     </p>
-                    <button
-                      type="button"
-                      disabled={readOnly || authBusy}
-                      onClick={() => void handleStartInstagramOAuth()}
-                      className={cx(
-                        "rounded-lg bg-brand-solid px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-brand-solid-hover",
-                        (readOnly || authBusy) && "cursor-not-allowed opacity-50",
-                      )}
-                    >
-                      {authBusy ? "Redirecting…" : "Authorize with Instagram"}
-                    </button>
-                    {instagramMockAuthAvailable ? (
-                      <button
-                        type="button"
-                        disabled={readOnly || authBusy}
-                        onClick={() => void handleMockAuthorizeInstagram()}
-                        className="rounded-lg border border-secondary bg-primary px-3 py-2 text-xs font-medium text-secondary hover:bg-tertiary/40"
-                      >
-                        Dev: mock connected (no Instagram)
-                      </button>
-                    ) : null}
-                  </div>
-                ) : !instagramAccountSelected ? (
-                  <div className="flex flex-col gap-3 rounded-lg border border-secondary bg-secondary/40 p-4">
-                    <p className="text-sm text-primary">
-                      Choose which Instagram account should receive syndicated videos for this tenant.
-                    </p>
-                    {pageBusy && instagramAccounts.length === 0 ? (
+                    {pageBusy && instagramPickerAccounts.length === 0 ? (
                       <p className="text-xs text-tertiary">Loading accounts…</p>
-                    ) : instagramAccounts.length === 0 ? (
+                    ) : instagramPickerAccounts.length === 0 ? (
                       <p className="text-xs text-tertiary">
-                        No Instagram Business accounts found. Link an Instagram account to a Facebook Page you manage.
+                        No Instagram Business accounts found, or all available accounts are already authorized.
                       </p>
                     ) : (
                       <label className="flex flex-col gap-1 text-xs font-medium text-secondary">
@@ -1256,9 +1306,9 @@ export function EditorSyndicationModal({
                           onChange={(value) => setSelectedIgAccountId(value ?? "")}
                           placeholder="Select an account…"
                           allowClear
-                          options={instagramAccounts.map((a) => ({
+                          options={instagramPickerAccounts.map((a) => ({
                             value: a.id,
-                            label: `@${a.username}${a.pageName ? ` (${a.pageName})` : ""}`,
+                            label: `${a.username}${a.pageName ? ` (${a.pageName})` : ""}`,
                           }))}
                         />
                       </label>
@@ -1275,14 +1325,19 @@ export function EditorSyndicationModal({
                       {pageBusy ? "Saving…" : "Save account"}
                     </button>
                   </div>
+                ) : !hasInstagramAccounts ? (
+                  <SyndicationOAuthBlock
+                    description="Sign in with Meta to publish finished encodes to an Instagram Business or Creator account linked to a Facebook Page."
+                    authorizeLabel="Authorize with Instagram"
+                    readOnly={readOnly}
+                    authBusy={authBusy}
+                    onAuthorize={() => void handleStartInstagramOAuth()}
+                    mockAuthAvailable={instagramMockAuthAvailable}
+                    onMockAuthorize={() => void handleMockAuthorizeInstagram()}
+                    mockLabel="Dev: mock connected (no Instagram)"
+                  />
                 ) : (
                   <div className="flex flex-col gap-4">
-                    <p className="text-xs text-secondary">
-                      Connected account:{" "}
-                      <strong className="text-primary">
-                        {instagramUsername ? `@${instagramUsername}` : "—"}
-                      </strong>
-                    </p>
                     <Toggle
                       isSelected={igDraft.enabled}
                       onChange={(v) => setIgDraft((d) => ({ ...d, enabled: v }))}
@@ -1327,28 +1382,18 @@ export function EditorSyndicationModal({
                         className="rounded-lg border border-secondary bg-primary px-2 py-2 text-sm text-primary"
                       />
                     </label>
-                    {igDraft.upload?.state ? (
-                      <p className="rounded-md border border-secondary bg-secondary px-2 py-2 text-xs text-secondary">
-                        Upload status: <strong className="text-primary">{igDraft.upload.state}</strong>
-                        {igDraft.upload.message ? ` — ${igDraft.upload.message}` : ""}
-                        {igDraft.upload.permalinkUrl ? (
-                          <>
-                            {" "}
-                            <a
-                              href={igDraft.upload.permalinkUrl}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="text-brand-secondary underline"
-                            >
-                              Open post
-                            </a>
-                          </>
-                        ) : null}
-                        {igDraft.upload.error ? (
-                          <span className="mt-1 block text-error-primary">{igDraft.upload.error}</span>
-                        ) : null}
-                      </p>
-                    ) : null}
+                    <SyndicationUploadStatusBlock
+                      branch={igDraft}
+                      accounts={instagramAccounts}
+                      linkLabel="Open post"
+                      linkUrlKey="permalinkUrl"
+                    />
+                    <SyndicationAccountsPanel
+                      accounts={instagramAccounts}
+                      readOnly={readOnly}
+                      authBusy={authBusy}
+                      onAddAccount={() => void handleStartInstagramOAuth()}
+                    />
                   </div>
                 )}
               </Tabs.Panel>
@@ -1357,50 +1402,26 @@ export function EditorSyndicationModal({
               <Tabs.Panel id="tiktok" className="pt-2">
                 {statusLoading ? (
                   <p className="text-sm text-tertiary">Loading connection status…</p>
-                ) : !tiktokConnected ? (
-                  <div className="flex flex-col gap-3 rounded-lg border border-secondary bg-secondary/40 p-4">
-                    <p className="text-sm text-primary">
-                      Sign in with TikTok to publish finished encodes to your TikTok account (Direct Post API).
-                    </p>
+                ) : !hasTiktokAccounts ? (
+                  <div className="flex flex-col gap-3">
+                    <SyndicationOAuthBlock
+                      description="Sign in with TikTok to publish finished encodes to your TikTok account (Direct Post API)."
+                      authorizeLabel="Authorize with TikTok"
+                      readOnly={readOnly}
+                      authBusy={authBusy}
+                      onAuthorize={() => void handleStartTiktokOAuth()}
+                      mockAuthAvailable={tiktokMockAuthAvailable}
+                      onMockAuthorize={() => void handleMockAuthorizeTiktok()}
+                      mockLabel="Dev: mock connected (no TikTok)"
+                    />
                     <p className="text-xs text-tertiary">
                       Unaudited apps may only publish as private until TikTok approves your Content Posting API
                       integration. Verify your MP4 output URL domain in the TikTok developer portal for pull-from-URL
                       uploads.
                     </p>
-                    <button
-                      type="button"
-                      disabled={readOnly || authBusy}
-                      onClick={() => void handleStartTiktokOAuth()}
-                      className={cx(
-                        "rounded-lg bg-brand-solid px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-brand-solid-hover",
-                        (readOnly || authBusy) && "cursor-not-allowed opacity-50",
-                      )}
-                    >
-                      {authBusy ? "Redirecting…" : "Authorize with TikTok"}
-                    </button>
-                    {tiktokMockAuthAvailable ? (
-                      <button
-                        type="button"
-                        disabled={readOnly || authBusy}
-                        onClick={() => void handleMockAuthorizeTiktok()}
-                        className="rounded-lg border border-secondary bg-primary px-3 py-2 text-xs font-medium text-secondary hover:bg-tertiary/40"
-                      >
-                        Dev: mock connected (no TikTok)
-                      </button>
-                    ) : null}
                   </div>
                 ) : (
                   <div className="flex flex-col gap-4">
-                    <p className="text-xs text-secondary">
-                      Connected account:{" "}
-                      <strong className="text-primary">
-                        {tiktokUsername
-                          ? `@${tiktokUsername}`
-                          : tiktokCreatorInfo?.creator_username
-                            ? `@${tiktokCreatorInfo.creator_username}`
-                            : "—"}
-                      </strong>
-                    </p>
                     {creatorInfoBusy && !tiktokCreatorInfo ? (
                       <p className="text-xs text-tertiary">Loading creator settings…</p>
                     ) : null}
@@ -1489,28 +1510,18 @@ export function EditorSyndicationModal({
                         size="sm"
                       />
                     </div>
-                    {ttDraft.upload?.state ? (
-                      <p className="rounded-md border border-secondary bg-secondary px-2 py-2 text-xs text-secondary">
-                        Upload status: <strong className="text-primary">{ttDraft.upload.state}</strong>
-                        {ttDraft.upload.message ? ` — ${ttDraft.upload.message}` : ""}
-                        {ttDraft.upload.shareUrl ? (
-                          <>
-                            {" "}
-                            <a
-                              href={ttDraft.upload.shareUrl}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="text-brand-secondary underline"
-                            >
-                              Open post
-                            </a>
-                          </>
-                        ) : null}
-                        {ttDraft.upload.error ? (
-                          <span className="mt-1 block text-error-primary">{ttDraft.upload.error}</span>
-                        ) : null}
-                      </p>
-                    ) : null}
+                    <SyndicationUploadStatusBlock
+                      branch={ttDraft}
+                      accounts={tiktokAccounts}
+                      linkLabel="Open post"
+                      linkUrlKey="shareUrl"
+                    />
+                    <SyndicationAccountsPanel
+                      accounts={tiktokAccounts}
+                      readOnly={readOnly}
+                      authBusy={authBusy}
+                      onAddAccount={() => void handleStartTiktokOAuth()}
+                    />
                   </div>
                 )}
               </Tabs.Panel>

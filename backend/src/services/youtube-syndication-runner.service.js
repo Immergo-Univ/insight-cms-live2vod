@@ -2,6 +2,7 @@ import { getSequelize } from "../db/sequelize.js";
 import { isVodJobsPostgresEnabled } from "./vod-jobs-pg.repository.js";
 import { getJob, mergeJobEditorSpec } from "./vod-jobs.store.js";
 import { uploadVideoToYoutube } from "./tenant-syndication.service.js";
+import { getActiveAccountsForPublish } from "./tenant-syndication-accounts.service.js";
 import { vodEncodeStdout } from "../utils/vod-encode-log.js";
 
 /**
@@ -25,9 +26,10 @@ function pickClipFromSpec(spec, editorClipId) {
 /**
  * @param {Record<string, unknown>} spec
  * @param {string} editorClipId
+ * @param {string} accountId
  * @param {Record<string, unknown>} uploadPatch
  */
-function specWithSyndicationUploadPatch(spec, editorClipId, uploadPatch) {
+function specWithYoutubeUploadPatch(spec, editorClipId, accountId, uploadPatch) {
   const base = spec && typeof spec === "object" && !Array.isArray(spec) ? { ...spec } : {};
   const clips = Array.isArray(base.clips) ? base.clips.map((c) => (c && typeof c === "object" ? { ...c } : c)) : [];
   const sid = String(editorClipId || "").trim();
@@ -43,8 +45,15 @@ function specWithSyndicationUploadPatch(spec, editorClipId, uploadPatch) {
   const yt = {
     ...(synd.youtube && typeof synd.youtube === "object" && !Array.isArray(synd.youtube) ? synd.youtube : {}),
   };
-  const prevUp = yt.upload && typeof yt.upload === "object" && !Array.isArray(yt.upload) ? yt.upload : {};
-  yt.upload = { ...prevUp, ...uploadPatch };
+  const prevUploads =
+    yt.uploads && typeof yt.uploads === "object" && !Array.isArray(yt.uploads) ? { ...yt.uploads } : {};
+  const prevAccountUp =
+    prevUploads[accountId] && typeof prevUploads[accountId] === "object" && !Array.isArray(prevUploads[accountId])
+      ? prevUploads[accountId]
+      : {};
+  prevUploads[accountId] = { ...prevAccountUp, ...uploadPatch };
+  yt.uploads = prevUploads;
+  yt.upload = prevUploads[accountId];
   synd.youtube = yt;
   clip.syndication = synd;
   clips[idx] = clip;
@@ -52,7 +61,7 @@ function specWithSyndicationUploadPatch(spec, editorClipId, uploadPatch) {
 }
 
 /**
- * After encoder marks job completed, optionally upload to YouTube (Postgres jobs with editorSpec only).
+ * After encoder marks job completed, upload to all connected YouTube accounts.
  *
  * @param {string} jobId
  */
@@ -77,8 +86,8 @@ export async function tryYoutubeSyndicationAfterJobCompleted(jobId) {
   const yt = synd.youtube && typeof synd.youtube === "object" && !Array.isArray(synd.youtube) ? synd.youtube : {};
   if (yt.enabled !== true) return;
 
-  const up = yt.upload && typeof yt.upload === "object" && !Array.isArray(yt.upload) ? yt.upload : {};
-  if (up.state === "published" || up.state === "uploading") return;
+  const accounts = await getActiveAccountsForPublish(job.tenantId, "youtube");
+  if (!accounts.length) return;
 
   const videoUrl =
     typeof job.outputUrl === "string" && /^https?:\/\//i.test(job.outputUrl.trim())
@@ -105,57 +114,72 @@ export async function tryYoutubeSyndicationAfterJobCompleted(jobId) {
   const tagsExtra = Array.isArray(opt.tagsExtra) ? opt.tagsExtra.map((x) => String(x)) : [];
   const tags = [...new Set([...tagsFromMeta, ...tagsExtra])].slice(0, 30);
 
-  const nowIso = new Date().toISOString();
-  await mergeJobEditorSpec(jobId, (prev) =>
-    specWithSyndicationUploadPatch(prev, job.editorClipId || "", {
-      state: "uploading",
-      message: "Uploading to YouTube…",
-      updatedAt: nowIso,
-    }),
-  );
+  const uploadsMap =
+    yt.uploads && typeof yt.uploads === "object" && !Array.isArray(yt.uploads) ? yt.uploads : {};
 
-  try {
-    const result = await uploadVideoToYoutube({
-      tenantId: job.tenantId,
-      videoUrl,
-      snippet: {
-        title: title || "Immergo clip",
-        description: description || "",
-        tags,
-        categoryId: opt.categoryId != null ? String(opt.categoryId) : "22",
-        defaultLanguage: opt.defaultLanguage ? String(opt.defaultLanguage) : undefined,
-        defaultAudioLanguage: opt.defaultAudioLanguage ? String(opt.defaultAudioLanguage) : undefined,
-      },
-      status: {
-        privacyStatus: opt.privacyStatus === "public" || opt.privacyStatus === "unlisted" ? opt.privacyStatus : "private",
-        embeddable: opt.embeddable !== false,
-        license: opt.license === "creativeCommon" ? "creativeCommon" : "youtube",
-        publicStatsViewable: opt.publicStatsViewable !== false,
-        selfDeclaredMadeForKids: Boolean(opt.selfDeclaredMadeForKids),
-      },
-      notifySubscribers: Boolean(opt.notifySubscribers),
-    });
+  for (const account of accounts) {
+    const accountId = String(account.get("id"));
+    const prevUp =
+      uploadsMap[accountId] && typeof uploadsMap[accountId] === "object" && !Array.isArray(uploadsMap[accountId])
+        ? uploadsMap[accountId]
+        : yt.upload && typeof yt.upload === "object" && !Array.isArray(yt.upload) && accounts.length === 1
+          ? yt.upload
+          : {};
+    if (prevUp.state === "published" || prevUp.state === "uploading") continue;
 
+    const nowIso = new Date().toISOString();
     await mergeJobEditorSpec(jobId, (prev) =>
-      specWithSyndicationUploadPatch(prev, job.editorClipId || "", {
-        state: "published",
-        message: "Published on YouTube",
-        videoId: result.videoId,
-        watchUrl: result.url,
-        updatedAt: new Date().toISOString(),
+      specWithYoutubeUploadPatch(prev, job.editorClipId || "", accountId, {
+        state: "uploading",
+        message: "Uploading to YouTube…",
+        updatedAt: nowIso,
       }),
     );
-    vodEncodeStdout(`youtube-syndication ok job=${jobId} videoId=${result.videoId}`);
-  } catch (e) {
-    const m = e instanceof Error ? e.message : String(e);
-    vodEncodeStdout(`youtube-syndication failed job=${jobId} err=${m.slice(0, 400)}`);
-    await mergeJobEditorSpec(jobId, (prev) =>
-      specWithSyndicationUploadPatch(prev, job.editorClipId || "", {
-        state: "failed",
-        message: "YouTube upload failed",
-        error: m.slice(0, 2000),
-        updatedAt: new Date().toISOString(),
-      }),
-    );
+
+    try {
+      const result = await uploadVideoToYoutube({
+        tenantId: job.tenantId,
+        accountId,
+        videoUrl,
+        snippet: {
+          title: title || "Immergo clip",
+          description: description || "",
+          tags,
+          categoryId: opt.categoryId != null ? String(opt.categoryId) : "22",
+          defaultLanguage: opt.defaultLanguage ? String(opt.defaultLanguage) : undefined,
+          defaultAudioLanguage: opt.defaultAudioLanguage ? String(opt.defaultAudioLanguage) : undefined,
+        },
+        status: {
+          privacyStatus: opt.privacyStatus === "public" || opt.privacyStatus === "unlisted" ? opt.privacyStatus : "private",
+          embeddable: opt.embeddable !== false,
+          license: opt.license === "creativeCommon" ? "creativeCommon" : "youtube",
+          publicStatsViewable: opt.publicStatsViewable !== false,
+          selfDeclaredMadeForKids: Boolean(opt.selfDeclaredMadeForKids),
+        },
+        notifySubscribers: Boolean(opt.notifySubscribers),
+      });
+
+      await mergeJobEditorSpec(jobId, (prev) =>
+        specWithYoutubeUploadPatch(prev, job.editorClipId || "", accountId, {
+          state: "published",
+          message: "Published on YouTube",
+          videoId: result.videoId,
+          watchUrl: result.url,
+          updatedAt: new Date().toISOString(),
+        }),
+      );
+      vodEncodeStdout(`youtube-syndication ok job=${jobId} account=${accountId} videoId=${result.videoId}`);
+    } catch (e) {
+      const m = e instanceof Error ? e.message : String(e);
+      vodEncodeStdout(`youtube-syndication failed job=${jobId} account=${accountId} err=${m.slice(0, 400)}`);
+      await mergeJobEditorSpec(jobId, (prev) =>
+        specWithYoutubeUploadPatch(prev, job.editorClipId || "", accountId, {
+          state: "failed",
+          message: "YouTube upload failed",
+          error: m.slice(0, 2000),
+          updatedAt: new Date().toISOString(),
+        }),
+      );
+    }
   }
 }

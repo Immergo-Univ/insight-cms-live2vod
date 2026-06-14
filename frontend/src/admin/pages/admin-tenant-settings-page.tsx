@@ -57,6 +57,14 @@ type FormShape = {
 type FacebookPageOption = { id: string; name: string };
 type NetworkName = "youtube" | "twitter" | "facebook" | "instagram" | "tiktok";
 
+type SyndicationAccountRow = {
+  id: string;
+  platform: NetworkName | string;
+  displayName: string;
+  status: string;
+  externalAccountId: string;
+};
+
 type TenantDashboard = {
   monthlyClips: { current: number; previous: number; trendPercent: number };
   syndicationVideosByNetwork: Record<NetworkName, number>;
@@ -97,6 +105,8 @@ export function AdminTenantSettingsPage() {
   const [selectedFacebookPageId, setSelectedFacebookPageId] = useState<string>("");
   const [dashboard, setDashboard] = useState<TenantDashboard | null>(null);
   const [dashboardLoading, setDashboardLoading] = useState(false);
+  const [syndicationAccounts, setSyndicationAccounts] = useState<SyndicationAccountRow[]>([]);
+  const [syndicationAccountsLoading, setSyndicationAccountsLoading] = useState(false);
 
   const setFormFromDetail = useCallback(
     (data: TenantDetail) => {
@@ -134,9 +144,26 @@ export function AdminTenantSettingsPage() {
     }
   }, [message, setFormFromDetail, tenantId]);
 
+  const loadSyndicationAccounts = useCallback(async () => {
+    if (!tenantId) return;
+    setSyndicationAccountsLoading(true);
+    try {
+      const { data } = await getAdminClient().get<SyndicationAccountRow[]>(
+        `/tenants/${encodeURIComponent(tenantId)}/syndication/accounts`,
+      );
+      setSyndicationAccounts(Array.isArray(data) ? data : []);
+    } catch (e: unknown) {
+      message.error(readErrorMessage(e));
+      setSyndicationAccounts([]);
+    } finally {
+      setSyndicationAccountsLoading(false);
+    }
+  }, [message, tenantId]);
+
   useEffect(() => {
     void loadTenant();
-  }, [loadTenant]);
+    void loadSyndicationAccounts();
+  }, [loadTenant, loadSyndicationAccounts]);
 
   const loadDashboard = useCallback(async () => {
     if (!tenantId) return;
@@ -230,11 +257,27 @@ export function AdminTenantSettingsPage() {
     try {
       await getAdminClient().post(`/tenants/${encodeURIComponent(tenantId)}/${network}/disconnect`);
       message.success(t(`tenants.${network}Disconnected`));
-      await Promise.all([loadTenant(), loadDashboard()]);
+      await Promise.all([loadTenant(), loadDashboard(), loadSyndicationAccounts()]);
       if (network === "facebook") {
         setFacebookPages([]);
         setSelectedFacebookPageId("");
       }
+    } catch (e: unknown) {
+      message.error(readErrorMessage(e));
+    } finally {
+      setDisconnectLoading(null);
+    }
+  };
+
+  const disconnectSyndicationAccount = async (accountId: string) => {
+    if (!tenantId || !can("tenants", "edit")) return;
+    setDisconnectLoading(accountId);
+    try {
+      await getAdminClient().delete(
+        `/tenants/${encodeURIComponent(tenantId)}/syndication/accounts/${encodeURIComponent(accountId)}`,
+      );
+      message.success(t("tenants.syndicationAccountDisconnected"));
+      await Promise.all([loadTenant(), loadDashboard(), loadSyndicationAccounts()]);
     } catch (e: unknown) {
       message.error(readErrorMessage(e));
     } finally {
@@ -352,6 +395,61 @@ export function AdminTenantSettingsPage() {
     { name: "syndicationTiktokEnabled", label: t("tenants.syndicationTiktokEnabledLabel") },
     { name: "syndicationTiktokDefaultEnabled", label: t("tenants.syndicationTiktokDefaultEnabledLabel") },
   ];
+
+  const syndicationAccountsColumns: ColumnsType<SyndicationAccountRow> = useMemo(
+    () => [
+      {
+        title: t("tenants.syndicationAccountsPlatform"),
+        dataIndex: "platform",
+        key: "platform",
+        render: (value: string) => <Tag>{value}</Tag>,
+      },
+      {
+        title: t("tenants.syndicationAccountsName"),
+        dataIndex: "displayName",
+        key: "displayName",
+      },
+      {
+        title: t("tenants.syndicationAccountsExternalId"),
+        dataIndex: "externalAccountId",
+        key: "externalAccountId",
+        ellipsis: true,
+      },
+      {
+        title: t("tenants.syndicationAccountsStatus"),
+        dataIndex: "status",
+        key: "status",
+        render: (value: string) => (
+          <Tag color={value === "active" ? "green" : value === "pending_selection" ? "gold" : "default"}>
+            {value}
+          </Tag>
+        ),
+      },
+      {
+        title: t("tenants.actions"),
+        key: "actions",
+        render: (_value, row) =>
+          can("tenants", "edit") ? (
+            <Popconfirm
+              title={t("tenants.syndicationAccountDisconnectConfirmTitle")}
+              description={t("tenants.syndicationAccountDisconnectConfirmDescription", {
+                name: row.displayName,
+                platform: row.platform,
+              })}
+              okText={t("tenants.syndicationAccountDisconnect")}
+              okButtonProps={{ danger: true }}
+              cancelText={t("common.cancel")}
+              onConfirm={() => void disconnectSyndicationAccount(row.id)}
+            >
+              <Button danger size="small" loading={disconnectLoading === row.id}>
+                {t("tenants.syndicationAccountDisconnect")}
+              </Button>
+            </Popconfirm>
+          ) : null,
+      },
+    ],
+    [can, disconnectLoading, disconnectSyndicationAccount, t],
+  );
 
   return (
     <div>
@@ -505,6 +603,28 @@ export function AdminTenantSettingsPage() {
                         </Space>
                       </Form.Item>
                     ))}
+                    <Card
+                      title={t("tenants.syndicationAccountsTitle")}
+                      extra={
+                        <Button size="small" onClick={() => void loadSyndicationAccounts()} loading={syndicationAccountsLoading}>
+                          {t("tenants.facebookPagesReload")}
+                        </Button>
+                      }
+                      style={{ marginTop: 16 }}
+                    >
+                      <Typography.Paragraph type="secondary" style={{ marginBottom: 12 }}>
+                        {t("tenants.syndicationAccountsHint")}
+                      </Typography.Paragraph>
+                      <Table<SyndicationAccountRow>
+                        rowKey="id"
+                        size="small"
+                        loading={syndicationAccountsLoading}
+                        columns={syndicationAccountsColumns}
+                        dataSource={syndicationAccounts}
+                        pagination={false}
+                        locale={{ emptyText: t("tenants.syndicationAccountsEmpty") }}
+                      />
+                    </Card>
                   </div>
                 ),
               },

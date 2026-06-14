@@ -1,4 +1,9 @@
 import { getSequelize } from "../db/sequelize.js";
+import {
+  deleteAllAccountsForPlatform,
+  deleteSyndicationAccount,
+  listAccountsForTenant,
+} from "./tenant-syndication-accounts.service.js";
 import { tenantRowToApi } from "./tenant-visit.service.js";
 import { Op } from "sequelize";
 
@@ -172,8 +177,10 @@ export async function adminUpdateTenant(tenantId, body) {
  * @param {string} tenantId
  */
 export async function adminDisconnectTenantYoutube(tenantId) {
+  const id = String(tenantId || "").trim();
+  await deleteAllAccountsForPlatform(id, "youtube");
   const { Tenant } = models();
-  const row = await Tenant.findByPk(String(tenantId || "").trim());
+  const row = await Tenant.findByPk(id);
   if (!row) return null;
   row.youtubeRefreshToken = null;
   row.syndicationYoutubeConnected = false;
@@ -181,14 +188,11 @@ export async function adminDisconnectTenantYoutube(tenantId) {
   return tenantRowToApi(row.get({ plain: true }));
 }
 
-/**
- * Clear the tenant's X OAuth refresh token and flip the connected flag off.
- *
- * @param {string} tenantId
- */
 export async function adminDisconnectTenantTwitter(tenantId) {
+  const id = String(tenantId || "").trim();
+  await deleteAllAccountsForPlatform(id, "twitter");
   const { Tenant } = models();
-  const row = await Tenant.findByPk(String(tenantId || "").trim());
+  const row = await Tenant.findByPk(id);
   if (!row) return null;
   row.twitterRefreshToken = null;
   row.syndicationTwitterConnected = false;
@@ -196,14 +200,11 @@ export async function adminDisconnectTenantTwitter(tenantId) {
   return tenantRowToApi(row.get({ plain: true }));
 }
 
-/**
- * Clear the tenant's Facebook OAuth tokens and selected Page.
- *
- * @param {string} tenantId
- */
 export async function adminDisconnectTenantFacebook(tenantId) {
+  const id = String(tenantId || "").trim();
+  await deleteAllAccountsForPlatform(id, "facebook");
   const { Tenant } = models();
-  const row = await Tenant.findByPk(String(tenantId || "").trim());
+  const row = await Tenant.findByPk(id);
   if (!row) return null;
   row.facebookUserAccessToken = null;
   row.facebookPageId = null;
@@ -214,14 +215,11 @@ export async function adminDisconnectTenantFacebook(tenantId) {
   return tenantRowToApi(row.get({ plain: true }));
 }
 
-/**
- * Clear the tenant's Instagram OAuth tokens and selected Business account.
- *
- * @param {string} tenantId
- */
 export async function adminDisconnectTenantInstagram(tenantId) {
+  const id = String(tenantId || "").trim();
+  await deleteAllAccountsForPlatform(id, "instagram");
   const { Tenant } = models();
-  const row = await Tenant.findByPk(String(tenantId || "").trim());
+  const row = await Tenant.findByPk(id);
   if (!row) return null;
   row.instagramUserAccessToken = null;
   row.instagramBusinessAccountId = null;
@@ -233,14 +231,11 @@ export async function adminDisconnectTenantInstagram(tenantId) {
   return tenantRowToApi(row.get({ plain: true }));
 }
 
-/**
- * Clear the tenant's TikTok OAuth tokens.
- *
- * @param {string} tenantId
- */
 export async function adminDisconnectTenantTiktok(tenantId) {
+  const id = String(tenantId || "").trim();
+  await deleteAllAccountsForPlatform(id, "tiktok");
   const { Tenant } = models();
-  const row = await Tenant.findByPk(String(tenantId || "").trim());
+  const row = await Tenant.findByPk(id);
   if (!row) return null;
   row.tiktokRefreshToken = null;
   row.tiktokOpenId = null;
@@ -248,6 +243,33 @@ export async function adminDisconnectTenantTiktok(tenantId) {
   row.syndicationTiktokConnected = false;
   await row.save();
   return tenantRowToApi(row.get({ plain: true }));
+}
+
+/**
+ * @param {string} tenantId
+ * @param {string} accountId
+ */
+export async function adminDisconnectSyndicationAccount(tenantId, accountId) {
+  const id = String(tenantId || "").trim();
+  const aid = String(accountId || "").trim();
+  const row = await getAccountByIdForAdmin(id, aid);
+  if (!row) return null;
+  await deleteSyndicationAccount(aid);
+  const { Tenant } = models();
+  const tenant = await Tenant.findByPk(id);
+  return tenant ? tenantRowToApi(tenant.get({ plain: true })) : null;
+}
+
+/**
+ * @param {string} tenantId
+ */
+export async function adminListSyndicationAccounts(tenantId) {
+  return listAccountsForTenant(String(tenantId || "").trim());
+}
+
+async function getAccountByIdForAdmin(tenantId, accountId) {
+  const accounts = await listAccountsForTenant(tenantId);
+  return accounts.find((a) => a.id === accountId) || null;
 }
 
 /**

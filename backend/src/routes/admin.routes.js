@@ -282,6 +282,36 @@ adminSecured.post(
   },
 );
 
+adminSecured.get(
+  "/tenants/:tenantId/syndication/accounts",
+  requireAdminPermission("tenants", "view"),
+  async (req, res) => {
+    try {
+      const accounts = await adminTenants.adminListSyndicationAccounts(req.params.tenantId);
+      res.json(accounts);
+    } catch (e) {
+      res.status(500).json({ error: e instanceof Error ? e.message : String(e) });
+    }
+  },
+);
+
+adminSecured.delete(
+  "/tenants/:tenantId/syndication/accounts/:accountId",
+  requireAdminPermission("tenants", "edit"),
+  async (req, res) => {
+    try {
+      const row = await adminTenants.adminDisconnectSyndicationAccount(
+        req.params.tenantId,
+        req.params.accountId,
+      );
+      if (!row) return res.status(404).json({ error: "Not found" });
+      res.json(row);
+    } catch (e) {
+      res.status(400).json({ error: e instanceof Error ? e.message : String(e) });
+    }
+  },
+);
+
 adminSecured.get("/clips", requireAdminPermission("clips", "view"), async (req, res) => {
   try {
     const page = parseInt(String(req.query.page || "1"), 10);

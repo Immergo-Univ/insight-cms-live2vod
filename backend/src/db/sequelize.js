@@ -3,6 +3,7 @@ import { config } from "../config.js";
 import { registerVodJobModel } from "../models/vod-job.model.js";
 import { registerAdminModels } from "../models/register-admin-models.js";
 import { registerTenantModel } from "../models/tenant.model.js";
+import { registerTenantSyndicationAccountModel } from "../models/tenant-syndication-account.model.js";
 import { registerAppSettingModel } from "../models/app-setting.model.js";
 import { seedAdminIfNeeded } from "../services/admin-seed.service.js";
 import { runPendingMigrations } from "./migration-runner.js";
@@ -41,6 +42,7 @@ export function registerAllModels(sq) {
   registerVodJobModel(sq);
   registerAdminModels(sq);
   registerTenantModel(sq);
+  registerTenantSyndicationAccountModel(sq);
   registerAppSettingModel(sq);
 }
 

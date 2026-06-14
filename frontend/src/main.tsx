@@ -11,11 +11,13 @@ import { RouteProvider } from "@/providers/router-provider";
 import { VodProcessingProvider } from "@/providers/vod-processing-provider";
 import { ThemeProvider } from "@/providers/theme-provider";
 import { AccountSettingsProvider } from "@/providers/account-settings-provider";
+import { Toaster } from "sonner";
 import "@/styles/globals.css";
 
 createRoot(document.getElementById("root")!).render(
     <StrictMode>
         <ThemeProvider>
+            <Toaster position="top-center" richColors closeButton />
             <AccountSettingsProvider>
                 <BrowserRouter>
                     <TenantSettingsProvider>

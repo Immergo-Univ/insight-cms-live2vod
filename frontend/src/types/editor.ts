@@ -376,6 +376,8 @@ export interface EditorClipYoutubeSyndicationUpload {
   updatedAt?: string;
 }
 
+export type EditorClipSyndicationUploadMap = Record<string, EditorClipYoutubeSyndicationUpload>;
+
 /** Per-clip YouTube options (subset of YouTube Data API snippet/status). */
 export interface EditorClipYoutubeSyndicationOptions {
   titleOverride?: string;
@@ -396,6 +398,7 @@ export interface EditorClipYoutubeSyndication {
   enabled: boolean;
   options: EditorClipYoutubeSyndicationOptions;
   upload?: EditorClipYoutubeSyndicationUpload;
+  uploads?: Record<string, EditorClipYoutubeSyndicationUpload>;
 }
 
 /** Upload lifecycle persisted on `clips[].syndication.twitter.upload` in job `editorSpec`. */
@@ -417,6 +420,7 @@ export interface EditorClipTwitterSyndication {
   enabled: boolean;
   options: EditorClipTwitterSyndicationOptions;
   upload?: EditorClipTwitterSyndicationUpload;
+  uploads?: Record<string, EditorClipTwitterSyndicationUpload>;
 }
 
 /** Upload lifecycle persisted on `clips[].syndication.facebook.upload` in job `editorSpec`. */
@@ -438,6 +442,7 @@ export interface EditorClipFacebookSyndication {
   enabled: boolean;
   options: EditorClipFacebookSyndicationOptions;
   upload?: EditorClipFacebookSyndicationUpload;
+  uploads?: Record<string, EditorClipFacebookSyndicationUpload>;
 }
 
 export type EditorInstagramMediaType = "reels" | "feed";
@@ -463,6 +468,7 @@ export interface EditorClipInstagramSyndication {
   enabled: boolean;
   options: EditorClipInstagramSyndicationOptions;
   upload?: EditorClipInstagramSyndicationUpload;
+  uploads?: Record<string, EditorClipInstagramSyndicationUpload>;
 }
 
 /** Upload lifecycle persisted on `clips[].syndication.tiktok.upload` in job `editorSpec`. */
@@ -490,6 +496,7 @@ export interface EditorClipTiktokSyndication {
   enabled: boolean;
   options: EditorClipTiktokSyndicationOptions;
   upload?: EditorClipTiktokSyndicationUpload;
+  uploads?: Record<string, EditorClipTiktokSyndicationUpload>;
 }
 
 export interface EditorClipSyndication {
