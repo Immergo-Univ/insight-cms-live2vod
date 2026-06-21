@@ -41,8 +41,12 @@ import {
   getResolvedInstagramOAuth,
   getResolvedTiktokOAuth,
 } from "../services/admin-settings.service.js";
+import { decodeTenantParam } from "../middleware/decode-tenant.middleware.js";
 
 export const tenantsRouter = Router();
+
+// Decode the `:tenantId` path segment (encrypted CryptoJS AES or plaintext) in place.
+tenantsRouter.param("tenantId", decodeTenantParam);
 
 /** Express may expose duplicate query keys as arrays; Google sends single values. */
 function firstQueryString(value) {

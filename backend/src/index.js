@@ -26,6 +26,8 @@ import { syncAllChannelLogosFromS3, startChannelLogosS3Sync } from "./services/c
 import { syncChannelAdsSnapshotsFromS3OnStartup } from "./services/channel-ads-s3-backup.service.js";
 import { getResolvedTiktokDomainVerificationFile } from "./services/admin-settings.service.js";
 import { resolveTenant } from "./services/auth.service.js";
+import { decodeTenantMiddleware } from "./middleware/decode-tenant.middleware.js";
+import { decodeTenantId } from "./utils/tenant-cipher.js";
 import { initVodJobsPersistence, subscribeTenant, unsubscribeTenant } from "./services/vod-jobs.store.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -34,6 +36,10 @@ const PORT = config.port;
 
 app.use(cors());
 app.use(express.json({ limit: "12mb" }));
+
+// Decode the tenant id (query / x-tenant-id header / body) to plaintext at the
+// edge. The cipher key lives only on the backend, never in the frontend bundle.
+app.use(decodeTenantMiddleware);
 
 const TIKTOK_FILE_CACHE_MS = 10000;
 let tiktokVerificationCache = {
@@ -136,7 +142,7 @@ vodWss.on("connection", (ws, req) => {
   let tenantId = "";
   try {
     const u = new URL(req.url || "", `http://${req.headers.host || "localhost"}`);
-    tenantId = (u.searchParams.get("tenantId") || "").trim();
+    tenantId = decodeTenantId(u.searchParams.get("tenantId") || "");
   } catch {
     /* ignore */
   }

@@ -1,8 +1,12 @@
 import { Router } from "express";
 import { resolveTenant } from "../services/auth.service.js";
 import { getJob } from "../services/vod-jobs.store.js";
+import { decodeTenantParam } from "../middleware/decode-tenant.middleware.js";
 
 export const publicTranscriptNewsRouter = Router();
+
+// Accept either an encrypted or plaintext tenant in the path segment.
+publicTranscriptNewsRouter.param("tenantId", decodeTenantParam);
 
 /**
  * @param {string} s

@@ -6,6 +6,8 @@ const BFF_BASE_URL = "/api";
 function getQueryParams() {
   const params = new URLSearchParams(window.location.search);
   return {
+    // tenantId may arrive encrypted (CryptoJS AES, same as BI) or plaintext;
+    // the backend decodes it. fetchAuthContext() returns the resolved plaintext.
     tenantId: params.get("tenantId") || "",
   };
 }
@@ -112,6 +114,13 @@ export class HttpClient {
         })
         .then((res) => {
           this.config.accountId = res.data.accountId;
+          // Backend returns the decoded (plaintext) tenant id; adopt it so any
+          // plaintext-only use (e.g. public share URLs) works after bootstrap.
+          if (res.data.tenantId) {
+            this.config.tenantId = res.data.tenantId;
+            this.client.defaults.headers.common["x-tenant-id"] = res.data.tenantId;
+            this.bffClient.defaults.headers.common["x-tenant-id"] = res.data.tenantId;
+          }
           return res.data;
         });
     }
