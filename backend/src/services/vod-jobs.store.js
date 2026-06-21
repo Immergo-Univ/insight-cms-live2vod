@@ -42,6 +42,7 @@ import {
  * @property {object} [openaiClipUsage] per-step OpenAI token usage + estimated USD for realtime clip STT/news
  * @property {object} [transcriptNewsBundle] rich news fields per locale (editor PATCH + public share page)
  * @property {'vod_encode'|'realtime_transcribe'} [jobKind]
+ * @property {string} [vodGuid] insight-api Mongo VOD guid created for this job (legacy webhook media_id)
  * @property {string} [editorClipId] client sub-clip id when job was started from the editor row
  * @property {object} [editorSpec] full editor JSON spec at job creation (syndication per clip, etc.)
  */

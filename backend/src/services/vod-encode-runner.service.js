@@ -3,31 +3,77 @@
  */
 
 import { randomUUID } from "crypto";
-import { createJob, updateJob } from "./vod-jobs.store.js";
+import { createJob, updateJob, mergeJobEditorSpec } from "./vod-jobs.store.js";
 import { config } from "../config.js";
 import { vodEncodeStdout } from "../utils/vod-encode-log.js";
 import { resolveTenant } from "./auth.service.js";
 import { resolveTenantS3 } from "./tenant-storage.service.js";
+import { createInsightVod } from "./insight-vod.service.js";
 
 /**
- * Resolve the tenant's S3 destination from insight-api (best-effort).
- * Returns undefined on any failure so dispatch can fall back to the encoder's config.
+ * Resolve the tenant's insight-api account id and S3 destination (best-effort).
+ * Returns undefined fields on failure so dispatch can fall back to the encoder's config.
  * @param {string} tenantId
  * @param {string} jobId
+ * @returns {Promise<{ accountId?: string, s3?: object }>}
  */
-async function resolveS3ForTenant(tenantId, jobId) {
+async function resolveTenantContext(tenantId, jobId) {
   try {
     const { accountId } = await resolveTenant(tenantId);
-    const s3 = await resolveTenantS3({ accountId, tenantId });
-    if (s3) return s3;
-    vodEncodeStdout(
-      `tenant ${tenantId} has no resolvable S3 storage; encoder will use its fallback (job=${jobId})`,
-    );
+    let s3;
+    try {
+      s3 = await resolveTenantS3({ accountId, tenantId });
+    } catch (e) {
+      const m = e instanceof Error ? e.message : String(e);
+      vodEncodeStdout(`failed to resolve tenant S3 job=${jobId} tenant=${tenantId} err=${m}`);
+    }
+    if (!s3) {
+      vodEncodeStdout(
+        `tenant ${tenantId} has no resolvable S3 storage; encoder will use its fallback (job=${jobId})`,
+      );
+    }
+    return { accountId, s3: s3 || undefined };
   } catch (e) {
     const m = e instanceof Error ? e.message : String(e);
-    vodEncodeStdout(`failed to resolve tenant S3 job=${jobId} tenant=${tenantId} err=${m}`);
+    vodEncodeStdout(`failed to resolve tenant context job=${jobId} tenant=${tenantId} err=${m}`);
+    return {};
   }
-  return undefined;
+}
+
+/**
+ * Create the VOD document in insight-api (Mongo) like the legacy flow, and build
+ * the legacy webhook descriptor the encoder will call. Best-effort: on failure the
+ * encode still runs (the editor flow keeps working) but insight-cms won't track it.
+ * Skipped for transcript-only jobs (no video output).
+ * @param {object} opts
+ * @param {string} opts.tenantId
+ * @param {object} opts.spec
+ * @param {string} [opts.accountId]
+ * @param {object} [opts.s3]
+ * @param {string} opts.jobId
+ * @returns {Promise<{ vodGuid?: string, insightWebhook?: object }>}
+ */
+async function createInsightVodForJob({ tenantId, spec, accountId, s3, jobId }) {
+  if (spec?.realtimeTranscribeOnly === true || !accountId) return {};
+  try {
+    const { guid } = await createInsightVod({ accountId, tenantId, spec, s3 });
+    const insightWebhook = {
+      url: `${config.insightApiBase}/cms/pentity/${encodeURIComponent(tenantId)}/vods/webhook`,
+      mediaId: guid,
+      headers: { "x-tenant-id": tenantId },
+    };
+    // Persist the guid for traceability (in-memory field + editorSpec for Postgres).
+    await updateJob(jobId, { vodGuid: guid });
+    await mergeJobEditorSpec(jobId, (prev) => ({ ...(prev || {}), __vodGuid: guid })).catch(
+      () => {},
+    );
+    vodEncodeStdout(`insight VOD created job=${jobId} guid=${guid}`);
+    return { vodGuid: guid, insightWebhook };
+  } catch (e) {
+    const m = e instanceof Error ? e.message : String(e);
+    vodEncodeStdout(`insight VOD create failed job=${jobId} tenant=${tenantId} err=${m}`);
+    return {};
+  }
 }
 
 function anySubtitlesEnabled(spec) {
@@ -98,7 +144,14 @@ export async function startBackgroundVodJob(opts) {
 
   void (async () => {
     try {
-      const s3 = await resolveS3ForTenant(tenantId, jobId);
+      const { accountId, s3 } = await resolveTenantContext(tenantId, jobId);
+      const { vodGuid, insightWebhook } = await createInsightVodForJob({
+        tenantId,
+        spec,
+        accountId,
+        s3,
+        jobId,
+      });
       const res = await fetch(`${serviceUrl}/encoder/jobs`, {
         method: "POST",
         headers: {
@@ -111,6 +164,8 @@ export async function startBackgroundVodJob(opts) {
           spec,
           ...(editorClipId ? { editorClipId } : {}),
           ...(s3 ? { s3 } : {}),
+          ...(vodGuid ? { vodGuid } : {}),
+          ...(insightWebhook ? { insightWebhook } : {}),
         }),
       });
       if (!res.ok) {
