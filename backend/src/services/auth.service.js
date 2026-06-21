@@ -1,5 +1,6 @@
 import axios from "axios";
 import { config } from "../config.js";
+import { decodeTenantId } from "../utils/tenant-cipher.js";
 
 const REFRESH_INTERVAL_MS = 10 * 60_000;
 
@@ -61,19 +62,23 @@ export async function getAuthToken() {
 
 export async function resolveTenant(tenantId) {
   const session = await ensureSession();
+  // Decode here too so tenant resolution works even if a request skips the
+  // global middleware (stale deploy, direct service calls, etc.).
+  const decodedTenantId = decodeTenantId(tenantId);
 
-  let customer = session.customers.find((c) => c._id === tenantId);
+  let customer = session.customers.find((c) => c._id === decodedTenantId);
 
   if (!customer) {
-    customer = session.customers.find((c) => c.code === tenantId);
+    customer = session.customers.find((c) => c.code === decodedTenantId);
   }
 
   if (!customer) {
     console.error(
-      `[auth] No customer found for tenantId "${tenantId}". ` +
-        `Available codes: ${session.customers.map((c) => c.code).join(", ")}`
+      `[auth] No customer found for tenantId "${decodedTenantId}"` +
+        (decodedTenantId !== tenantId ? ` (raw: "${tenantId}")` : "") +
+        `. Available codes: ${session.customers.map((c) => c.code).join(", ")}`
     );
-    throw new Error(`No customer found for tenantId "${tenantId}"`);
+    throw new Error(`No customer found for tenantId "${decodedTenantId}"`);
   }
 
   const customerId = customer.customerId || customer._id;
@@ -93,6 +98,7 @@ export async function resolveTenant(tenantId) {
     accountId: account._id,
     customerId,
     customerCode: customer.code,
+    tenantId: decodedTenantId,
   };
 }
 

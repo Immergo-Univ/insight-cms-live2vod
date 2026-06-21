@@ -7,11 +7,12 @@ import {
 } from "../services/vod-jobs.store.js";
 import { startBackgroundVodJob, requestCancelJob } from "../services/vod-encode-runner.service.js";
 import { listTenantVodMp4s } from "../services/vod-s3.service.js";
+import { getRequestTenantId } from "../utils/tenant-cipher.js";
 
 export const vodRouter = Router();
 
 function getTenantId(req) {
-  return (req.query.tenantId || req.headers["x-tenant-id"] || "").trim();
+  return getRequestTenantId(req);
 }
 
 vodRouter.post("/jobs", async (req, res) => {

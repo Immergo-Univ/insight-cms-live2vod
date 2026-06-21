@@ -36,3 +36,18 @@ export function decodeTenantId(raw) {
 
   return value;
 }
+
+/**
+ * Read tenant id from an Express request (query, x-tenant-id header, or body).
+ * Always decodes CryptoJS AES ciphertext. Express 5 makes req.query read-only, so
+ * callers must not rely on mutating req.query.tenantId in middleware.
+ * @param {import("express").Request} req
+ * @returns {string}
+ */
+export function getRequestTenantId(req) {
+  const raw =
+    req.query?.tenantId ??
+    req.headers?.["x-tenant-id"] ??
+    (req.body && typeof req.body === "object" ? req.body.tenantId : undefined);
+  return decodeTenantId(raw);
+}

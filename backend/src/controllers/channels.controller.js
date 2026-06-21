@@ -1,12 +1,13 @@
 import { Router } from "express";
 import { fetchChannelsWithArchive, mapChannelData } from "../services/channels.service.js";
 import { resolveTenant } from "../services/auth.service.js";
+import { getRequestTenantId } from "../utils/tenant-cipher.js";
 
 export const channelsRouter = Router();
 
 channelsRouter.get("/", async (req, res) => {
   try {
-    const tenantId = req.query.tenantId || req.headers["x-tenant-id"];
+    const tenantId = getRequestTenantId(req);
 
     if (!tenantId) {
       return res.status(400).json({
@@ -14,11 +15,11 @@ channelsRouter.get("/", async (req, res) => {
       });
     }
 
-    const { accountId } = await resolveTenant(tenantId);
+    const { accountId, tenantId: resolvedTenantId } = await resolveTenant(tenantId);
 
-    console.log(`[channels] tenantId="${tenantId}" → accountId="${accountId}"`);
+    console.log(`[channels] tenantId="${resolvedTenantId}" → accountId="${accountId}"`);
 
-    const rawChannels = await fetchChannelsWithArchive({ accountId, tenantId });
+    const rawChannels = await fetchChannelsWithArchive({ accountId, tenantId: resolvedTenantId });
 
     rawChannels.forEach((ch) => {
       const evCount = ch.epgObject?.events?.length ?? 0;

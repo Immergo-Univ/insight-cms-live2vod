@@ -1,12 +1,13 @@
 import { Router } from "express";
 import { fetchMainCategories, mapMainCategoryData } from "../services/main-categories.service.js";
 import { resolveTenant } from "../services/auth.service.js";
+import { getRequestTenantId } from "../utils/tenant-cipher.js";
 
 export const mainCategoriesRouter = Router();
 
 mainCategoriesRouter.get("/", async (req, res) => {
   try {
-    const tenantId = req.query.tenantId || req.headers["x-tenant-id"];
+    const tenantId = getRequestTenantId(req);
 
     if (!tenantId) {
       return res.status(400).json({
@@ -14,11 +15,11 @@ mainCategoriesRouter.get("/", async (req, res) => {
       });
     }
 
-    const { accountId } = await resolveTenant(tenantId);
+    const { accountId, tenantId: resolvedTenantId } = await resolveTenant(tenantId);
 
-    console.log(`[main-categories] tenantId="${tenantId}" → accountId="${accountId}"`);
+    console.log(`[main-categories] tenantId="${resolvedTenantId}" → accountId="${accountId}"`);
 
-    const rawRows = await fetchMainCategories({ accountId, tenantId });
+    const rawRows = await fetchMainCategories({ accountId, tenantId: resolvedTenantId });
     const rows = rawRows.map(mapMainCategoryData).filter((row) => row.id);
 
     console.log(`[main-categories] fetched ${rawRows.length} raw row(s), returning ${rows.length} mapped row(s)`);
