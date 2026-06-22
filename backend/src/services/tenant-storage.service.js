@@ -78,6 +78,12 @@ export async function resolveTenantS3({ accountId, tenantId }) {
 
   if (!bucket || !keyName || !key) return null;
 
+  // Legacy createClip uses customerCode unless storage provider overrides the folder.
+  const customerFolder =
+    primary.useProviderBucket && primary.folderOrBucket
+      ? String(primary.folderOrBucket)
+      : tenantId;
+
   return {
     bucket,
     key: keyName,
@@ -85,5 +91,6 @@ export async function resolveTenantS3({ accountId, tenantId }) {
     hostname: primary.hostname || "",
     cdnBase: primary.distributionUrl || "",
     provider,
+    customerFolder,
   };
 }

@@ -14,7 +14,7 @@ sequenceDiagram
   participant Agent as immergo agent (k8s)
   BFF->>API: 1) POST cms/entity/vods/insertOrUpdate (base) -> {guid,_id}
   BFF->>API: 2) POST cms/entity/vods/insertOrUpdate (_id + content[] por guid)
-  BFF->>Enc: POST /encoder/jobs { jobId, tenantId, spec, s3, vodGuid, insightWebhook }
+  BFF->>Enc: POST /encoder/jobs { jobId, tenantId, spec, s3, renditions, vodGuid, insightWebhook }
   Enc->>Agent: k8s Job (FFMPEG_PARAMS con vodGuid)
   Agent->>Enc: PUT /episodes (running/finish + percent, videoDuration)
   Enc->>API: POST cms/pentity/{tenant}/vods/webhook (media_id=guid)
@@ -23,30 +23,37 @@ sequenceDiagram
 
 ## Creación del VOD (BFF → insight-api)
 
-`backend/src/services/insight-vod.service.js` → `createInsightVod({ accountId, tenantId, spec, s3 })`:
+`backend/src/services/insight-vod.service.js` → `createInsightVod({ accountId, tenantId, spec, s3, renditions })`:
 
 1. `POST {INSIGHT_API_BASE}/cms/entity/vods/insertOrUpdate` con el doc base (`title`, `description`, `keywords`, `accountId`, `publish_status:"pending"`, `vodType:"clip"`, poster en `content[]` si el editor lo provee). Headers: `Authorization: Bearer {token}`, `x-tenant-id: {tenant}`. La respuesta trae `guid` y `_id`.
-2. Calcula `content[]` con el `guid` y el layout S3 canónico (ver abajo) y hace un segundo `insertOrUpdate` con `_id` para persistir `content[]`.
+2. Calcula `content[]` con el `guid` y el layout S3 legacy (ver abajo) y hace un segundo `insertOrUpdate` con `_id` para persistir `content[]`.
 3. Devuelve `{ vodId, guid }`.
 
 > Se usa `insertOrUpdate` (no `createClip`) para NO disparar el transcoding interno de insight-api. El encode lo hace immergo.
 
-## Layout S3 canónico (compartido BFF ↔ agent)
+## Perfiles de encodeo (videoProfiles)
 
-`backend/src/services/vod-output-layout.js` centraliza prefijo + ladder de renditions y debe coincidir con `immergo-vod-encoder-api/src/config/editorial.config.js`.
+`backend/src/services/video-profiles.service.js` → `resolveTenantVideoProfiles({ accountId, tenantId })`:
+
+- Consulta `videoProfiles` en insight-api por `accountId` (igual que legacy `createClip`).
+- Si no hay perfiles, usa los defaults de `environment.renditions` (`640x360`, `960x540`, `1280x720`).
+- Se envían al encoder en `POST /encoder/jobs` como `renditions[]`.
+
+## Layout S3 legacy (compartido BFF ↔ agent)
+
+`backend/src/services/vod-output-layout.js` — **mismo layout que insight-api createClip**:
 
 ```
-base   = {cdnBase}/{prefix}/{tenant}/{guid}
+base   = {cdnBase}/{customerFolder}/transcoded/{guid}
 master = {base}/hls/master.m3u8        (content hls, default:true)
-mp4    = {base}/{guid}.mp4             (content mp4, syndication)
+mp4    = {base}/{res}_{guid}.mp4       (content mp4, uno por rendición)
 poster = {base}/poster.jpg            (content Poster H)
+hls    = {base}/hls/{bitrate}/streamPlaylist.m3u8 + segmentos
 ```
 
-- `prefix` por defecto `generated-vods` (env `EDITORIAL_S3_PREFIX` / `VOD_OUTPUT_PREFIX`).
-- `cdnBase` viene de `resolveTenantS3()` (`accountSettings.storageProviders[].distributionUrl`).
-- `guid` es la clave compartida: `media_id` del webhook legacy, prefijo S3 y base de las URLs de `content[]`.
-
-Nota: immergo produce **HLS ABR (master + variantes) + un único MP4** de syndication (no un MP4 por rendición como el legacy). Por eso `content[]` lista el `hls` master (default) y un `mp4`.
+- `customerFolder` = tenant id (o override de `storageProviders[].folderOrBucket` cuando `useProviderBucket`).
+- `guid` es la clave compartida: `media_id` del webhook legacy, segmento S3 y base de las URLs de `content[]`.
+- El agent sube con `output = {customerFolder}/transcoded` + `vodGuid = guid` (equivalente legacy a `output + origin_id`).
 
 ## Payload a `POST /encoder/jobs`
 
@@ -58,7 +65,11 @@ Nota: immergo produce **HLS ABR (master + variantes) + un único MP4** de syndic
   "tenantId": "tenant",
   "spec": { /* EditorStateJson */ },
   "editorClipId": "opcional",
-  "s3": { "bucket", "key", "secret", "hostname", "cdnBase", "prefix" },
+  "s3": {
+    "bucket", "key", "secret", "hostname", "cdnBase",
+    "customerFolder", "output": "{customerFolder}/transcoded"
+  },
+  "renditions": [ /* videoProfiles del tenant */ ],
   "vodGuid": "{guid del VOD en Mongo}",
   "insightWebhook": {
     "url": "{INSIGHT_API_BASE}/cms/pentity/{tenant}/vods/webhook",

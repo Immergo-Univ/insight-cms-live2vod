@@ -48,12 +48,12 @@ function buildClipInfo(spec) {
 }
 
 /**
- * Pre-populated `content[]`: poster + hls master (default) + a single syndication mp4 + clipInfo.
- * immergo produces HLS ABR + ONE mp4 (not per-rendition mp4s), so we list one mp4 entry.
+ * Pre-populated `content[]` matching legacy createClip:
+ * poster + mp4 per rendition + hls master (default) + clipInfo.
  */
-function buildContent(spec, urls) {
+function buildContent(spec, urls, renditions) {
   const now = Date.now();
-  return [
+  const content = [
     {
       assetTypes: ["Poster H"],
       downloadUrl: urls.posterUrl,
@@ -68,34 +68,41 @@ function buildContent(spec, urls) {
       created: now,
       updated: now,
     },
-    {
-      assetTypes: ["hls"],
-      resolution: "hls",
-      downloadUrl: urls.masterUrl,
-      mime_type: "application/x-mpegURL",
-      format: "m3u8",
-      type: "video",
-      medium: "video",
-      name: "HLS ABR",
-      description: "Adaptative Bitrate HLS",
-      default: true,
-      created: now,
-      updated: now,
-    },
-    {
+  ];
+
+  for (const entry of urls.mp4Entries || []) {
+    content.push({
       assetTypes: ["mp4"],
-      resolution: "1280x720",
-      downloadUrl: urls.mp4Url,
+      resolution: entry.resolution,
+      downloadUrl: entry.url,
       mime_type: "video/mp4",
       format: "mp4",
       type: "video",
       medium: "video",
-      name: "MP4",
+      name: entry.resolution,
       created: now,
       updated: now,
-    },
-    buildClipInfo(spec),
-  ];
+    });
+  }
+
+  const brList = renditions.map((r) => r.br || r.bitrate).filter(Boolean);
+  content.push({
+    assetTypes: ["hls"],
+    resolution: "hls",
+    downloadUrl: urls.masterUrl,
+    mime_type: "application/x-mpegURL",
+    format: "m3u8",
+    type: "video",
+    medium: "video",
+    name: brList.length ? `HLS ${brList.join(", ")}` : "HLS ABR",
+    description: "Adaptative Bitrate HLS",
+    default: true,
+    created: now,
+    updated: now,
+  });
+
+  content.push(buildClipInfo(spec));
+  return content;
 }
 
 /**
@@ -104,9 +111,18 @@ function buildContent(spec, urls) {
  * @param {string} opts.tenantId   tenant code (x-tenant-id)
  * @param {object} opts.spec       EditorStateJson
  * @param {object} [opts.s3]       resolved tenant S3 (uses s3.cdnBase for public URLs)
+ * @param {string} [opts.customerFolder] legacy customer folder override
+ * @param {Array<object>} [opts.renditions] tenant video profiles (encoder shape)
  * @returns {Promise<{ vodId: string, guid: string, masterUrl: string }>}
  */
-export async function createInsightVod({ accountId, tenantId, spec, s3 }) {
+export async function createInsightVod({
+  accountId,
+  tenantId,
+  spec,
+  s3,
+  customerFolder,
+  renditions = [],
+}) {
   if (!accountId) throw new Error("createInsightVod: missing accountId");
   if (!tenantId) throw new Error("createInsightVod: missing tenantId");
 
@@ -144,8 +160,15 @@ export async function createInsightVod({ accountId, tenantId, spec, s3 }) {
   }
 
   // Step 2: now that we know the guid, persist the pre-populated content[].
-  const urls = vodOutputUrls({ cdnBase: s3?.cdnBase || "", tenantId, guid });
-  const content = buildContent(spec, urls);
+  const folder = customerFolder || s3?.customerFolder;
+  const urls = vodOutputUrls({
+    cdnBase: s3?.cdnBase || "",
+    tenantId,
+    guid,
+    customerFolder: folder,
+    renditions,
+  });
+  const content = buildContent(spec, urls, renditions);
   await axios.post(url, { _id: vodId, accountId, content }, { headers });
 
   return { vodId: String(vodId), guid, masterUrl: urls.masterUrl };
