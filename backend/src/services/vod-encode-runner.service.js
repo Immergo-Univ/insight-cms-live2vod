@@ -199,6 +199,9 @@ export async function startBackgroundVodJob(opts) {
           Authorization: `Bearer ${secret}`,
         },
         body: JSON.stringify({
+          // Discriminator read by immergo-vod-encoder-api to route this message
+          // through the NEW per-rendition Live2VOD path (vs the legacy /episodes flow).
+          encoderType: "new",
           jobId,
           tenantId,
           spec,
