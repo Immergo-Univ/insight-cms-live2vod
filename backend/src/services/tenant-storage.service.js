@@ -88,7 +88,11 @@ export async function resolveTenantS3({ accountId, tenantId }) {
   // BUCKET (e.g. https://cdn/{bucket}/transcoded/{guid}/...), so the S3 object KEY must NOT
   // repeat that segment (key = transcoded/{guid}/...). Virtual-hosted providers (s3/wasabi)
   // carry the tenant folder inside the key.
-  const pathStyle = provider === "digitalocean";
+  // Detect DO both by provider name AND by endpoint host, because some tenants register DO
+  // Spaces under the generic "s3" provider with a *.digitaloceanspaces.com endpoint.
+  const endpointHost = String(primary.hostname || "").toLowerCase();
+  const pathStyle =
+    provider === "digitalocean" || /digitaloceanspaces\.com/i.test(endpointHost);
 
   return {
     bucket,

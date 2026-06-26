@@ -59,6 +59,13 @@ async function resolveTenantContext(tenantId, jobId) {
 function buildEncoderS3Payload(s3, tenantId) {
   if (!s3) return undefined;
   const customerFolder = s3.customerFolder || tenantId;
+  // S3 key prefix the agent uploads under. For DigitalOcean (path-style) this is just
+  // "transcoded" because the bucket already is the tenant Space; for virtual-hosted
+  // providers it is "{tenant}/transcoded".
+  const output = encoderOutputPrefix(s3, tenantId);
+  vodEncodeStdout(
+    `s3 layout tenant=${tenantId} provider=${s3.provider} pathStyle=${s3.pathStyle} bucket=${s3.bucket} output=${output} cdnBase=${s3.cdnBase}`,
+  );
   return {
     bucket: s3.bucket,
     key: s3.key,
@@ -66,10 +73,7 @@ function buildEncoderS3Payload(s3, tenantId) {
     hostname: s3.hostname,
     cdnBase: s3.cdnBase,
     customerFolder,
-    // S3 key prefix the agent uploads under. For DigitalOcean (path-style) this is just
-    // "transcoded" because the bucket already is the tenant Space; for virtual-hosted
-    // providers it is "{tenant}/transcoded".
-    output: encoderOutputPrefix(s3, tenantId),
+    output,
   };
 }
 
