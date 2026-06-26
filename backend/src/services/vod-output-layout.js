@@ -28,33 +28,44 @@ export function sanitizeTenantSegment(tenantId) {
 }
 
 /**
- * Resolve the URL/key folder + addressing style from a resolved tenant S3 object.
+ * Resolve the URL folder (public path segment) and the S3 key prefix (encoder `output`),
+ * REPLICATING insight-api's getTranscodingProvider so the layout matches the working legacy
+ * clips exactly:
+ *
+ *   - urlFolder  = customerFolder (tenant code, or folderOrBucket when useProviderBucket).
+ *                  Public URL = {cdnBase}/{urlFolder}/transcoded/{guid}/...
+ *   - keyPrefix  = the bucket is prepended to the key ONLY for DigitalOcean; for every other
+ *                  provider (wasabi / s3 / netstorage) the key is just "transcoded".
+ *                  (insight-api: `${provider=='digitalocean' ? folderOrBucket+'/' : ''}transcoded`)
+ *
+ * This infra serves objects path-style ({cdn}/{bucket}/{key}, bucket = folderOrBucket =
+ * customerFolder), so the key must NOT repeat the tenant folder.
+ *
  * @param {object} opts
  * @param {string} opts.tenantId
- * @param {boolean} [opts.pathStyle] true for DigitalOcean Spaces (bucket-in-path)
- * @param {string} [opts.bucket] storage bucket (Space name); first URL segment for path-style
- * @param {string} [opts.customerFolder] tenant folder for virtual-hosted providers
+ * @param {string} [opts.provider] storage provider (digitalocean | wasabi | s3 | ...)
+ * @param {string} [opts.bucket] storage bucket (folderOrBucket)
+ * @param {string} [opts.customerFolder] tenant folder for the public URL
  * @returns {{ urlFolder: string, keyPrefix: string }}
  */
-export function vodLayout({ tenantId, pathStyle, bucket, customerFolder }) {
-  if (pathStyle) {
-    // DigitalOcean: bucket is the URL's first segment; key starts at "transcoded".
-    const urlFolder = sanitizeTenantSegment(bucket || customerFolder || tenantId);
-    return { urlFolder, keyPrefix: VOD_TRANSCODED_FOLDER };
-  }
-  const folder = sanitizeTenantSegment(customerFolder || tenantId);
-  return { urlFolder: folder, keyPrefix: `${folder}/${VOD_TRANSCODED_FOLDER}` };
+export function vodLayout({ tenantId, provider, bucket, customerFolder }) {
+  const urlFolder = sanitizeTenantSegment(customerFolder || tenantId);
+  const keyPrefix =
+    provider === "digitalocean"
+      ? `${sanitizeTenantSegment(bucket || customerFolder || tenantId)}/${VOD_TRANSCODED_FOLDER}`
+      : VOD_TRANSCODED_FOLDER;
+  return { urlFolder, keyPrefix };
 }
 
 /**
  * Encoder `output` (S3 key prefix the agent uploads under).
- * @param {object} s3 resolved tenant S3 ({ pathStyle, bucket, customerFolder })
+ * @param {object} s3 resolved tenant S3 ({ provider, bucket, customerFolder })
  * @param {string} tenantId
  */
 export function encoderOutputPrefix(s3, tenantId) {
   return vodLayout({
     tenantId,
-    pathStyle: s3?.pathStyle,
+    provider: s3?.provider,
     bucket: s3?.bucket,
     customerFolder: s3?.customerFolder,
   }).keyPrefix;
@@ -68,7 +79,7 @@ export function encoderOutputPrefix(s3, tenantId) {
  * @param {string} opts.cdnBase
  * @param {string} opts.tenantId
  * @param {string} opts.guid
- * @param {boolean} [opts.pathStyle]
+ * @param {string} [opts.provider]
  * @param {string} [opts.bucket]
  * @param {string} [opts.customerFolder]
  * @param {Array<{ res?: string, resolution?: string, notGenerateMp4?: boolean }>} [opts.renditions]
@@ -77,12 +88,12 @@ export function vodOutputUrls({
   cdnBase,
   tenantId,
   guid,
-  pathStyle,
+  provider,
   bucket,
   customerFolder,
   renditions = [],
 }) {
-  const { urlFolder } = vodLayout({ tenantId, pathStyle, bucket, customerFolder });
+  const { urlFolder } = vodLayout({ tenantId, provider, bucket, customerFolder });
   const cdn = String(cdnBase || "").replace(/\/+$/, "");
   const base = `${cdn}/${urlFolder}/${VOD_TRANSCODED_FOLDER}/${guid}`;
   const mp4Entries = renditions

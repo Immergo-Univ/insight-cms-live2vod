@@ -64,7 +64,7 @@ function buildEncoderS3Payload(s3, tenantId) {
   // providers it is "{tenant}/transcoded".
   const output = encoderOutputPrefix(s3, tenantId);
   vodEncodeStdout(
-    `s3 layout tenant=${tenantId} provider=${s3.provider} pathStyle=${s3.pathStyle} bucket=${s3.bucket} output=${output} cdnBase=${s3.cdnBase}`,
+    `s3 layout tenant=${tenantId} provider=${s3.provider} bucket=${s3.bucket} output=${output} cdnBase=${s3.cdnBase}`,
   );
   return {
     bucket: s3.bucket,

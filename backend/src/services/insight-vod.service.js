@@ -166,7 +166,7 @@ export async function createInsightVod({
     cdnBase: s3?.cdnBase || "",
     tenantId,
     guid,
-    pathStyle: s3?.pathStyle,
+    provider: s3?.provider,
     bucket: s3?.bucket,
     customerFolder: folder,
     renditions,
