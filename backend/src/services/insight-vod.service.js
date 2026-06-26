@@ -160,11 +160,14 @@ export async function createInsightVod({
   }
 
   // Step 2: now that we know the guid, persist the pre-populated content[].
+  // URLs must line up byte-for-byte with where the encoder uploads (path-style aware).
   const folder = customerFolder || s3?.customerFolder;
   const urls = vodOutputUrls({
     cdnBase: s3?.cdnBase || "",
     tenantId,
     guid,
+    pathStyle: s3?.pathStyle,
+    bucket: s3?.bucket,
     customerFolder: folder,
     renditions,
   });

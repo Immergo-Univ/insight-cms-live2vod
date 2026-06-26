@@ -9,7 +9,7 @@ import { vodEncodeStdout } from "../utils/vod-encode-log.js";
 import { resolveTenant } from "./auth.service.js";
 import { resolveTenantS3 } from "./tenant-storage.service.js";
 import { resolveTenantVideoProfiles } from "./video-profiles.service.js";
-import { legacyOutputPrefix } from "./vod-output-layout.js";
+import { encoderOutputPrefix } from "./vod-output-layout.js";
 import { createInsightVod } from "./insight-vod.service.js";
 
 /**
@@ -66,7 +66,10 @@ function buildEncoderS3Payload(s3, tenantId) {
     hostname: s3.hostname,
     cdnBase: s3.cdnBase,
     customerFolder,
-    output: legacyOutputPrefix(tenantId, customerFolder),
+    // S3 key prefix the agent uploads under. For DigitalOcean (path-style) this is just
+    // "transcoded" because the bucket already is the tenant Space; for virtual-hosted
+    // providers it is "{tenant}/transcoded".
+    output: encoderOutputPrefix(s3, tenantId),
   };
 }
 

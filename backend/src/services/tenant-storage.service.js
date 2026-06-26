@@ -84,6 +84,12 @@ export async function resolveTenantS3({ accountId, tenantId }) {
       ? String(primary.folderOrBucket)
       : tenantId;
 
+  // DigitalOcean Spaces is addressed path-style: the public URL's first path segment is the
+  // BUCKET (e.g. https://cdn/{bucket}/transcoded/{guid}/...), so the S3 object KEY must NOT
+  // repeat that segment (key = transcoded/{guid}/...). Virtual-hosted providers (s3/wasabi)
+  // carry the tenant folder inside the key.
+  const pathStyle = provider === "digitalocean";
+
   return {
     bucket,
     key: keyName,
@@ -91,6 +97,7 @@ export async function resolveTenantS3({ accountId, tenantId }) {
     hostname: primary.hostname || "",
     cdnBase: primary.distributionUrl || "",
     provider,
+    pathStyle,
     customerFolder,
   };
 }
