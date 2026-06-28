@@ -2,6 +2,13 @@ export type TenantDto = {
   tenantId: string;
   subtitlesEnabled: boolean;
   subtitlesDefaultEnabled?: boolean;
+  subtitlesTranscriptNewsUiEnabled?: boolean;
+  subtitlesDefaultBurnIn?: boolean;
+  subtitlesDefaultDiarization?: boolean;
+  subtitlesDefaultInferSpeakerNames?: boolean;
+  subtitlesDefaultNewsEn?: boolean;
+  subtitlesDefaultNewsEs?: boolean;
+  subtitlesDefaultNewsHe?: boolean;
   syndicationYoutubeEnabled?: boolean;
   syndicationYoutubeDefaultEnabled?: boolean;
   syndicationYoutubeConnected?: boolean;

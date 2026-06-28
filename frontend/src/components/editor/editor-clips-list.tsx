@@ -71,13 +71,44 @@ function vodJobHasDiarizedTranscript(job: VodJobRecord): boolean {
   return Boolean(di && Array.isArray(di.segments) && di.segments.length > 0);
 }
 
+function vodJobHadSubtitlesOrNewsRequested(job: VodJobRecord): boolean {
+  if (job.jobKind === "realtime_transcribe") return false;
+  const spec = job.editorSpec;
+  if (!spec || typeof spec !== "object") return false;
+  if (spec.transcribeGenerateNews === true) return true;
+  const clips = Array.isArray(spec.clips) ? spec.clips : [];
+  for (const c of clips) {
+    if (!c || typeof c !== "object") continue;
+    if (c.subtitleMode === true) return true;
+    const subs = c.subtitles;
+    if (subs && typeof subs === "object" && subs.enabled === true) return true;
+  }
+  const rootSubs = spec.subtitles;
+  if (rootSubs && typeof rootSubs === "object" && rootSubs.enabled === true) return true;
+  return false;
+}
+
+function vodJobHasNewsPayload(job: VodJobRecord): boolean {
+  return Boolean(
+    job.transcriptNewsEn?.trim() ||
+      job.transcriptNewsEs?.trim() ||
+      job.transcriptNewsHe?.trim() ||
+      (job.transcriptNewsBundle && typeof job.transcriptNewsBundle === "object"),
+  );
+}
+
 /** VOD encode row: show transcript control while job runs or when it finished with STT payload. */
-function vodEncodeJobSupportsTranscriptModal(job: VodJobRecord | undefined): boolean {
+function vodEncodeJobSupportsTranscriptModal(
+  job: VodJobRecord | undefined,
+  transcriptNewsUiEnabled: boolean,
+): boolean {
   if (!job || job.jobKind === "realtime_transcribe") return false;
   if (vodJobIsActive(job.status)) return true;
   if (job.status === "failed") return true;
   if (job.status === "completed") {
-    return Boolean(job.transcriptText?.trim() || vodJobHasDiarizedTranscript(job));
+    if (Boolean(job.transcriptText?.trim()) || vodJobHasDiarizedTranscript(job)) return true;
+    if (vodJobHasNewsPayload(job)) return true;
+    if (transcriptNewsUiEnabled && vodJobHadSubtitlesOrNewsRequested(job)) return true;
   }
   return false;
 }
@@ -562,6 +593,8 @@ interface EditorClipsListProps {
   onAddImageWidgetFromFile?: (clipId: string, file: File) => Promise<void>;
   /** Realtime session: show transcript viewer control on each clip row. */
   realtimeTranscriptUi?: boolean;
+  /** When true, completed VOD encodes with subtitles/news requested show transcript control. */
+  vodTranscriptNewsUiEnabled?: boolean;
   vodJobs: VodJobRecord[];
   clipVodEncodeErrors: Record<string, string>;
   onClipStartVodEncode: (clipId: string, includeAds: boolean) => void | Promise<void>;
@@ -596,6 +629,7 @@ export function EditorClipsList({
   onAddTextWidget,
   onAddImageWidgetFromFile,
   realtimeTranscriptUi = false,
+  vodTranscriptNewsUiEnabled = true,
   vodJobs,
   clipVodEncodeErrors,
   onClipStartVodEncode,
@@ -1057,7 +1091,7 @@ export function EditorClipsList({
                       </button>
                     </span>
                   ) : null}
-                  {realtimeTranscriptUi || vodEncodeJobSupportsTranscriptModal(vodJob) ? (
+                  {realtimeTranscriptUi || vodEncodeJobSupportsTranscriptModal(vodJob, vodTranscriptNewsUiEnabled) ? (
                     <span data-no-row-select onClick={(e) => e.stopPropagation()} className="inline-flex shrink-0">
                       <button
                         type="button"

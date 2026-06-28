@@ -132,6 +132,19 @@ export async function adminUpdateTenant(tenantId, body) {
   if (!row) return null;
   if (body.subtitlesEnabled !== undefined) row.subtitlesEnabled = Boolean(body.subtitlesEnabled);
   if (body.subtitlesDefaultEnabled !== undefined) row.subtitlesDefaultEnabled = Boolean(body.subtitlesDefaultEnabled);
+  if (body.subtitlesTranscriptNewsUiEnabled !== undefined) {
+    row.subtitlesTranscriptNewsUiEnabled = Boolean(body.subtitlesTranscriptNewsUiEnabled);
+  }
+  if (body.subtitlesDefaultBurnIn !== undefined) row.subtitlesDefaultBurnIn = Boolean(body.subtitlesDefaultBurnIn);
+  if (body.subtitlesDefaultDiarization !== undefined) {
+    row.subtitlesDefaultDiarization = Boolean(body.subtitlesDefaultDiarization);
+  }
+  if (body.subtitlesDefaultInferSpeakerNames !== undefined) {
+    row.subtitlesDefaultInferSpeakerNames = Boolean(body.subtitlesDefaultInferSpeakerNames);
+  }
+  if (body.subtitlesDefaultNewsEn !== undefined) row.subtitlesDefaultNewsEn = Boolean(body.subtitlesDefaultNewsEn);
+  if (body.subtitlesDefaultNewsEs !== undefined) row.subtitlesDefaultNewsEs = Boolean(body.subtitlesDefaultNewsEs);
+  if (body.subtitlesDefaultNewsHe !== undefined) row.subtitlesDefaultNewsHe = Boolean(body.subtitlesDefaultNewsHe);
   if (body.syndicationYoutubeEnabled !== undefined) {
     row.syndicationYoutubeEnabled = Boolean(body.syndicationYoutubeEnabled);
   }

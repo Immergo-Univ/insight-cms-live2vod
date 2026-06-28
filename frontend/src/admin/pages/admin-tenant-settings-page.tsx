@@ -15,6 +15,13 @@ type TenantDetail = {
   tenantId: string;
   subtitlesEnabled: boolean;
   subtitlesDefaultEnabled?: boolean;
+  subtitlesTranscriptNewsUiEnabled?: boolean;
+  subtitlesDefaultBurnIn?: boolean;
+  subtitlesDefaultDiarization?: boolean;
+  subtitlesDefaultInferSpeakerNames?: boolean;
+  subtitlesDefaultNewsEn?: boolean;
+  subtitlesDefaultNewsEs?: boolean;
+  subtitlesDefaultNewsHe?: boolean;
   syndicationYoutubeEnabled: boolean;
   syndicationYoutubeDefaultEnabled?: boolean;
   syndicationYoutubeConnected?: boolean;
@@ -42,6 +49,13 @@ type TenantDetail = {
 type FormShape = {
   subtitlesEnabled: boolean;
   subtitlesDefaultEnabled: boolean;
+  subtitlesTranscriptNewsUiEnabled: boolean;
+  subtitlesDefaultBurnIn: boolean;
+  subtitlesDefaultDiarization: boolean;
+  subtitlesDefaultInferSpeakerNames: boolean;
+  subtitlesDefaultNewsEn: boolean;
+  subtitlesDefaultNewsEs: boolean;
+  subtitlesDefaultNewsHe: boolean;
   syndicationYoutubeEnabled: boolean;
   syndicationYoutubeDefaultEnabled: boolean;
   syndicationTwitterEnabled: boolean;
@@ -134,6 +148,13 @@ export function AdminTenantSettingsPage() {
       form.setFieldsValue({
         subtitlesEnabled: data.subtitlesEnabled !== false,
         subtitlesDefaultEnabled: data.subtitlesDefaultEnabled === true,
+        subtitlesTranscriptNewsUiEnabled: data.subtitlesTranscriptNewsUiEnabled !== false,
+        subtitlesDefaultBurnIn: data.subtitlesDefaultBurnIn === true,
+        subtitlesDefaultDiarization: data.subtitlesDefaultDiarization !== false,
+        subtitlesDefaultInferSpeakerNames: data.subtitlesDefaultInferSpeakerNames === true,
+        subtitlesDefaultNewsEn: data.subtitlesDefaultNewsEn !== false,
+        subtitlesDefaultNewsEs: data.subtitlesDefaultNewsEs !== false,
+        subtitlesDefaultNewsHe: data.subtitlesDefaultNewsHe !== false,
         syndicationYoutubeEnabled: data.syndicationYoutubeEnabled === true,
         syndicationYoutubeDefaultEnabled: data.syndicationYoutubeDefaultEnabled === true,
         syndicationTwitterEnabled: data.syndicationTwitterEnabled === true,
@@ -248,6 +269,13 @@ export function AdminTenantSettingsPage() {
     const payload = {
       subtitlesEnabled: Boolean(form.getFieldValue("subtitlesEnabled")),
       subtitlesDefaultEnabled: Boolean(form.getFieldValue("subtitlesDefaultEnabled")),
+      subtitlesTranscriptNewsUiEnabled: Boolean(form.getFieldValue("subtitlesTranscriptNewsUiEnabled")),
+      subtitlesDefaultBurnIn: Boolean(form.getFieldValue("subtitlesDefaultBurnIn")),
+      subtitlesDefaultDiarization: Boolean(form.getFieldValue("subtitlesDefaultDiarization")),
+      subtitlesDefaultInferSpeakerNames: Boolean(form.getFieldValue("subtitlesDefaultInferSpeakerNames")),
+      subtitlesDefaultNewsEn: Boolean(form.getFieldValue("subtitlesDefaultNewsEn")),
+      subtitlesDefaultNewsEs: Boolean(form.getFieldValue("subtitlesDefaultNewsEs")),
+      subtitlesDefaultNewsHe: Boolean(form.getFieldValue("subtitlesDefaultNewsHe")),
       syndicationYoutubeEnabled: Boolean(form.getFieldValue("syndicationYoutubeEnabled")),
       syndicationYoutubeDefaultEnabled: Boolean(form.getFieldValue("syndicationYoutubeDefaultEnabled")),
       syndicationTwitterEnabled: Boolean(form.getFieldValue("syndicationTwitterEnabled")),
@@ -393,8 +421,6 @@ export function AdminTenantSettingsPage() {
 
   const syndicationSwitches: Array<{
     name:
-      | "subtitlesEnabled"
-      | "subtitlesDefaultEnabled"
       | "syndicationYoutubeEnabled"
       | "syndicationYoutubeDefaultEnabled"
       | "syndicationTwitterEnabled"
@@ -407,8 +433,6 @@ export function AdminTenantSettingsPage() {
       | "syndicationTiktokDefaultEnabled";
     label: string;
   }> = [
-    { name: "subtitlesEnabled", label: t("tenants.subtitlesEnabledLabel") },
-    { name: "subtitlesDefaultEnabled", label: t("tenants.subtitlesDefaultEnabledLabel") },
     { name: "syndicationYoutubeEnabled", label: t("tenants.syndicationYoutubeEnabledLabel") },
     { name: "syndicationYoutubeDefaultEnabled", label: t("tenants.syndicationYoutubeDefaultEnabledLabel") },
     { name: "syndicationTwitterEnabled", label: t("tenants.syndicationTwitterEnabledLabel") },
@@ -420,6 +444,59 @@ export function AdminTenantSettingsPage() {
     { name: "syndicationTiktokEnabled", label: t("tenants.syndicationTiktokEnabledLabel") },
     { name: "syndicationTiktokDefaultEnabled", label: t("tenants.syndicationTiktokDefaultEnabledLabel") },
   ];
+
+  const subtitleSwitches: Array<{
+    name:
+      | "subtitlesEnabled"
+      | "subtitlesDefaultEnabled"
+      | "subtitlesTranscriptNewsUiEnabled"
+      | "subtitlesDefaultBurnIn"
+      | "subtitlesDefaultDiarization"
+      | "subtitlesDefaultInferSpeakerNames"
+      | "subtitlesDefaultNewsEn"
+      | "subtitlesDefaultNewsEs"
+      | "subtitlesDefaultNewsHe";
+    label: string;
+    hint?: string;
+  }> = [
+    { name: "subtitlesEnabled", label: t("tenants.subtitlesEnabledLabel") },
+    { name: "subtitlesDefaultEnabled", label: t("tenants.subtitlesDefaultEnabledLabel") },
+    {
+      name: "subtitlesTranscriptNewsUiEnabled",
+      label: t("tenants.subtitlesTranscriptNewsUiEnabledLabel"),
+      hint: t("tenants.subtitlesTranscriptNewsUiEnabledHint"),
+    },
+    { name: "subtitlesDefaultBurnIn", label: t("tenants.subtitlesDefaultBurnInLabel") },
+    { name: "subtitlesDefaultDiarization", label: t("tenants.subtitlesDefaultDiarizationLabel") },
+    { name: "subtitlesDefaultInferSpeakerNames", label: t("tenants.subtitlesDefaultInferSpeakerNamesLabel") },
+    { name: "subtitlesDefaultNewsEn", label: t("tenants.subtitlesDefaultNewsEnLabel") },
+    { name: "subtitlesDefaultNewsEs", label: t("tenants.subtitlesDefaultNewsEsLabel") },
+    { name: "subtitlesDefaultNewsHe", label: t("tenants.subtitlesDefaultNewsHeLabel") },
+  ];
+
+  const renderSwitchList = (
+    items: Array<{ name: keyof FormShape; label: string; hint?: string }>,
+  ) => (
+    <div style={{ maxWidth: 900 }}>
+      {items.map((item) => (
+        <Form.Item key={String(item.name)} style={{ marginBottom: 14 }}>
+          <Space align="start" size={10}>
+            <Form.Item name={item.name} valuePropName="checked" noStyle>
+              <Switch disabled={!can("tenants", "edit")} />
+            </Form.Item>
+            <div>
+              <Typography.Text>{item.label}</Typography.Text>
+              {item.hint ? (
+                <Typography.Paragraph type="secondary" style={{ marginBottom: 0, marginTop: 4 }}>
+                  {item.hint}
+                </Typography.Paragraph>
+              ) : null}
+            </div>
+          </Space>
+        </Form.Item>
+      ))}
+    </div>
+  );
 
   const renderNetworkSyndicationSection = useCallback(
     (network: NetworkName) => {
@@ -630,22 +707,14 @@ export function AdminTenantSettingsPage() {
                 ),
               },
               {
+                key: "subtitles",
+                label: t("tenants.tabSubtitles"),
+                children: renderSwitchList(subtitleSwitches),
+              },
+              {
                 key: "syndication",
                 label: t("tenants.tabSyndication"),
-                children: (
-                  <div style={{ maxWidth: 900 }}>
-                    {syndicationSwitches.map((item) => (
-                      <Form.Item key={item.name} style={{ marginBottom: 14 }}>
-                        <Space align="center" size={10}>
-                          <Form.Item name={item.name} valuePropName="checked" noStyle>
-                            <Switch disabled={!can("tenants", "edit")} />
-                          </Form.Item>
-                          <Typography.Text>{item.label}</Typography.Text>
-                        </Space>
-                      </Form.Item>
-                    ))}
-                  </div>
-                ),
+                children: renderSwitchList(syndicationSwitches),
               },
               {
                 key: "youtube",

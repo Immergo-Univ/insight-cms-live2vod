@@ -98,6 +98,7 @@ function createDefaultFullWindowSubClip(
   defaults?: {
     subtitlesDefaultEnabled?: boolean;
     defaultSyndication?: EditorClipSyndication | undefined;
+    defaultSubtitleSettings?: EditorSubtitleSettings;
   },
 ): EditorSubClip {
   const isRealtime = clipState.selectionMode === "realtime";
@@ -108,13 +109,17 @@ function createDefaultFullWindowSubClip(
   const endTime = isRealtime
     ? Math.max(60, Math.floor(nowUnixSec) - clipState.startTime)
     : wallSpan;
+  const subtitleOn = defaults?.subtitlesDefaultEnabled === true;
   return {
     id,
     order: 1,
     startTime: 0,
     endTime,
     ...defaultEditorSubClipEncodeFields(),
-    subtitleMode: defaults?.subtitlesDefaultEnabled === true,
+    subtitleMode: subtitleOn,
+    ...(subtitleOn && defaults?.defaultSubtitleSettings
+      ? { subtitleSettings: defaults.defaultSubtitleSettings }
+      : {}),
     ...(defaults?.defaultSyndication ? { syndication: defaults.defaultSyndication } : {}),
   };
 }
@@ -576,6 +581,8 @@ export function EditorPage() {
     loading: tenantSettingsLoading,
     subtitlesEnabled: tenantSubtitlesEnabled,
     subtitlesDefaultEnabled,
+    subtitlesTranscriptNewsUiEnabled,
+    tenantDefaultSubtitleSettings,
     syndicationYoutubeEnabled,
     syndicationYoutubeDefaultEnabled,
     syndicationTwitterEnabled,
@@ -635,6 +642,7 @@ export function EditorPage() {
         {
           ...clip,
           subtitleMode: shouldSetSubtitle ? true : clip.subtitleMode,
+          ...(shouldSetSubtitle ? { subtitleSettings: tenantDefaultSubtitleSettings } : {}),
           ...(shouldSetSyndication
             ? { syndication: JSON.parse(JSON.stringify(defaultClipSyndication)) }
             : {}),
@@ -649,6 +657,7 @@ export function EditorPage() {
     tenantSubtitlesEnabled,
     subtitlesDefaultEnabled,
     defaultClipSyndication,
+    tenantDefaultSubtitleSettings,
   ]);
 
   const selectedEncodeClip = useMemo(
@@ -699,7 +708,7 @@ export function EditorPage() {
   const subtitleOverlayActive =
     tenantSubtitlesEnabled && !!(selectedEncodeClip?.subtitleMode);
   const subtitleSettingsForPlayer = normalizeEditorSubtitleSettings(
-    selectedEncodeClip?.subtitleSettings ?? DEFAULT_EDITOR_SUBTITLE_SETTINGS,
+    selectedEncodeClip?.subtitleSettings ?? tenantDefaultSubtitleSettings,
   );
 
   const [realtimeTick, setRealtimeTick] = useState(0);
@@ -928,14 +937,16 @@ export function EditorPage() {
             startTime: timeSeconds,
             endTime: end,
             ...defaultEditorSubClipEncodeFields(),
-            subtitleMode: tenantSubtitlesEnabled && subtitlesDefaultEnabled === true,
+            ...(tenantSubtitlesEnabled && subtitlesDefaultEnabled === true
+              ? { subtitleMode: true as const, subtitleSettings: tenantDefaultSubtitleSettings }
+              : { subtitleMode: false as const }),
             ...(defaultClipSyndication ? { syndication: JSON.parse(JSON.stringify(defaultClipSyndication)) } : {}),
           },
         ];
       });
       setSelectedClipId(id);
     },
-    [clipState, selectedClipId, isRealtime, clips, duration, zoomIndex, tenantSubtitlesEnabled, subtitlesDefaultEnabled, defaultClipSyndication],
+    [clipState, selectedClipId, isRealtime, clips, duration, zoomIndex, tenantSubtitlesEnabled, subtitlesDefaultEnabled, defaultClipSyndication, tenantDefaultSubtitleSettings],
   );
 
   /** Append a new sub-clip at the current playhead (same span logic as Mark In without selection). */
@@ -990,7 +1001,9 @@ export function EditorPage() {
             startTime: timeSeconds,
             endTime: end,
             ...encode,
-            subtitleMode: tenantSubtitlesEnabled && subtitlesDefaultEnabled === true,
+            ...(tenantSubtitlesEnabled && subtitlesDefaultEnabled === true
+              ? { subtitleMode: true as const, subtitleSettings: tenantDefaultSubtitleSettings }
+              : { subtitleMode: false as const }),
             ...(defaultClipSyndication ? { syndication: JSON.parse(JSON.stringify(defaultClipSyndication)) } : {}),
           },
         ];
@@ -998,7 +1011,7 @@ export function EditorPage() {
       setSelectedClipId(id);
       timelineRef.current?.scrollTimeToCenter(timeSeconds);
     },
-    [clipState, clips, duration, isRealtime, zoomIndex, currentTime, tenantSubtitlesEnabled, subtitlesDefaultEnabled, defaultClipSyndication],
+    [clipState, clips, duration, isRealtime, zoomIndex, currentTime, tenantSubtitlesEnabled, subtitlesDefaultEnabled, defaultClipSyndication, tenantDefaultSubtitleSettings],
   );
 
   const handleMarkOut = useCallback(
@@ -1041,7 +1054,9 @@ export function EditorPage() {
             startTime: offset,
             endTime: end,
             ...defaultEditorSubClipEncodeFields(),
-            subtitleMode: tenantSubtitlesEnabled && subtitlesDefaultEnabled === true,
+            ...(tenantSubtitlesEnabled && subtitlesDefaultEnabled === true
+              ? { subtitleMode: true as const, subtitleSettings: tenantDefaultSubtitleSettings }
+              : { subtitleMode: false as const }),
             ...(defaultClipSyndication ? { syndication: JSON.parse(JSON.stringify(defaultClipSyndication)) } : {}),
           },
         ];
@@ -1099,6 +1114,7 @@ export function EditorPage() {
     tenantSubtitlesEnabled,
     subtitlesDefaultEnabled,
     defaultClipSyndication,
+    tenantDefaultSubtitleSettings,
   ]);
 
   const handleRemoveClip = useCallback((id: string) => {
@@ -1313,22 +1329,27 @@ export function EditorPage() {
     [],
   );
 
-  const handleToggleClipSubtitle = useCallback((clipId: string) => {
-    let turningOff = false;
-    setClips((prev) => {
-      const cur = prev.find((c) => c.id === clipId);
-      turningOff = !!(cur?.subtitleMode);
-      return prev.map((c) => {
-        if (c.id !== clipId) return c;
-        if (turningOff) return { ...c, subtitleMode: false };
-        return {
-          ...c,
-          subtitleMode: true,
-          subtitleSettings: normalizeEditorSubtitleSettings(c.subtitleSettings),
-        };
+  const handleToggleClipSubtitle = useCallback(
+    (clipId: string) => {
+      let turningOff = false;
+      setClips((prev) => {
+        const cur = prev.find((c) => c.id === clipId);
+        turningOff = !!(cur?.subtitleMode);
+        return prev.map((c) => {
+          if (c.id !== clipId) return c;
+          if (turningOff) return { ...c, subtitleMode: false };
+          return {
+            ...c,
+            subtitleMode: true,
+            subtitleSettings: normalizeEditorSubtitleSettings(
+              c.subtitleSettings ?? tenantDefaultSubtitleSettings,
+            ),
+          };
+        });
       });
-    });
-  }, []);
+    },
+    [tenantDefaultSubtitleSettings],
+  );
 
   const handleVerticalCropCenterX = useCallback(
     (centerX: number) => {
@@ -1694,6 +1715,7 @@ export function EditorPage() {
               onAddTextWidget={handleAddTextWidget}
               onAddImageWidgetFromFile={handleAddImageWidgetFromFile}
               realtimeTranscriptUi={isRealtime && tenantSubtitlesEnabled}
+              vodTranscriptNewsUiEnabled={subtitlesTranscriptNewsUiEnabled}
               onVodJobsRefresh={refreshVodJobs}
           />
           </aside>

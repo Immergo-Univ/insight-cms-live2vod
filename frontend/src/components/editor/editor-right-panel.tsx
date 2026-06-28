@@ -108,6 +108,8 @@ interface EditorRightPanelProps {
   onAddImageWidgetFromFile?: (clipId: string, file: File) => Promise<void>;
   /** Realtime mode: show per-clip transcript action + modal. */
   realtimeTranscriptUi?: boolean;
+  /** When true, completed VOD encodes with subtitles show transcript/news control. */
+  vodTranscriptNewsUiEnabled?: boolean;
   /** Refetch VOD jobs after transcript speaker PATCH (realtime modal). */
   onVodJobsRefresh?: () => Promise<void>;
 }
@@ -165,6 +167,7 @@ export function EditorRightPanel({
   onAddTextWidget,
   onAddImageWidgetFromFile,
   realtimeTranscriptUi = false,
+  vodTranscriptNewsUiEnabled = true,
   onVodJobsRefresh,
 }: EditorRightPanelProps) {
   const [clipMetadataId, setClipMetadataId] = useState<string | null>(null);
@@ -299,6 +302,7 @@ export function EditorRightPanel({
               onAddTextWidget={onAddTextWidget}
               onAddImageWidgetFromFile={onAddImageWidgetFromFile}
               realtimeTranscriptUi={realtimeTranscriptUi}
+              vodTranscriptNewsUiEnabled={vodTranscriptNewsUiEnabled}
               vodJobs={vodJobs}
               clipVodEncodeErrors={clipVodEncodeErrors}
               onClipStartVodEncode={onClipStartVodEncode}

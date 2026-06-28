@@ -2,6 +2,11 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState, t
 import { useLocation } from "react-router";
 import { toast } from "sonner";
 import { postTenantEnsure, type TenantDto } from "@/services/tenant-bff.service";
+import {
+  buildTenantDefaultSubtitleSettings,
+  tenantSubtitlesTranscriptNewsUiEnabled,
+} from "@/utils/tenant-subtitle-defaults";
+import type { EditorSubtitleSettings } from "@/types/editor";
 
 type TenantSettingsContextValue = {
   tenantId: string;
@@ -11,6 +16,14 @@ type TenantSettingsContextValue = {
   subtitlesEnabled: boolean;
   /** When true, new clips start with subtitle mode enabled by default. */
   subtitlesDefaultEnabled: boolean;
+  /** When true, show transcript & news control on completed VOD encode rows. */
+  subtitlesTranscriptNewsUiEnabled: boolean;
+  /** Default subtitle modal options for new clips (from tenant admin). */
+  tenantDefaultSubtitleSettings: EditorSubtitleSettings & {
+    transcribeSpeakerDiarization: boolean;
+    transcribeInferSpeakerNames: boolean;
+    transcribeNewsLocales: { en: boolean; es: boolean; he: boolean };
+  };
   /** When true, show per-clip syndication UI for YouTube. */
   syndicationYoutubeEnabled: boolean;
   /** When true, new clips start with YouTube syndication enabled by default. */
@@ -147,6 +160,11 @@ export function TenantSettingsProvider({ children }: { children: ReactNode }) {
 
   const subtitlesEnabled = !tenantId || tenant?.subtitlesEnabled !== false;
   const subtitlesDefaultEnabled = Boolean(tenantId && tenant?.subtitlesDefaultEnabled === true);
+  const subtitlesTranscriptNewsUiEnabled = tenantSubtitlesTranscriptNewsUiEnabled(tenant);
+  const tenantDefaultSubtitleSettings = useMemo(
+    () => buildTenantDefaultSubtitleSettings(tenant),
+    [tenant],
+  );
   const syndicationYoutubeEnabled = Boolean(tenantId && tenant?.syndicationYoutubeEnabled === true);
   const syndicationYoutubeDefaultEnabled = Boolean(tenantId && tenant?.syndicationYoutubeDefaultEnabled === true);
   const syndicationTwitterEnabled = Boolean(tenantId && tenant?.syndicationTwitterEnabled === true);
@@ -165,6 +183,8 @@ export function TenantSettingsProvider({ children }: { children: ReactNode }) {
       loading,
       subtitlesEnabled,
       subtitlesDefaultEnabled,
+      subtitlesTranscriptNewsUiEnabled,
+      tenantDefaultSubtitleSettings,
       syndicationYoutubeEnabled,
       syndicationYoutubeDefaultEnabled,
       syndicationTwitterEnabled,
@@ -183,6 +203,8 @@ export function TenantSettingsProvider({ children }: { children: ReactNode }) {
       loading,
       subtitlesEnabled,
       subtitlesDefaultEnabled,
+      subtitlesTranscriptNewsUiEnabled,
+      tenantDefaultSubtitleSettings,
       syndicationYoutubeEnabled,
       syndicationYoutubeDefaultEnabled,
       syndicationTwitterEnabled,
