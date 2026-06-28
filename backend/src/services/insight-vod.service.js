@@ -17,6 +17,7 @@ import axios from "axios";
 import { config } from "../config.js";
 import { getAuthToken } from "./auth.service.js";
 import { vodOutputUrls } from "./vod-output-layout.js";
+import { resolveWhisperSubtitleLanguageFromSpec } from "./subtitle-language-utils.js";
 
 /** Title/description/keywords from the editor spec (clip metadata first, then root). */
 function extractMetadata(spec) {
@@ -112,6 +113,7 @@ function buildContent(spec, urls, renditions) {
   content.push(buildClipInfo(spec));
 
   if (anyWhisperSubtitlesEnabled(spec) && urls.whisperSubsUrl) {
+    const whisperLang = resolveWhisperSubtitleLanguageFromSpec(spec);
     content.push({
       assetTypes: ["Subtitles"],
       downloadUrl: urls.whisperSubsUrl,
@@ -120,9 +122,9 @@ function buildContent(spec, urls, renditions) {
       type: "text",
       medium: "Subtitles",
       typeName: "Subtitles",
-      name: "Whisper",
-      language: "def",
-      languageName: "Whisper",
+      name: whisperLang.name,
+      language: whisperLang.iso2,
+      languageName: whisperLang.name,
       status: "pending",
       created: now,
       updated: now,
