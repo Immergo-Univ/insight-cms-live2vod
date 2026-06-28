@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { config } from "../config.js";
 import { getJob, updateJob } from "../services/vod-jobs.store.js";
+import { trySyncInsightVodWhisperSubtitleLabels } from "../services/insight-vod.service.js";
 import { tryYoutubeSyndicationAfterJobCompleted } from "../services/youtube-syndication-runner.service.js";
 import { tryTwitterSyndicationAfterJobCompleted } from "../services/twitter-syndication-runner.service.js";
 import { tryFacebookSyndicationAfterJobCompleted } from "../services/facebook-syndication-runner.service.js";
@@ -64,7 +65,12 @@ encoderCallbackRouter.patch("/jobs/:jobId", requireEncoderSecret, async (req, re
   if (Object.keys(patch).length === 0) {
     return res.status(400).json({ error: "No valid fields to patch" });
   }
-  await updateJob(jobId, patch);
+  const updatedJob = await updateJob(jobId, patch);
+  if (updatedJob) {
+    if (patch.transcriptText || patch.status === "completed") {
+      void trySyncInsightVodWhisperSubtitleLabels(updatedJob);
+    }
+  }
   if (patch.status === "completed") {
     void tryYoutubeSyndicationAfterJobCompleted(jobId).catch((e) => {
       const m = e instanceof Error ? e.message : String(e);

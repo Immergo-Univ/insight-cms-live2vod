@@ -15,7 +15,7 @@
 
 import axios from "axios";
 import { config } from "../config.js";
-import { getAuthToken } from "./auth.service.js";
+import { getAuthToken, resolveTenant } from "./auth.service.js";
 import { vodOutputUrls } from "./vod-output-layout.js";
 import { resolveWhisperSubtitleLanguageFromSpec } from "./subtitle-language-utils.js";
 
@@ -134,6 +134,114 @@ function buildContent(spec, urls, renditions) {
   return content;
 }
 
+function isWhisperSidecarSubtitleItem(item) {
+  if (!item || !Array.isArray(item.assetTypes)) return false;
+  if (!item.assetTypes.includes("Subtitles")) return false;
+  const url = String(item.downloadUrl || "").toLowerCase();
+  return url.includes("subs_whisper") || /\/subs\/.*\.vtt(?:\?|$)/.test(url);
+}
+
+/**
+ * Update Mongo `content[]` subtitle labels (name / language / languageName) for Immergo whisper sidecar.
+ * Idempotent; no-ops when labels already match or the VOD cannot be loaded.
+ *
+ * @param {object} opts
+ * @param {string} opts.accountId
+ * @param {string} opts.tenantId
+ * @param {string} opts.vodGuid insight-api VOD guid (= originId / media_id)
+ * @param {object} [opts.spec] editor spec for language resolution
+ * @param {{ iso2?: string, name?: string }} [opts.languageOverride]
+ */
+export async function patchInsightVodWhisperSubtitleLabels({
+  accountId,
+  tenantId,
+  vodGuid,
+  spec,
+  languageOverride,
+}) {
+  if (!accountId || !tenantId || !vodGuid) return false;
+
+  const lang =
+    languageOverride?.iso2 && languageOverride?.name
+      ? {
+          iso2: String(languageOverride.iso2),
+          name: String(languageOverride.name),
+          hlsLanguage:
+            resolveWhisperSubtitleLanguage({
+              whisperOutputLanguage: String(languageOverride.iso2),
+              whisperSourceLanguage: "auto",
+            }).hlsLanguage,
+        }
+      : resolveWhisperSubtitleLanguageFromSpec(spec);
+
+  const token = await getAuthToken();
+  const headers = {
+    Authorization: `Bearer ${token}`,
+    "x-tenant-id": tenantId,
+  };
+  const findUrl = `${config.insightApiBase}/cms/entity/vods/find`;
+  const findRes = await axios.get(findUrl, {
+    params: { filter: `guid||$eq||${vodGuid}` },
+    headers,
+  });
+  const rows = Array.isArray(findRes.data) ? findRes.data : findRes.data ? [findRes.data] : [];
+  const vod = rows[0];
+  if (!vod?._id || !Array.isArray(vod.content)) return false;
+
+  let changed = false;
+  const content = vod.content.map((item) => {
+    if (!isWhisperSidecarSubtitleItem(item)) return item;
+    if (item.name === lang.name && item.languageName === lang.name && item.language === lang.iso2) {
+      return item;
+    }
+    changed = true;
+    return {
+      ...item,
+      name: lang.name,
+      languageName: lang.name,
+      language: lang.iso2,
+      updated: Date.now(),
+    };
+  });
+
+  if (!changed) return false;
+
+  await axios.post(
+    `${config.insightApiBase}/cms/entity/vods/insertOrUpdate`,
+    { _id: vod._id, accountId: vod.accountId || accountId, content },
+    { headers: { ...headers, "Content-Type": "application/json" } },
+  );
+  return true;
+}
+
+/**
+ * Best-effort subtitle label sync after encode / STT (never throws).
+ * @param {import("./vod-jobs.store.js").VodJob | null | undefined} job
+ */
+export async function trySyncInsightVodWhisperSubtitleLabels(job) {
+  if (!job?.vodGuid || !job?.tenantId) return;
+  const spec = job.editorSpec && typeof job.editorSpec === "object" ? job.editorSpec : null;
+  if (!anyWhisperSubtitlesEnabled(spec)) return;
+  try {
+    const { accountId } = await resolveTenant(job.tenantId);
+    if (!accountId) return;
+    const ok = await patchInsightVodWhisperSubtitleLabels({
+      accountId,
+      tenantId: job.tenantId,
+      vodGuid: job.vodGuid,
+      spec,
+    });
+    if (ok) {
+      console.log(
+        `[insight-vod] synced whisper subtitle labels guid=${job.vodGuid} tenant=${job.tenantId}`,
+      );
+    }
+  } catch (e) {
+    const m = e instanceof Error ? e.message : String(e);
+    console.error(`[insight-vod] subtitle label sync failed guid=${job.vodGuid}: ${m}`);
+  }
+}
+
 /**
  * @param {object} opts
  * @param {string} opts.accountId  insight-api account ObjectId
@@ -202,6 +310,13 @@ export async function createInsightVod({
   });
   const content = buildContent(spec, urls, renditions);
   await axios.post(url, { _id: vodId, accountId, content }, { headers });
+
+  const whisperLang = resolveWhisperSubtitleLanguageFromSpec(spec);
+  if (anyWhisperSubtitlesEnabled(spec)) {
+    console.log(
+      `[insight-vod] create guid=${guid} whisper subtitle labels name=${whisperLang.name} lang=${whisperLang.iso2}`,
+    );
+  }
 
   return { vodId: String(vodId), guid, masterUrl: urls.masterUrl };
 }
