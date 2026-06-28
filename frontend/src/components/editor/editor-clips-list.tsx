@@ -79,7 +79,6 @@ function vodJobHadSubtitlesOrNewsRequested(job: VodJobRecord): boolean {
   const clips = Array.isArray(spec.clips) ? spec.clips : [];
   for (const c of clips) {
     if (!c || typeof c !== "object") continue;
-    if (c.subtitleMode === true) return true;
     const subs = c.subtitles;
     if (subs && typeof subs === "object" && subs.enabled === true) return true;
   }

@@ -1,3 +1,5 @@
+import type { EditorStateJson } from "./editor";
+
 export type VodJobStatus =
   | "queued"
   | "processing"
@@ -123,6 +125,8 @@ export interface VodJobRecord {
   transcriptNewsBundle?: TranscriptNewsBundle | null;
   /** When set, this job was started from the editor for a specific sub-clip row. */
   editorClipId?: string;
+  /** Full editor JSON spec at job creation (subtitles, syndication, etc.). */
+  editorSpec?: EditorStateJson | null;
   createdAt: string;
   updatedAt?: string;
   clipUrl?: string;
