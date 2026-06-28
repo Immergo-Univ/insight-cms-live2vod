@@ -11,6 +11,7 @@ import { resolveTenantS3 } from "./tenant-storage.service.js";
 import { resolveTenantVideoProfiles } from "./video-profiles.service.js";
 import { encoderOutputPrefix } from "./vod-output-layout.js";
 import { createInsightVod } from "./insight-vod.service.js";
+import { getSequelize } from "../db/sequelize.js";
 
 /**
  * Resolve the tenant's insight-api account id, S3 destination and video profiles.
@@ -128,6 +129,19 @@ function anySubtitlesEnabled(spec) {
 }
 
 /**
+ * @param {string} tenantId
+ * @returns {Promise<boolean>}
+ */
+async function tenantAllowsSubtitles(tenantId) {
+  const sequelize = getSequelize();
+  if (!sequelize) return true;
+  const { Tenant } = sequelize.models;
+  const row = await Tenant.findOne({ where: { tenantId: String(tenantId || "").trim() } });
+  if (!row) return true;
+  return row.subtitlesEnabled !== false;
+}
+
+/**
  * Ask remote encoder to stop (best-effort).
  * @param {string} jobId
  */
@@ -157,6 +171,25 @@ export async function startBackgroundVodJob(opts) {
   const jobId = randomUUID();
   const { tenantId, spec, clipUrlPreview, editorClipId } = opts;
 
+  const subs = anySubtitlesEnabled(spec);
+  if (subs && !(await tenantAllowsSubtitles(tenantId))) {
+    await createJob({
+      id: jobId,
+      tenantId,
+      status: "failed",
+      progress: 0,
+      phase: "failed",
+      error: "Subtitles are disabled for this tenant",
+      message: "Subtitles are disabled for this tenant",
+      clipUrl: clipUrlPreview || spec.clipUrl,
+      jobKind: spec?.realtimeTranscribeOnly === true ? "realtime_transcribe" : "vod_encode",
+      ...(editorClipId ? { editorClipId } : {}),
+      editorSpec: spec && typeof spec === "object" ? JSON.parse(JSON.stringify(spec)) : null,
+    });
+    vodEncodeStdout(`rejected job=${jobId} tenant=${tenantId} subtitles=disabled_by_tenant`);
+    return jobId;
+  }
+
   await createJob({
     id: jobId,
     tenantId,
@@ -169,8 +202,6 @@ export async function startBackgroundVodJob(opts) {
     ...(editorClipId ? { editorClipId } : {}),
     editorSpec: spec && typeof spec === "object" ? JSON.parse(JSON.stringify(spec)) : null,
   });
-
-  const subs = anySubtitlesEnabled(spec);
   vodEncodeStdout(
     `queued job=${jobId} tenant=${tenantId} subtitles=${subs ? "yes" : "no"}${editorClipId ? ` editorClipId=${editorClipId}` : ""}`,
   );

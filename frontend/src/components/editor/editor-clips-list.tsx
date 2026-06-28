@@ -37,8 +37,16 @@ import {
 import { cx } from "@/utils/cx";
 import { buildMarkOutThumbnailUrl, buildThumbnailUrl, FRAME_DURATION_SEC } from "./editor-constants";
 import { TranscriptNewsLocalePanel } from "./transcript-news-locale-panel";
-import { EditorSubtitleButton } from "./editor-subtitle-button";
+import { EditorSubtitleGenerateButton } from "./editor-subtitle-generate-button";
+import { EditorSubtitleBurnButton } from "./editor-subtitle-burn-button";
 import { EditorVerticalCropButton } from "./editor-vertical-crop-button";
+import {
+  clipBurnInEnabled,
+  clipHasSelectedSubtitleLocales,
+  clipSubtitleGenerateEnabled,
+} from "@/utils/editor-subclip-subtitles";
+import { whisperLanguageLabel } from "@/types/editor-whisper-languages";
+import { Checkbox } from "@/components/base/checkbox/checkbox";
 import {
   clampClipTimeRange,
   filterRelativeTimeTyping,
@@ -146,12 +154,14 @@ function emptyNewsBlock(): TranscriptNewsLocaleBlock {
 
 function TranscriptAndNewsTabs({
   job,
+  availableLanguages,
   onVodJobsRefresh,
   clipUrl,
   channelId,
   clipStartTime,
 }: {
   job: VodJobRecord;
+  availableLanguages: string[];
   onVodJobsRefresh?: () => Promise<void>;
   clipUrl: string;
   channelId: string;
@@ -200,7 +210,30 @@ function TranscriptAndNewsTabs({
   const newsHe = job.transcriptNewsHe?.trim() ?? "";
   const newsErr = job.transcriptNewsError?.trim();
 
-  const hasAnyNews = Boolean(newsEn || newsEs || newsHe);
+  const hasAnyNews = useMemo(() => {
+    if (newsEn || newsEs || newsHe) return true;
+    const bundleObj = job.transcriptNewsBundle;
+    if (!bundleObj || typeof bundleObj !== "object") return false;
+      return availableLanguages.some((code) => {
+        const block = (bundleObj as unknown as Record<string, unknown>)[code];
+        return block && typeof block === "object";
+      });
+  }, [newsEn, newsEs, newsHe, job.transcriptNewsBundle, availableLanguages]);
+
+  const newsTabItems = useMemo(
+    () =>
+      availableLanguages.map((code) => ({
+        id: code,
+        label: whisperLanguageLabel(code),
+        children: whisperLanguageLabel(code),
+      })),
+    [availableLanguages],
+  );
+
+  const tabItems = useMemo(
+    () => [{ id: "raw", label: "Transcript", children: "Transcript" }, ...newsTabItems],
+    [newsTabItems],
+  );
 
   const handleSaveSpeakers = useCallback(async () => {
     if (!hasDi || !di || speakerIds.length === 0) return;
@@ -236,6 +269,15 @@ function TranscriptAndNewsTabs({
   const enBlock = bundle.en ?? emptyNewsBlock();
   const esBlock = bundle.es ?? emptyNewsBlock();
   const heBlock = bundle.he ?? emptyNewsBlock();
+
+  const localeBlock = (code: string): TranscriptNewsLocaleBlock => {
+    const fromBundle = (bundle as unknown as Record<string, TranscriptNewsLocaleBlock | undefined>)[code];
+    if (fromBundle) return fromBundle;
+    if (code === "en") return enBlock;
+    if (code === "es") return esBlock;
+    if (code === "he") return heBlock;
+    return emptyNewsBlock();
+  };
 
   return (
     <div className="min-w-0">
@@ -310,17 +352,7 @@ function TranscriptAndNewsTabs({
         </div>
       ) : null}
       <Tabs defaultSelectedKey="raw" className="min-w-0 gap-3">
-        <Tabs.List
-          type="underline"
-          orientation="horizontal"
-          fullWidth
-          items={[
-            { id: "raw", label: "Transcript", children: "Transcript" },
-            { id: "en", label: "English", children: "English" },
-            { id: "es", label: "Español", children: "Español" },
-            { id: "he", label: "עברית", children: "עברית" },
-          ]}
-        />
+        <Tabs.List type="underline" orientation="horizontal" fullWidth items={tabItems} />
         <Tabs.Panel id="raw" className="min-h-[100px] pt-1">
           {raw ? (
             <pre className="whitespace-pre-wrap font-sans text-sm leading-relaxed text-primary">{raw}</pre>
@@ -334,36 +366,24 @@ function TranscriptAndNewsTabs({
             </p>
           ) : null}
         </Tabs.Panel>
-        <Tabs.Panel id="en" className="min-h-[120px] max-h-[55vh] overflow-y-auto pt-1" lang="en">
-          <TranscriptNewsLocalePanel
-            locale="en"
-            jobId={job.id}
-            jobContentStamp={job.updatedAt ?? job.createdAt}
-            block={enBlock}
-            onChange={(next) => setBundle((b) => ({ ...b, version: 1, en: next }))}
-            defaultPosterUrl={defaultPosterUrl}
-          />
-        </Tabs.Panel>
-        <Tabs.Panel id="es" className="min-h-[120px] max-h-[55vh] overflow-y-auto pt-1" lang="es">
-          <TranscriptNewsLocalePanel
-            locale="es"
-            jobId={job.id}
-            jobContentStamp={job.updatedAt ?? job.createdAt}
-            block={esBlock}
-            onChange={(next) => setBundle((b) => ({ ...b, version: 1, es: next }))}
-            defaultPosterUrl={defaultPosterUrl}
-          />
-        </Tabs.Panel>
-        <Tabs.Panel id="he" className="min-h-[120px] max-h-[55vh] overflow-y-auto pt-1" dir="rtl" lang="he">
-          <TranscriptNewsLocalePanel
-            locale="he"
-            jobId={job.id}
-            jobContentStamp={job.updatedAt ?? job.createdAt}
-            block={heBlock}
-            onChange={(next) => setBundle((b) => ({ ...b, version: 1, he: next }))}
-            defaultPosterUrl={defaultPosterUrl}
-          />
-        </Tabs.Panel>
+        {availableLanguages.map((code) => (
+          <Tabs.Panel
+            key={code}
+            id={code}
+            className="min-h-[120px] max-h-[55vh] overflow-y-auto pt-1"
+            lang={code}
+            dir={code === "he" || code === "ar" ? "rtl" : undefined}
+          >
+            <TranscriptNewsLocalePanel
+              locale={code}
+              jobId={job.id}
+              jobContentStamp={job.updatedAt ?? job.createdAt}
+              block={localeBlock(code)}
+              onChange={(next) => setBundle((b) => ({ ...b, version: 1, [code]: next }))}
+              defaultPosterUrl={defaultPosterUrl}
+            />
+          </Tabs.Panel>
+        ))}
       </Tabs>
     </div>
   );
@@ -593,7 +613,10 @@ interface EditorClipsListProps {
   compact?: boolean;
   /** Opens vertical crop modal and selects the clip (parent should focus timeline on this clip). */
   onOpenVerticalCropModal?: (clipId: string) => void;
-  onToggleClipSubtitle?: (clipId: string) => void;
+  onOpenClipSubtitleGenerate?: (clipId: string) => void;
+  onOpenClipSubtitleBurn?: (clipId: string) => void;
+  subtitlesControlsEnabled?: boolean;
+  availableLanguages?: string[];
   /** Max time (seconds) in the parent window; used to clamp edited in/out. */
   parentWindowDurationSec: number;
   /** Apply parsed range; return applied range or null if unchanged / rejected. */
@@ -610,8 +633,9 @@ interface EditorClipsListProps {
   onAddImageWidgetFromFile?: (clipId: string, file: File) => Promise<void>;
   /** Realtime session: show transcript viewer control on each clip row. */
   realtimeTranscriptUi?: boolean;
-  /** When true, completed VOD encodes with subtitles/news requested show transcript control. */
-  vodTranscriptNewsUiEnabled?: boolean;
+  /** When true, show transcript control on clip rows (tenant news button). */
+  transcriptNewsUiEnabled?: boolean;
+  onUpdateClipNewsLocales?: (clipId: string, newsLocales: Record<string, boolean>) => void;
   vodJobs: VodJobRecord[];
   clipVodEncodeErrors: Record<string, string>;
   onClipStartVodEncode: (clipId: string, includeAds: boolean) => void | Promise<void>;
@@ -638,7 +662,10 @@ export function EditorClipsList({
   emptyHint = "Use Mark In / Mark Out to add ranges.",
   compact = false,
   onOpenVerticalCropModal,
-  onToggleClipSubtitle,
+  onOpenClipSubtitleGenerate,
+  onOpenClipSubtitleBurn,
+  subtitlesControlsEnabled = false,
+  availableLanguages = ["en", "es", "he"],
   parentWindowDurationSec,
   onClipTimesCommit,
   onUpdateClipTitle,
@@ -646,7 +673,8 @@ export function EditorClipsList({
   onAddTextWidget,
   onAddImageWidgetFromFile,
   realtimeTranscriptUi = false,
-  vodTranscriptNewsUiEnabled = true,
+  transcriptNewsUiEnabled = true,
+  onUpdateClipNewsLocales,
   vodJobs,
   clipVodEncodeErrors,
   onClipStartVodEncode,
@@ -904,7 +932,7 @@ export function EditorClipsList({
           <Modal>
             <Dialog
               aria-label="Clip transcript"
-              className="mx-4 flex w-full max-w-4xl justify-center outline-hidden sm:mx-auto"
+              className="mx-4 flex w-[min(60vw,960px)] justify-center outline-hidden sm:mx-auto"
             >
               <div className="relative max-h-[85vh] w-full overflow-y-auto rounded-xl border border-secondary bg-primary p-5 shadow-xl">
                 <CloseButton
@@ -945,6 +973,7 @@ export function EditorClipsList({
                     <TranscriptAndNewsTabs
                       key={`${transcriptModalJob.id}-${transcriptModalJob.updatedAt ?? transcriptModalJob.createdAt}`}
                       job={transcriptModalJob}
+                      availableLanguages={availableLanguages}
                       onVodJobsRefresh={onVodJobsRefresh}
                       clipUrl={clipUrl}
                       channelId={channelId}
@@ -952,6 +981,30 @@ export function EditorClipsList({
                     />
                   ) : transcriptBackfillBusy ? (
                     <p className="text-tertiary">Loading transcript from encode artifacts…</p>
+                  ) : transcriptModalClip && transcriptNewsUiEnabled ? (
+                    <div className="space-y-3">
+                      <p className="text-xs text-tertiary">
+                        Configure which news drafts OpenAI should generate when you encode this clip (requires subtitle
+                        generation and OPENAI_API_KEY on the encoder).
+                      </p>
+                      <div className="flex flex-col gap-2 rounded-lg border border-secondary bg-secondary/30 px-3 py-3">
+                        <p className="text-xs font-medium text-secondary">News languages at encode</p>
+                        {availableLanguages.map((code) => (
+                          <Checkbox
+                            key={code}
+                            size="sm"
+                            className="w-full min-w-0"
+                            isSelected={transcriptModalClip.newsLocales?.[code] !== false}
+                            onChange={(v) => {
+                              if (!onUpdateClipNewsLocales) return;
+                              const prev = transcriptModalClip.newsLocales ?? {};
+                              onUpdateClipNewsLocales(transcriptModalClip.id, { ...prev, [code]: v });
+                            }}
+                            label={whisperLanguageLabel(code)}
+                          />
+                        ))}
+                      </div>
+                    </div>
                   ) : (
                     <p className="text-tertiary">
                       {transcriptBackfillReasonMessage(transcriptBackfillReason)}
@@ -1152,7 +1205,9 @@ export function EditorClipsList({
                       </button>
                     </span>
                   ) : null}
-                  {realtimeTranscriptUi || vodEncodeJobSupportsTranscriptModal(vodJob, vodTranscriptNewsUiEnabled) ? (
+                  {realtimeTranscriptUi ||
+                  transcriptNewsUiEnabled ||
+                  vodEncodeJobSupportsTranscriptModal(vodJob, transcriptNewsUiEnabled) ? (
                     <span data-no-row-select onClick={(e) => e.stopPropagation()} className="inline-flex shrink-0">
                       <button
                         type="button"
@@ -1204,13 +1259,26 @@ export function EditorClipsList({
                         <Edit01 className="size-3.5" />
                       </button>
                     ) : null}
-                    {onToggleClipSubtitle ? (
+                    {onOpenClipSubtitleGenerate ? (
                       <span onClick={(e) => e.stopPropagation()} className="inline-flex">
-                        <EditorSubtitleButton
+                        <EditorSubtitleGenerateButton
                           variant="inline"
-                          active={!!c.subtitleMode}
+                          active={clipSubtitleGenerateEnabled(c)}
                           disabled={encodeActive}
-                          onToggle={() => onToggleClipSubtitle(c.id)}
+                          onClick={() => onOpenClipSubtitleGenerate(c.id)}
+                        />
+                      </span>
+                    ) : null}
+                    {onOpenClipSubtitleBurn &&
+                    subtitlesControlsEnabled &&
+                    clipSubtitleGenerateEnabled(c) &&
+                    clipHasSelectedSubtitleLocales(c) ? (
+                      <span onClick={(e) => e.stopPropagation()} className="inline-flex">
+                        <EditorSubtitleBurnButton
+                          variant="inline"
+                          active={clipBurnInEnabled(c)}
+                          disabled={encodeActive}
+                          onClick={() => onOpenClipSubtitleBurn(c.id)}
                         />
                       </span>
                     ) : null}

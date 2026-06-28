@@ -22,6 +22,16 @@ export function registerTenantModel(sequelize) {
       subtitlesDefaultNewsEn: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
       subtitlesDefaultNewsEs: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
       subtitlesDefaultNewsHe: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
+      /** Pool of subtitle/news language codes enabled for this tenant (admin Languages tab). */
+      availableLanguages: {
+        type: DataTypes.JSONB,
+        allowNull: false,
+        defaultValue: ["en", "es", "he"],
+      },
+      /** Show View transcript & news button in editor clip rows. */
+      newsButtonEnabled: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
+      /** Pre-encode: news locale toggles ON by default in transcript modal. */
+      newsDefaultGenerate: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
       syndicationYoutubeEnabled: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
       syndicationYoutubeDefaultEnabled: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
       syndicationYoutubeConnected: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },

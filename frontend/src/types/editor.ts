@@ -350,18 +350,16 @@ export interface EditorSubtitleTranscribeNewsLocales {
  */
 export interface EditorSubtitleSettings {
   style: EditorSubtitleStyle;
-  /** When true, burn generated subtitles into the encoded video (default false). */
+  /** @deprecated use clip.burnInEnabled */
   burnIn?: boolean;
+  /** Language code for burn-in (must be in clip.subtitleLocales selected). */
+  burnInLanguage?: string;
   whisperSourceLanguage: WhisperLanguageCode;
+  /** @deprecated VTT locales come from clip.subtitleLocales */
   whisperOutputLanguage: WhisperSubtitleOutputLanguage;
-  /** OpenAI diarization for burned subs + transcript (default true when omitted). */
   transcribeSpeakerDiarization?: boolean;
-  /**
-   * When true, run optional name inference so display names appear in burned SRT/VTT cues and transcript.
-   * Default false (speaker ids / generic labels only).
-   */
   transcribeInferSpeakerNames?: boolean;
-  /** Which news locales to keep after STT (default all true). */
+  /** @deprecated use clip.newsLocales */
   transcribeNewsLocales?: Partial<EditorSubtitleTranscribeNewsLocales>;
 }
 
@@ -512,16 +510,16 @@ export interface EditorClipSyndication {
 /** Sent in JSON when subtitle mode is on. */
 export interface EditorSubtitlesConfig {
   enabled: true;
-  /** When true, burn SRT into mezzanine before renditions (default false). */
   burnIn?: boolean;
+  burnInLanguage?: string;
+  subtitleLocales?: Record<string, boolean>;
   whisperSourceLanguage: WhisperLanguageCode;
-  whisperOutputLanguage: WhisperSubtitleOutputLanguage;
+  whisperOutputLanguage?: WhisperSubtitleOutputLanguage;
   style: EditorSubtitleStyle;
-  /** @deprecated Old jobs only; backend maps to source/output if present */
   languageMode?: string;
   transcribeSpeakerDiarization?: boolean;
   transcribeInferSpeakerNames?: boolean;
-  transcribeNewsLocales?: Partial<EditorSubtitleTranscribeNewsLocales>;
+  transcribeNewsLocales?: Record<string, boolean>;
 }
 
 /** Default subtitle / whisper options for a new sub-clip or when fields are missing (clipping / timeline encode). */
@@ -563,6 +561,7 @@ export function normalizeEditorSubtitleSettings(
   };
   return {
     burnIn: base.burnIn === true,
+    burnInLanguage: typeof base.burnInLanguage === "string" && base.burnInLanguage.trim() ? base.burnInLanguage.trim() : "en",
     whisperSourceLanguage: base.whisperSourceLanguage,
     whisperOutputLanguage: base.whisperOutputLanguage,
     style,
@@ -632,8 +631,14 @@ export interface EditorSubClipEncodeOptions {
   verticalCropBreakpoints?: EditorVerticalCropBreakpoint[];
   /** Motion between keyframes (preview + encode). */
   verticalCropPanSettings?: EditorVerticalCropPanSettings;
-  /** When true, whisper + burned-in subtitles using `subtitleSettings`. */
+  /** @deprecated use subtitleGenerateEnabled */
   subtitleMode?: boolean;
+  subtitleGenerateEnabled?: boolean;
+  burnInEnabled?: boolean;
+  /** Per-locale VTT generation flags (subset of tenant availableLanguages). */
+  subtitleLocales?: Record<string, boolean>;
+  /** Per-locale news generation flags for transcript modal. */
+  newsLocales?: Record<string, boolean>;
   subtitleSettings?: EditorSubtitleSettings;
   /** Over-video widgets (text / image) for this output clip; positions are relative to the widget viewport (see docs on `EditorClipWidgetLayout`). */
   widgets?: EditorClipWidget[];
@@ -721,9 +726,13 @@ export interface EditorStateJson {
   /** When false, skip OpenAI news generation for this job. Default true when omitted. */
   transcribeGenerateNews?: boolean;
   /** When set, drop disabled locales from the trilingual news result (after STT). */
-  transcribeNewsLocales?: Partial<EditorSubtitleTranscribeNewsLocales>;
+  transcribeNewsLocales?: Record<string, boolean>;
   /** When true, run speaker-name inference for diarized STT (subtitles + transcript). */
   transcribeInferSpeakerNames?: boolean;
+  /** Tenant language pool (admin Languages tab). */
+  availableLanguages?: string[];
+  /** Selected subtitle language codes for this encode. */
+  subtitleLanguages?: string[];
 }
 
 /** Defaults for encode-related fields when creating or hydrating a sub-clip. */

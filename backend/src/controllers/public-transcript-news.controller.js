@@ -2,6 +2,8 @@ import { Router } from "express";
 import { resolveTenant } from "../services/auth.service.js";
 import { getJob } from "../services/vod-jobs.store.js";
 import { decodeTenantParam } from "../middleware/decode-tenant.middleware.js";
+import { getSequelize } from "../db/sequelize.js";
+import { normalizeAvailableLanguages } from "../utils/tenant-languages.js";
 
 export const publicTranscriptNewsRouter = Router();
 
@@ -57,11 +59,20 @@ publicTranscriptNewsRouter.get("/transcript-news/:tenantId/:jobId", async (req, 
     const tenantId = String(req.params.tenantId || "").trim();
     const jobId = String(req.params.jobId || "").trim();
     const lang = String(req.query.lang || "en").trim().toLowerCase();
-    const locale = lang === "es" || lang === "he" ? lang : "en";
     if (!tenantId || !jobId) {
       return res.status(400).type("text/plain").send("Missing tenantId or jobId");
     }
     await resolveTenant(tenantId);
+    let locale = lang;
+    const sequelize = getSequelize();
+    if (sequelize) {
+      const { Tenant } = sequelize.models;
+      const row = await Tenant.findOne({ where: { tenantId } });
+      const pool = normalizeAvailableLanguages(row?.availableLanguages);
+      locale = pool.includes(lang) ? lang : pool[0] ?? "en";
+    } else if (lang !== "es" && lang !== "he") {
+      locale = "en";
+    }
     const job = await getJob(jobId);
     if (!job || job.tenantId !== tenantId) {
       return res.status(404).type("text/plain").send("Not found");

@@ -8,6 +8,7 @@ import { resolveTenantS3 } from "./tenant-storage.service.js";
 import { resolveTenantVideoProfiles } from "./video-profiles.service.js";
 import { vodOutputUrls } from "./vod-output-layout.js";
 import { getJob, updateJob } from "./vod-jobs.store.js";
+import { subtitleLanguagesFromSpec } from "./subtitle-language-utils.js";
 
 function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
@@ -100,10 +101,32 @@ async function whisperArtifactUrlsForJob(job) {
     customerFolder: s3.customerFolder,
     renditions,
   });
-  return {
-    srtUrl: `${urls.base}/subs/whisper.srt`,
-    vttUrl: urls.whisperSubsUrl,
-  };
+  const spec = job.editorSpec && typeof job.editorSpec === "object" ? job.editorSpec : null;
+  const langs = subtitleLanguagesFromSpec(spec);
+  const useLegacyNames = langs.length <= 1;
+  /** @type {Array<{ srtUrl: string, vttUrl: string, label?: string }>} */
+  const candidates = [];
+  if (useLegacyNames) {
+    candidates.push({
+      srtUrl: `${urls.base}/subs/whisper.srt`,
+      vttUrl: urls.whisperSubsUrl,
+      label: "legacy",
+    });
+  } else {
+    for (const code of langs) {
+      candidates.push({
+        srtUrl: `${urls.base}/subs/whisper_${code}.srt`,
+        vttUrl: `${urls.base}/hls/subs_whisper_${code}.vtt`,
+        label: code,
+      });
+    }
+    candidates.push({
+      srtUrl: `${urls.base}/subs/whisper.srt`,
+      vttUrl: urls.whisperSubsUrl,
+      label: "legacy-fallback",
+    });
+  }
+  return { base: urls.base, candidates };
 }
 
 /**
@@ -159,8 +182,8 @@ export async function backfillWhisperTranscriptDetailed(job, opts = {}) {
     return { ok: false, reason: "subtitles_not_requested", job };
   }
 
-  const urls = await whisperArtifactUrlsForJob(job);
-  if (!urls) {
+  const artifactSet = await whisperArtifactUrlsForJob(job);
+  if (!artifactSet?.candidates?.length) {
     console.warn(`[whisper-backfill] no CDN URLs job=${job.id} guid=${job.vodGuid}`);
     return { ok: false, reason: "no_cdn_urls", job };
   }
@@ -172,28 +195,28 @@ export async function backfillWhisperTranscriptDetailed(job, opts = {}) {
   let lastError = "";
 
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
-    try {
+    for (const pair of artifactSet.candidates) {
       try {
-        const srt = await fetchText(urls.srtUrl);
-        transcriptText = parseSrtContentToPlainText(srt);
-      } catch (srtErr) {
-        const vtt = await fetchText(urls.vttUrl);
-        transcriptText = parseVttContentToPlainText(vtt);
-        if (!transcriptText) {
-          const m = srtErr instanceof Error ? srtErr.message : String(srtErr);
-          throw new Error(`SRT and VTT fetch/parse failed (${m})`);
+        try {
+          const srt = await fetchText(pair.srtUrl);
+          transcriptText = parseSrtContentToPlainText(srt);
+        } catch (srtErr) {
+          lastError = srtErr instanceof Error ? srtErr.message : String(srtErr);
+          try {
+            const vtt = await fetchText(pair.vttUrl);
+            transcriptText = parseVttContentToPlainText(vtt);
+          } catch (vttErr) {
+            lastError = vttErr instanceof Error ? vttErr.message : String(vttErr);
+            continue;
+          }
         }
-      }
-      if (transcriptText.trim()) break;
-    } catch (e) {
-      lastError = e instanceof Error ? e.message : String(e);
-      if (attempt === maxAttempts - 1) {
-        console.warn(`[whisper-backfill] failed job=${job.id} guid=${job.vodGuid}: ${lastError}`);
+        if (transcriptText.trim()) break;
+      } catch (e) {
+        lastError = e instanceof Error ? e.message : String(e);
       }
     }
-    if (attempt < maxAttempts - 1) {
-      await sleep(1500 * (attempt + 1));
-    }
+    if (transcriptText.trim()) break;
+    if (attempt < maxAttempts - 1) await sleep(1500 * (attempt + 1));
   }
 
   if (!transcriptText.trim()) {

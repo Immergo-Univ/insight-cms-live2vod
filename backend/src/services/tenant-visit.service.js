@@ -1,5 +1,6 @@
 import { getSequelize } from "../db/sequelize.js";
 import { normalizeSyndicationAccountMaxByPlatform } from "./tenant-syndication-account-limits.service.js";
+import { normalizeAvailableLanguages } from "../utils/tenant-languages.js";
 
 /**
  * Create or update tenant row when the timeline (or app) is visited for a tenantId.
@@ -78,13 +79,17 @@ export function tenantRowToApi(plain) {
     tenantId: plain.tenantId,
     subtitlesEnabled: plain.subtitlesEnabled !== false,
     subtitlesDefaultEnabled: plain.subtitlesDefaultEnabled === true,
-    subtitlesTranscriptNewsUiEnabled: plain.subtitlesTranscriptNewsUiEnabled !== false,
+    subtitlesTranscriptNewsUiEnabled:
+      plain.newsButtonEnabled !== false && plain.subtitlesTranscriptNewsUiEnabled !== false,
     subtitlesDefaultBurnIn: plain.subtitlesDefaultBurnIn === true,
     subtitlesDefaultDiarization: plain.subtitlesDefaultDiarization !== false,
     subtitlesDefaultInferSpeakerNames: plain.subtitlesDefaultInferSpeakerNames === true,
     subtitlesDefaultNewsEn: plain.subtitlesDefaultNewsEn !== false,
     subtitlesDefaultNewsEs: plain.subtitlesDefaultNewsEs !== false,
     subtitlesDefaultNewsHe: plain.subtitlesDefaultNewsHe !== false,
+    availableLanguages: normalizeAvailableLanguages(plain.availableLanguages),
+    newsButtonEnabled: plain.newsButtonEnabled !== false && plain.subtitlesTranscriptNewsUiEnabled !== false,
+    newsDefaultGenerate: plain.newsDefaultGenerate !== false,
     syndicationYoutubeEnabled: plain.syndicationYoutubeEnabled === true,
     syndicationYoutubeDefaultEnabled: plain.syndicationYoutubeDefaultEnabled === true,
     syndicationYoutubeConnected: hasYoutubeToken || plain.syndicationYoutubeConnected === true,

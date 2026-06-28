@@ -80,3 +80,49 @@ export function resolveWhisperSubtitleLanguage(config) {
     hlsLanguage: meta.hlsLanguage,
   };
 }
+
+/**
+ * @param {string} iso2
+ * @returns {{ iso2: string, name: string, hlsLanguage: string }}
+ */
+export function whisperLanguageMeta(iso2) {
+  const code = String(iso2 || "").trim().toLowerCase() || DEFAULT.iso2;
+  const meta = WHISPER_LANGUAGE_META[code] || DEFAULT;
+  return { iso2: code, name: meta.name, hlsLanguage: meta.hlsLanguage };
+}
+
+/**
+ * Selected VTT locales from editor spec (multi-locale or legacy single language).
+ * @param {object | null | undefined} spec
+ * @returns {string[]}
+ */
+export function subtitleLanguagesFromSpec(spec) {
+  if (!spec || typeof spec !== "object") return [DEFAULT.iso2];
+  if (Array.isArray(spec.subtitleLanguages) && spec.subtitleLanguages.length > 0) {
+    /** @type {string[]} */
+    const out = [];
+    for (const item of spec.subtitleLanguages) {
+      const code = String(item || "")
+        .trim()
+        .toLowerCase();
+      if (!code || code === "auto" || out.includes(code)) continue;
+      out.push(code);
+    }
+    if (out.length) return out;
+  }
+  const cfg = whisperSubsConfigFromSpec(spec);
+  if (cfg?.subtitleLocales && typeof cfg.subtitleLocales === "object") {
+    /** @type {string[]} */
+    const out = [];
+    for (const [key, enabled] of Object.entries(cfg.subtitleLocales)) {
+      if (enabled !== true) continue;
+      const code = String(key || "")
+        .trim()
+        .toLowerCase();
+      if (!code || out.includes(code)) continue;
+      out.push(code);
+    }
+    if (out.length) return out;
+  }
+  return [resolveWhisperSubtitleLanguage(cfg).iso2];
+}

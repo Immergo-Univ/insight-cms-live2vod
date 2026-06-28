@@ -61,7 +61,21 @@ import type {
   EditorVerticalCropPanSettings,
 } from "@/types/editor";
 import { installEditorConsoleTools } from "@/utils/editor-console-debug";
-import { isValidWhisperSubtitlePair } from "@/types/editor-whisper-languages";
+import { EditorSubtitleGenerateModal } from "@/components/editor/editor-subtitle-generate-modal";
+import { EditorSubtitleBurnModal } from "@/components/editor/editor-subtitle-burn-modal";
+import {
+  buildDefaultSubtitleLocales,
+  buildDefaultNewsLocales,
+  mergeSubtitleLocalesWithTenantPool,
+} from "@/utils/tenant-subtitle-defaults";
+import {
+  clipBurnInEnabled,
+  clipHasSelectedSubtitleLocales,
+  clipSubtitleGenerateEnabled,
+  reconcileBurnInAfterLocaleChange,
+  resolveClipBurnInLanguage,
+} from "@/utils/editor-subclip-subtitles";
+import { subtitlesConfigFromClip, transcribeRootFromClip } from "@/utils/editor-spec-subtitles";
 
 /** Default length for a manually inserted ad slot (seconds). */
 const DEFAULT_NEW_AD_DURATION_SEC = 30;
@@ -99,6 +113,9 @@ function createDefaultFullWindowSubClip(
     subtitlesDefaultEnabled?: boolean;
     defaultSyndication?: EditorClipSyndication | undefined;
     defaultSubtitleSettings?: EditorSubtitleSettings;
+    subtitleLocales?: Record<string, boolean>;
+    newsLocales?: Record<string, boolean>;
+    burnInDefault?: boolean;
   },
 ): EditorSubClip {
   const isRealtime = clipState.selectionMode === "realtime";
@@ -110,13 +127,19 @@ function createDefaultFullWindowSubClip(
     ? Math.max(60, Math.floor(nowUnixSec) - clipState.startTime)
     : wallSpan;
   const subtitleOn = defaults?.subtitlesDefaultEnabled === true;
+  const poolLocales = defaults?.subtitleLocales ?? buildDefaultSubtitleLocales(undefined);
+  const newsLocales = defaults?.newsLocales ?? buildDefaultNewsLocales(undefined);
   return {
     id,
     order: 1,
     startTime: 0,
     endTime,
     ...defaultEditorSubClipEncodeFields(),
+    subtitleGenerateEnabled: subtitleOn,
     subtitleMode: subtitleOn,
+    burnInEnabled: subtitleOn && defaults?.burnInDefault === true,
+    subtitleLocales: poolLocales,
+    newsLocales,
     ...(subtitleOn && defaults?.defaultSubtitleSettings
       ? { subtitleSettings: defaults.defaultSubtitleSettings }
       : {}),
@@ -178,7 +201,6 @@ function parentWallEndUnix(clipState: EditorClipState, subClips: EditorSubClip[]
 }
 
 function editorSubClipToStateJsonClip(c: EditorSubClip): EditorStateJsonClip {
-  const st = normalizeEditorSubtitleSettings(c.subtitleSettings);
   const clipDur = Math.max(0, c.endTime - c.startTime);
   const sortedBps =
     c.verticalCropMode && c.verticalCropBreakpoints?.length
@@ -219,23 +241,11 @@ function editorSubClipToStateJsonClip(c: EditorSubClip): EditorStateJsonClip {
           verticalCropPanSettings: normalizeEditorVerticalCropPanSettings(c.verticalCropPanSettings),
         }
       : {}),
-    ...(c.subtitleMode
-      ? {
-          subtitles: {
-            enabled: true as const,
-            ...(st.burnIn ? { burnIn: true as const } : {}),
-            whisperSourceLanguage: st.whisperSourceLanguage,
-            whisperOutputLanguage: st.whisperOutputLanguage,
-            style: { ...st.style },
-            transcribeSpeakerDiarization: st.transcribeSpeakerDiarization,
-            transcribeInferSpeakerNames: st.transcribeInferSpeakerNames,
-            transcribeNewsLocales: {
-              en: st.transcribeNewsLocales.en,
-              es: st.transcribeNewsLocales.es,
-              he: st.transcribeNewsLocales.he,
-            },
-          },
-        }
+    ...(c.subtitleMode || c.subtitleGenerateEnabled
+      ? (() => {
+          const block = subtitlesConfigFromClip(c);
+          return block ? { subtitles: block } : {};
+        })()
       : {}),
     widgets: (c.widgets ?? []).map(cloneEditorClipWidget),
     ...(c.syndication ? { syndication: JSON.parse(JSON.stringify(c.syndication)) } : {}),
@@ -249,6 +259,7 @@ function buildSingleClipEditorStateJson(
   adsMarkers: EditorAdMarker[],
   includeAds: boolean,
   nowUnix: number,
+  tenantForSpec: import("@/services/tenant-bff.service").TenantDto | null,
 ): EditorStateJson {
   const absEpochToIso = (absSec: number) => {
     const t = Number(absSec);
@@ -275,14 +286,13 @@ function buildSingleClipEditorStateJson(
   }
 
   const transcribeSettings = loadRealtimeTranscribeSettings();
-  const subNorm = normalizeEditorSubtitleSettings(target.subtitleSettings);
-  const nl = subNorm.transcribeNewsLocales;
-  const rootTranscribe = target.subtitleMode
+  const rootFromClip = transcribeRootFromClip(target, tenantForSpec);
+  const rootTranscribe = clipSubtitleGenerateEnabled(target)
     ? {
-        transcribeSpeakerDiarization: subNorm.transcribeSpeakerDiarization,
-        transcribeGenerateNews: Boolean(nl.en || nl.es || nl.he),
-        transcribeNewsLocales: { en: nl.en, es: nl.es, he: nl.he },
-        transcribeInferSpeakerNames: subNorm.transcribeInferSpeakerNames,
+        transcribeSpeakerDiarization: rootFromClip.transcribeSpeakerDiarization,
+        transcribeGenerateNews: rootFromClip.transcribeGenerateNews,
+        transcribeNewsLocales: rootFromClip.transcribeNewsLocales,
+        transcribeInferSpeakerNames: rootFromClip.transcribeInferSpeakerNames,
       }
     : {
         transcribeSpeakerDiarization: transcribeSettings.speakerDiarization,
@@ -294,6 +304,8 @@ function buildSingleClipEditorStateJson(
     sourceM3u8: clipState.sourceM3u8,
     startTime: parentWallStart,
     endTime: parentWallEnd,
+    availableLanguages: rootFromClip.availableLanguages,
+    subtitleLanguages: rootFromClip.subtitleLanguages,
     posters: [],
     clips: [{ ...editorSubClipToStateJsonClip(target), order: 1 }],
     ads: adsOut,
@@ -581,8 +593,10 @@ export function EditorPage() {
     loading: tenantSettingsLoading,
     subtitlesEnabled: tenantSubtitlesEnabled,
     subtitlesDefaultEnabled,
-    subtitlesTranscriptNewsUiEnabled,
     tenantDefaultSubtitleSettings,
+    tenant,
+    availableLanguages,
+    newsButtonEnabled,
     syndicationYoutubeEnabled,
     syndicationYoutubeDefaultEnabled,
     syndicationTwitterEnabled,
@@ -620,6 +634,30 @@ export function EditorPage() {
     ],
   );
 
+  const defaultClipSubtitleFields = useMemo(() => {
+    const locales = buildDefaultSubtitleLocales(tenant);
+    const newsLocales = buildDefaultNewsLocales(tenant);
+    const subtitleOn = tenantSubtitlesEnabled && subtitlesDefaultEnabled === true;
+    const burnInDefault = tenant?.subtitlesDefaultBurnIn === true;
+    if (!subtitleOn) {
+      return {
+        subtitleGenerateEnabled: false,
+        subtitleMode: false as const,
+        burnInEnabled: false,
+        subtitleLocales: locales,
+        newsLocales,
+      };
+    }
+    return {
+      subtitleGenerateEnabled: true,
+      subtitleMode: true as const,
+      burnInEnabled: burnInDefault,
+      subtitleLocales: locales,
+      newsLocales,
+      subtitleSettings: tenantDefaultSubtitleSettings,
+    };
+  }, [tenant, tenantSubtitlesEnabled, subtitlesDefaultEnabled, tenantDefaultSubtitleSettings]);
+
   useEffect(() => {
     if (appliedInitialTenantDefaultsRef.current) return;
     if (tenantSettingsLoading) return;
@@ -634,15 +672,15 @@ export function EditorPage() {
     setClips((prev) => {
       if (prev.length !== 1) return prev;
       const clip = prev[0];
-      const shouldSetSubtitle = tenantSubtitlesEnabled && subtitlesDefaultEnabled === true && !clip.subtitleMode;
+      const shouldSetSubtitle =
+        tenantSubtitlesEnabled && subtitlesDefaultEnabled === true && !clipSubtitleGenerateEnabled(clip);
       const shouldSetSyndication = Boolean(defaultClipSyndication && !clip.syndication);
       if (!shouldSetSubtitle && !shouldSetSyndication) return prev;
       appliedInitialTenantDefaultsRef.current = true;
       return [
         {
           ...clip,
-          subtitleMode: shouldSetSubtitle ? true : clip.subtitleMode,
-          ...(shouldSetSubtitle ? { subtitleSettings: tenantDefaultSubtitleSettings } : {}),
+          ...(shouldSetSubtitle ? defaultClipSubtitleFields : {}),
           ...(shouldSetSyndication
             ? { syndication: JSON.parse(JSON.stringify(defaultClipSyndication)) }
             : {}),
@@ -657,7 +695,7 @@ export function EditorPage() {
     tenantSubtitlesEnabled,
     subtitlesDefaultEnabled,
     defaultClipSyndication,
-    tenantDefaultSubtitleSettings,
+    defaultClipSubtitleFields,
   ]);
 
   const selectedEncodeClip = useMemo(
@@ -706,7 +744,7 @@ export function EditorPage() {
     currentTime,
   ]);
   const subtitleOverlayActive =
-    tenantSubtitlesEnabled && !!(selectedEncodeClip?.subtitleMode);
+    tenantSubtitlesEnabled && clipSubtitleGenerateEnabled(selectedEncodeClip ?? undefined);
   const subtitleSettingsForPlayer = normalizeEditorSubtitleSettings(
     selectedEncodeClip?.subtitleSettings ?? tenantDefaultSubtitleSettings,
   );
@@ -937,16 +975,14 @@ export function EditorPage() {
             startTime: timeSeconds,
             endTime: end,
             ...defaultEditorSubClipEncodeFields(),
-            ...(tenantSubtitlesEnabled && subtitlesDefaultEnabled === true
-              ? { subtitleMode: true as const, subtitleSettings: tenantDefaultSubtitleSettings }
-              : { subtitleMode: false as const }),
+            ...defaultClipSubtitleFields,
             ...(defaultClipSyndication ? { syndication: JSON.parse(JSON.stringify(defaultClipSyndication)) } : {}),
           },
         ];
       });
       setSelectedClipId(id);
     },
-    [clipState, selectedClipId, isRealtime, clips, duration, zoomIndex, tenantSubtitlesEnabled, subtitlesDefaultEnabled, defaultClipSyndication, tenantDefaultSubtitleSettings],
+    [clipState, selectedClipId, isRealtime, clips, duration, zoomIndex, defaultClipSyndication, defaultClipSubtitleFields],
   );
 
   /** Append a new sub-clip at the current playhead (same span logic as Mark In without selection). */
@@ -1001,9 +1037,7 @@ export function EditorPage() {
             startTime: timeSeconds,
             endTime: end,
             ...encode,
-            ...(tenantSubtitlesEnabled && subtitlesDefaultEnabled === true
-              ? { subtitleMode: true as const, subtitleSettings: tenantDefaultSubtitleSettings }
-              : { subtitleMode: false as const }),
+            ...defaultClipSubtitleFields,
             ...(defaultClipSyndication ? { syndication: JSON.parse(JSON.stringify(defaultClipSyndication)) } : {}),
           },
         ];
@@ -1011,7 +1045,7 @@ export function EditorPage() {
       setSelectedClipId(id);
       timelineRef.current?.scrollTimeToCenter(timeSeconds);
     },
-    [clipState, clips, duration, isRealtime, zoomIndex, currentTime, tenantSubtitlesEnabled, subtitlesDefaultEnabled, defaultClipSyndication, tenantDefaultSubtitleSettings],
+    [clipState, clips, duration, isRealtime, zoomIndex, currentTime, defaultClipSyndication, defaultClipSubtitleFields],
   );
 
   const handleMarkOut = useCallback(
@@ -1054,9 +1088,7 @@ export function EditorPage() {
             startTime: offset,
             endTime: end,
             ...defaultEditorSubClipEncodeFields(),
-            ...(tenantSubtitlesEnabled && subtitlesDefaultEnabled === true
-              ? { subtitleMode: true as const, subtitleSettings: tenantDefaultSubtitleSettings }
-              : { subtitleMode: false as const }),
+            ...defaultClipSubtitleFields,
             ...(defaultClipSyndication ? { syndication: JSON.parse(JSON.stringify(defaultClipSyndication)) } : {}),
           },
         ];
@@ -1329,27 +1361,76 @@ export function EditorPage() {
     [],
   );
 
-  const handleToggleClipSubtitle = useCallback(
-    (clipId: string) => {
-      let turningOff = false;
-      setClips((prev) => {
-        const cur = prev.find((c) => c.id === clipId);
-        turningOff = !!(cur?.subtitleMode);
-        return prev.map((c) => {
+  const [subtitleGenerateModalClipId, setSubtitleGenerateModalClipId] = useState<string | null>(null);
+  const [subtitleBurnModalClipId, setSubtitleBurnModalClipId] = useState<string | null>(null);
+
+  const subtitleGenerateModalClip = useMemo(
+    () => (subtitleGenerateModalClipId ? clips.find((c) => c.id === subtitleGenerateModalClipId) ?? null : null),
+    [clips, subtitleGenerateModalClipId],
+  );
+  const subtitleBurnModalClip = useMemo(
+    () => (subtitleBurnModalClipId ? clips.find((c) => c.id === subtitleBurnModalClipId) ?? null : null),
+    [clips, subtitleBurnModalClipId],
+  );
+
+  const handleSaveSubtitleGenerate = useCallback(
+    (
+      clipId: string,
+      payload: {
+        generateEnabled: boolean;
+        settings: EditorSubtitleSettings;
+        subtitleLocales: Record<string, boolean>;
+      },
+    ) => {
+      setClips((prev) =>
+        prev.map((c) => {
           if (c.id !== clipId) return c;
-          if (turningOff) return { ...c, subtitleMode: false };
+          if (!payload.generateEnabled) {
+            return {
+              ...c,
+              subtitleGenerateEnabled: false,
+              subtitleMode: false,
+              burnInEnabled: false,
+            };
+          }
+          const merged = reconcileBurnInAfterLocaleChange(
+            { ...c, subtitleSettings: normalizeEditorSubtitleSettings(payload.settings) },
+            payload.subtitleLocales,
+          );
           return {
             ...c,
+            subtitleGenerateEnabled: true,
             subtitleMode: true,
-            subtitleSettings: normalizeEditorSubtitleSettings(
-              c.subtitleSettings ?? tenantDefaultSubtitleSettings,
-            ),
+            subtitleSettings: merged.subtitleSettings,
+            subtitleLocales: merged.subtitleLocales,
+            burnInEnabled: merged.burnInEnabled,
           };
-        });
-      });
+        }),
+      );
     },
-    [tenantDefaultSubtitleSettings],
+    [],
   );
+
+  const handleSaveSubtitleBurn = useCallback(
+    (clipId: string, payload: { burnInEnabled: boolean; burnInLanguage: string }) => {
+      setClips((prev) =>
+        prev.map((c) => {
+          if (c.id !== clipId) return c;
+          const st = normalizeEditorSubtitleSettings(c.subtitleSettings);
+          return {
+            ...c,
+            burnInEnabled: payload.burnInEnabled,
+            subtitleSettings: { ...st, burnInLanguage: payload.burnInLanguage },
+          };
+        }),
+      );
+    },
+    [],
+  );
+
+  const handleUpdateClipNewsLocales = useCallback((clipId: string, newsLocales: Record<string, boolean>) => {
+    setClips((prev) => prev.map((c) => (c.id === clipId ? { ...c, newsLocales } : c)));
+  }, []);
 
   const handleVerticalCropCenterX = useCallback(
     (centerX: number) => {
@@ -1501,15 +1582,12 @@ export function EditorPage() {
       }
 
       if (
-        clip.subtitleMode &&
-        !isValidWhisperSubtitlePair(
-          (clip.subtitleSettings ?? DEFAULT_EDITOR_SUBTITLE_SETTINGS).whisperSourceLanguage,
-          (clip.subtitleSettings ?? DEFAULT_EDITOR_SUBTITLE_SETTINGS).whisperOutputLanguage,
-        )
+        clipSubtitleGenerateEnabled(clip) &&
+        !clipHasSelectedSubtitleLocales(clip)
       ) {
         setClipVodEncodeErrors((p) => ({
           ...p,
-          [clipId]: "Fix subtitle languages for this clip before encoding.",
+          [clipId]: "Select at least one subtitle language for this clip before encoding.",
         }));
         return;
       }
@@ -1530,7 +1608,7 @@ export function EditorPage() {
 
       try {
         const nowSec = Math.floor(Date.now() / 1000);
-        const spec = buildSingleClipEditorStateJson(clipState, clips, clip, ads, includeAds, nowSec);
+        const spec = buildSingleClipEditorStateJson(clipState, clips, clip, ads, includeAds, nowSec, tenant);
         await startVodJob(spec, { editorClipId: clipId });
         await refreshVodJobs();
       } catch (err) {
@@ -1540,7 +1618,7 @@ export function EditorPage() {
         }));
       }
     },
-    [clipState, clips, ads, refreshVodJobs],
+    [clipState, clips, ads, refreshVodJobs, tenant],
   );
 
   const handleClipCancelVodEncode = useCallback(
@@ -1697,9 +1775,14 @@ export function EditorPage() {
               onRemoveAd={handleRemoveAd}
             onAdOrderChange={handleAdOrderChange}
               onSaveVerticalCropFromModal={handleSaveVerticalCropFromModal}
-              onToggleClipSubtitle={
-                tenantSubtitlesEnabled ? handleToggleClipSubtitle : undefined
+              onOpenClipSubtitleGenerate={
+                tenantSubtitlesEnabled ? (clipId) => setSubtitleGenerateModalClipId(clipId) : undefined
               }
+              onOpenClipSubtitleBurn={
+                tenantSubtitlesEnabled ? (clipId) => setSubtitleBurnModalClipId(clipId) : undefined
+              }
+              subtitlesControlsEnabled={tenantSubtitlesEnabled}
+              availableLanguages={availableLanguages}
               syndicationTenantId={editorTenantId}
               syndicationYoutubeEnabled={syndicationYoutubeEnabled}
               syndicationYoutubeDefaultEnabled={syndicationYoutubeDefaultEnabled}
@@ -1715,7 +1798,8 @@ export function EditorPage() {
               onAddTextWidget={handleAddTextWidget}
               onAddImageWidgetFromFile={handleAddImageWidgetFromFile}
               realtimeTranscriptUi={isRealtime && tenantSubtitlesEnabled}
-              vodTranscriptNewsUiEnabled={subtitlesTranscriptNewsUiEnabled}
+              transcriptNewsUiEnabled={newsButtonEnabled}
+              onUpdateClipNewsLocales={handleUpdateClipNewsLocales}
               onVodJobsRefresh={refreshVodJobs}
           />
           </aside>
@@ -1776,6 +1860,44 @@ export function EditorPage() {
             <EditorJsonButton stateJson={stateJson} />
           </div>
         </div>
+      ) : null}
+
+      {subtitleGenerateModalClip ? (
+        <EditorSubtitleGenerateModal
+          isOpen={!!subtitleGenerateModalClipId}
+          onOpenChange={(open) => {
+            if (!open) setSubtitleGenerateModalClipId(null);
+          }}
+          generateEnabled={clipSubtitleGenerateEnabled(subtitleGenerateModalClip)}
+          settings={normalizeEditorSubtitleSettings(
+            subtitleGenerateModalClip.subtitleSettings ?? tenantDefaultSubtitleSettings,
+          )}
+          subtitleLocales={mergeSubtitleLocalesWithTenantPool(
+            subtitleGenerateModalClip.subtitleLocales,
+            tenant,
+          )}
+          availableLanguages={availableLanguages}
+          onSave={(payload) => {
+            handleSaveSubtitleGenerate(subtitleGenerateModalClip.id, payload);
+            setSubtitleGenerateModalClipId(null);
+          }}
+        />
+      ) : null}
+
+      {subtitleBurnModalClip ? (
+        <EditorSubtitleBurnModal
+          isOpen={!!subtitleBurnModalClipId}
+          onOpenChange={(open) => {
+            if (!open) setSubtitleBurnModalClipId(null);
+          }}
+          burnInEnabled={clipBurnInEnabled(subtitleBurnModalClip)}
+          burnInLanguage={resolveClipBurnInLanguage(subtitleBurnModalClip)}
+          subtitleLocales={mergeSubtitleLocalesWithTenantPool(subtitleBurnModalClip.subtitleLocales, tenant)}
+          onSave={(payload) => {
+            handleSaveSubtitleBurn(subtitleBurnModalClip.id, payload);
+            setSubtitleBurnModalClipId(null);
+          }}
+        />
       ) : null}
     </div>
   );

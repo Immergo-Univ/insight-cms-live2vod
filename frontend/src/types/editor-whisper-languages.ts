@@ -32,6 +32,13 @@ export const WHISPER_SOURCE_LANGUAGE_OPTIONS = [
   { code: "ro" as const, label: "Romanian" },
 ] as const;
 
+/** Human-readable label for a language code (excluding auto). */
+export function whisperLanguageLabel(code: string): string {
+  const c = code.trim().toLowerCase();
+  const o = WHISPER_SOURCE_LANGUAGE_OPTIONS.find((x) => x.code === c);
+  return o?.label ?? c;
+}
+
 export type WhisperLanguageCode = (typeof WHISPER_SOURCE_LANGUAGE_OPTIONS)[number]["code"];
 
 /** Subtitle line language: match video, or a fixed language (no "auto" on output). */

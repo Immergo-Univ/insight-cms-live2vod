@@ -4,6 +4,8 @@ import { toast } from "sonner";
 import { postTenantEnsure, type TenantDto } from "@/services/tenant-bff.service";
 import {
   buildTenantDefaultSubtitleSettings,
+  tenantAvailableLanguages,
+  tenantNewsButtonEnabled,
   tenantSubtitlesTranscriptNewsUiEnabled,
 } from "@/utils/tenant-subtitle-defaults";
 import type { EditorSubtitleSettings } from "@/types/editor";
@@ -16,13 +18,16 @@ type TenantSettingsContextValue = {
   subtitlesEnabled: boolean;
   /** When true, new clips start with subtitle mode enabled by default. */
   subtitlesDefaultEnabled: boolean;
-  /** When true, show transcript & news control on completed VOD encode rows. */
+  /** When true, show transcript & news control on clip rows. */
   subtitlesTranscriptNewsUiEnabled: boolean;
+  newsButtonEnabled: boolean;
+  newsDefaultGenerate: boolean;
+  availableLanguages: string[];
   /** Default subtitle modal options for new clips (from tenant admin). */
   tenantDefaultSubtitleSettings: EditorSubtitleSettings & {
     transcribeSpeakerDiarization: boolean;
     transcribeInferSpeakerNames: boolean;
-    transcribeNewsLocales: { en: boolean; es: boolean; he: boolean };
+    burnInLanguage: string;
   };
   /** When true, show per-clip syndication UI for YouTube. */
   syndicationYoutubeEnabled: boolean;
@@ -161,6 +166,9 @@ export function TenantSettingsProvider({ children }: { children: ReactNode }) {
   const subtitlesEnabled = !tenantId || tenant?.subtitlesEnabled !== false;
   const subtitlesDefaultEnabled = Boolean(tenantId && tenant?.subtitlesDefaultEnabled === true);
   const subtitlesTranscriptNewsUiEnabled = tenantSubtitlesTranscriptNewsUiEnabled(tenant);
+  const newsButtonEnabled = tenantNewsButtonEnabled(tenant);
+  const newsDefaultGenerate = tenant?.newsDefaultGenerate !== false;
+  const availableLanguages = tenantAvailableLanguages(tenant);
   const tenantDefaultSubtitleSettings = useMemo(
     () => buildTenantDefaultSubtitleSettings(tenant),
     [tenant],
@@ -184,6 +192,9 @@ export function TenantSettingsProvider({ children }: { children: ReactNode }) {
       subtitlesEnabled,
       subtitlesDefaultEnabled,
       subtitlesTranscriptNewsUiEnabled,
+      newsButtonEnabled,
+      newsDefaultGenerate,
+      availableLanguages,
       tenantDefaultSubtitleSettings,
       syndicationYoutubeEnabled,
       syndicationYoutubeDefaultEnabled,
@@ -204,6 +215,9 @@ export function TenantSettingsProvider({ children }: { children: ReactNode }) {
       subtitlesEnabled,
       subtitlesDefaultEnabled,
       subtitlesTranscriptNewsUiEnabled,
+      newsButtonEnabled,
+      newsDefaultGenerate,
+      availableLanguages,
       tenantDefaultSubtitleSettings,
       syndicationYoutubeEnabled,
       syndicationYoutubeDefaultEnabled,

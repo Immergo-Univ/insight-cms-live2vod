@@ -1,8 +1,7 @@
-import { useCallback, useLayoutEffect, useRef } from "react";
-import { Copy01, Link01, Share01 } from "@untitledui/icons";
+import { useCallback, useLayoutEffect, useRef, useState } from "react";
+import { Check, Link01 } from "@untitledui/icons";
 import { httpClient } from "@/services/http-client";
 import type { TranscriptNewsLocaleBlock } from "@/types/vod-job";
-import { buildTranscriptNewsArticleHtml } from "@/utils/transcript-news-article-html";
 
 function exec(cmd: string, value?: string) {
   try {
@@ -13,7 +12,7 @@ function exec(cmd: string, value?: string) {
 }
 
 interface TranscriptNewsLocalePanelProps {
-  locale: "en" | "es" | "he";
+  locale: string;
   jobId: string;
   /** Bumps when job is refetched so editor body can sync from server. */
   jobContentStamp?: string;
@@ -52,34 +51,42 @@ export function TranscriptNewsLocalePanel({
     onChange({ ...block, htmlBody: el.innerHTML });
   }, [block, onChange]);
 
-  const copyText = useCallback(
-    async (text: string) => {
-      try {
+  const [linkCopied, setLinkCopied] = useState(false);
+
+  /** Copy with a clipboard-API attempt and an execCommand fallback for non-secure contexts. */
+  const copyText = useCallback(async (text: string): Promise<boolean> => {
+    if (!text) return false;
+    try {
+      if (navigator.clipboard?.writeText) {
         await navigator.clipboard.writeText(text);
-      } catch {
-        /* ignore */
+        return true;
       }
-    },
-    [],
-  );
+    } catch {
+      /* fall back to execCommand below */
+    }
+    try {
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.setAttribute("readonly", "");
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.select();
+      const ok = document.execCommand("copy");
+      document.body.removeChild(ta);
+      return ok;
+    } catch {
+      return false;
+    }
+  }, []);
 
-  const shareTwitter = useCallback(() => {
-    const u = encodeURIComponent(publicUrl);
-    const t = encodeURIComponent(block.title || "News");
-    window.open(`https://twitter.com/intent/tweet?url=${u}&text=${t}`, "_blank", "noopener,noreferrer");
-  }, [publicUrl, block.title]);
-
-  const shareFacebook = useCallback(() => {
-    const u = encodeURIComponent(publicUrl);
-    window.open(`https://www.facebook.com/sharer/sharer.php?u=${u}`, "_blank", "noopener,noreferrer");
-  }, [publicUrl]);
-
-  const shareLinkedIn = useCallback(() => {
-    const u = encodeURIComponent(publicUrl);
-    window.open(`https://www.linkedin.com/sharing/share-offsite/?url=${u}`, "_blank", "noopener,noreferrer");
-  }, [publicUrl]);
-
-  const articleHtmlForClipboard = buildTranscriptNewsArticleHtml(block, posterSrc);
+  const copyPublicLink = useCallback(async () => {
+    const ok = await copyText(publicUrl);
+    if (ok) {
+      setLinkCopied(true);
+      window.setTimeout(() => setLinkCopied(false), 2000);
+    }
+  }, [copyText, publicUrl]);
 
   return (
     <div className="flex min-w-0 flex-col gap-4" lang={locale} dir={locale === "he" ? "rtl" : "ltr"}>
@@ -246,53 +253,29 @@ export function TranscriptNewsLocalePanel({
         <div className="flex min-w-0 flex-col gap-2 rounded-lg border border-secondary bg-secondary/40 px-2 py-2">
           <p className="text-xs font-medium text-secondary">Share</p>
           <div className="flex min-w-0 flex-wrap items-center gap-2">
-            <code className="min-w-0 flex-1 truncate rounded bg-primary px-1.5 py-1 font-mono text-[10px] text-tertiary">
+            <a
+              href={publicUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              data-no-row-select
+              title={publicUrl}
+              className="min-w-0 flex-1 truncate rounded bg-primary px-1.5 py-1 font-mono text-[10px] text-brand-secondary underline hover:text-brand-primary"
+            >
               {publicUrl}
-            </code>
+            </a>
             <button
               type="button"
               data-no-row-select
               title="Copy public link"
+              aria-label="Copy public link"
               className="flex size-8 shrink-0 items-center justify-center rounded-full border border-secondary bg-primary text-fg-quaternary hover:bg-secondary"
-              onClick={() => void copyText(publicUrl)}
+              onClick={() => void copyPublicLink()}
             >
-              <Link01 className="size-4" aria-hidden />
-            </button>
-            <button
-              type="button"
-              data-no-row-select
-              title="Copy full article HTML"
-              className="flex size-8 shrink-0 items-center justify-center rounded-full border border-secondary bg-primary text-fg-quaternary hover:bg-secondary"
-              onClick={() => void copyText(articleHtmlForClipboard)}
-            >
-              <Copy01 className="size-4" aria-hidden />
-            </button>
-            <button
-              type="button"
-              data-no-row-select
-              title="Share on X"
-              className="flex size-8 shrink-0 items-center justify-center rounded-full border border-secondary bg-primary text-fg-quaternary hover:bg-secondary"
-              onClick={shareTwitter}
-            >
-              <Share01 className="size-4" aria-hidden />
-            </button>
-            <button
-              type="button"
-              data-no-row-select
-              title="Facebook"
-              className="rounded border border-secondary bg-primary px-2 py-1 text-[10px] font-medium text-primary hover:bg-secondary"
-              onClick={shareFacebook}
-            >
-              f
-            </button>
-            <button
-              type="button"
-              data-no-row-select
-              title="LinkedIn"
-              className="rounded border border-secondary bg-primary px-2 py-1 text-[10px] font-medium text-primary hover:bg-secondary"
-              onClick={shareLinkedIn}
-            >
-              in
+              {linkCopied ? (
+                <Check className="size-4 text-fg-success-primary" aria-hidden />
+              ) : (
+                <Link01 className="size-4" aria-hidden />
+              )}
             </button>
           </div>
           <p className="text-[10px] text-tertiary">

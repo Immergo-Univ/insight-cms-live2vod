@@ -6,6 +6,7 @@ import {
 } from "./tenant-syndication-accounts.service.js";
 import { parseSyndicationAccountMaxByPlatformInput } from "./tenant-syndication-account-limits.service.js";
 import { tenantRowToApi } from "./tenant-visit.service.js";
+import { normalizeAvailableLanguages } from "../utils/tenant-languages.js";
 import { Op } from "sequelize";
 
 function models() {
@@ -145,6 +146,25 @@ export async function adminUpdateTenant(tenantId, body) {
   if (body.subtitlesDefaultNewsEn !== undefined) row.subtitlesDefaultNewsEn = Boolean(body.subtitlesDefaultNewsEn);
   if (body.subtitlesDefaultNewsEs !== undefined) row.subtitlesDefaultNewsEs = Boolean(body.subtitlesDefaultNewsEs);
   if (body.subtitlesDefaultNewsHe !== undefined) row.subtitlesDefaultNewsHe = Boolean(body.subtitlesDefaultNewsHe);
+  if (body.availableLanguages !== undefined) {
+    row.availableLanguages = normalizeAvailableLanguages(body.availableLanguages);
+  }
+  if (body.newsButtonEnabled !== undefined) {
+    row.newsButtonEnabled = Boolean(body.newsButtonEnabled);
+    row.subtitlesTranscriptNewsUiEnabled = Boolean(body.newsButtonEnabled);
+  }
+  if (body.subtitlesTranscriptNewsUiEnabled !== undefined) {
+    row.subtitlesTranscriptNewsUiEnabled = Boolean(body.subtitlesTranscriptNewsUiEnabled);
+    row.newsButtonEnabled = Boolean(body.subtitlesTranscriptNewsUiEnabled);
+  }
+  if (body.newsDefaultGenerate !== undefined) row.newsDefaultGenerate = Boolean(body.newsDefaultGenerate);
+
+  const subtitlesOn = body.subtitlesEnabled !== undefined ? Boolean(body.subtitlesEnabled) : row.subtitlesEnabled !== false;
+  if (!subtitlesOn) {
+    row.newsButtonEnabled = false;
+    row.newsDefaultGenerate = false;
+    row.subtitlesTranscriptNewsUiEnabled = false;
+  }
   if (body.syndicationYoutubeEnabled !== undefined) {
     row.syndicationYoutubeEnabled = Boolean(body.syndicationYoutubeEnabled);
   }

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { App, Button, Card, Col, Form, Input, InputNumber, Popconfirm, Row, Space, Spin, Statistic, Switch, Table, Tabs, Tag, Typography } from "antd";
+import { App, Button, Card, Col, Form, Input, InputNumber, Popconfirm, Row, Select, Space, Spin, Statistic, Switch, Table, Tabs, Tag, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useNavigate, useParams } from "react-router";
 import { useTranslation } from "react-i18next";
@@ -11,11 +11,16 @@ import {
   postTenantSyndicationFacebookSelectPage,
 } from "@/services/tenant-syndication.service";
 
+import { WHISPER_SOURCE_LANGUAGE_OPTIONS } from "@/types/editor-whisper-languages";
+
 type TenantDetail = {
   tenantId: string;
   subtitlesEnabled: boolean;
   subtitlesDefaultEnabled?: boolean;
   subtitlesTranscriptNewsUiEnabled?: boolean;
+  availableLanguages?: string[];
+  newsButtonEnabled?: boolean;
+  newsDefaultGenerate?: boolean;
   subtitlesDefaultBurnIn?: boolean;
   subtitlesDefaultDiarization?: boolean;
   subtitlesDefaultInferSpeakerNames?: boolean;
@@ -49,13 +54,12 @@ type TenantDetail = {
 type FormShape = {
   subtitlesEnabled: boolean;
   subtitlesDefaultEnabled: boolean;
-  subtitlesTranscriptNewsUiEnabled: boolean;
+  availableLanguages: string[];
+  newsButtonEnabled: boolean;
+  newsDefaultGenerate: boolean;
   subtitlesDefaultBurnIn: boolean;
   subtitlesDefaultDiarization: boolean;
   subtitlesDefaultInferSpeakerNames: boolean;
-  subtitlesDefaultNewsEn: boolean;
-  subtitlesDefaultNewsEs: boolean;
-  subtitlesDefaultNewsHe: boolean;
   syndicationYoutubeEnabled: boolean;
   syndicationYoutubeDefaultEnabled: boolean;
   syndicationTwitterEnabled: boolean;
@@ -148,13 +152,16 @@ export function AdminTenantSettingsPage() {
       form.setFieldsValue({
         subtitlesEnabled: data.subtitlesEnabled !== false,
         subtitlesDefaultEnabled: data.subtitlesDefaultEnabled === true,
-        subtitlesTranscriptNewsUiEnabled: data.subtitlesTranscriptNewsUiEnabled !== false,
+        availableLanguages:
+          Array.isArray(data.availableLanguages) && data.availableLanguages.length
+            ? data.availableLanguages
+            : ["en", "es", "he"],
+        newsButtonEnabled:
+          data.newsButtonEnabled !== false && data.subtitlesTranscriptNewsUiEnabled !== false,
+        newsDefaultGenerate: data.newsDefaultGenerate !== false,
         subtitlesDefaultBurnIn: data.subtitlesDefaultBurnIn === true,
         subtitlesDefaultDiarization: data.subtitlesDefaultDiarization !== false,
         subtitlesDefaultInferSpeakerNames: data.subtitlesDefaultInferSpeakerNames === true,
-        subtitlesDefaultNewsEn: data.subtitlesDefaultNewsEn !== false,
-        subtitlesDefaultNewsEs: data.subtitlesDefaultNewsEs !== false,
-        subtitlesDefaultNewsHe: data.subtitlesDefaultNewsHe !== false,
         syndicationYoutubeEnabled: data.syndicationYoutubeEnabled === true,
         syndicationYoutubeDefaultEnabled: data.syndicationYoutubeDefaultEnabled === true,
         syndicationTwitterEnabled: data.syndicationTwitterEnabled === true,
@@ -269,13 +276,15 @@ export function AdminTenantSettingsPage() {
     const payload = {
       subtitlesEnabled: Boolean(form.getFieldValue("subtitlesEnabled")),
       subtitlesDefaultEnabled: Boolean(form.getFieldValue("subtitlesDefaultEnabled")),
-      subtitlesTranscriptNewsUiEnabled: Boolean(form.getFieldValue("subtitlesTranscriptNewsUiEnabled")),
+      availableLanguages: (form.getFieldValue("availableLanguages") ?? []).filter(
+        (c: unknown) => typeof c === "string" && c.trim(),
+      ),
+      newsButtonEnabled: Boolean(form.getFieldValue("newsButtonEnabled")),
+      newsDefaultGenerate: Boolean(form.getFieldValue("newsDefaultGenerate")),
+      subtitlesTranscriptNewsUiEnabled: Boolean(form.getFieldValue("newsButtonEnabled")),
       subtitlesDefaultBurnIn: Boolean(form.getFieldValue("subtitlesDefaultBurnIn")),
       subtitlesDefaultDiarization: Boolean(form.getFieldValue("subtitlesDefaultDiarization")),
       subtitlesDefaultInferSpeakerNames: Boolean(form.getFieldValue("subtitlesDefaultInferSpeakerNames")),
-      subtitlesDefaultNewsEn: Boolean(form.getFieldValue("subtitlesDefaultNewsEn")),
-      subtitlesDefaultNewsEs: Boolean(form.getFieldValue("subtitlesDefaultNewsEs")),
-      subtitlesDefaultNewsHe: Boolean(form.getFieldValue("subtitlesDefaultNewsHe")),
       syndicationYoutubeEnabled: Boolean(form.getFieldValue("syndicationYoutubeEnabled")),
       syndicationYoutubeDefaultEnabled: Boolean(form.getFieldValue("syndicationYoutubeDefaultEnabled")),
       syndicationTwitterEnabled: Boolean(form.getFieldValue("syndicationTwitterEnabled")),
@@ -449,30 +458,40 @@ export function AdminTenantSettingsPage() {
     name:
       | "subtitlesEnabled"
       | "subtitlesDefaultEnabled"
-      | "subtitlesTranscriptNewsUiEnabled"
       | "subtitlesDefaultBurnIn"
       | "subtitlesDefaultDiarization"
-      | "subtitlesDefaultInferSpeakerNames"
-      | "subtitlesDefaultNewsEn"
-      | "subtitlesDefaultNewsEs"
-      | "subtitlesDefaultNewsHe";
+      | "subtitlesDefaultInferSpeakerNames";
     label: string;
     hint?: string;
   }> = [
     { name: "subtitlesEnabled", label: t("tenants.subtitlesEnabledLabel") },
     { name: "subtitlesDefaultEnabled", label: t("tenants.subtitlesDefaultEnabledLabel") },
-    {
-      name: "subtitlesTranscriptNewsUiEnabled",
-      label: t("tenants.subtitlesTranscriptNewsUiEnabledLabel"),
-      hint: t("tenants.subtitlesTranscriptNewsUiEnabledHint"),
-    },
     { name: "subtitlesDefaultBurnIn", label: t("tenants.subtitlesDefaultBurnInLabel") },
     { name: "subtitlesDefaultDiarization", label: t("tenants.subtitlesDefaultDiarizationLabel") },
     { name: "subtitlesDefaultInferSpeakerNames", label: t("tenants.subtitlesDefaultInferSpeakerNamesLabel") },
-    { name: "subtitlesDefaultNewsEn", label: t("tenants.subtitlesDefaultNewsEnLabel") },
-    { name: "subtitlesDefaultNewsEs", label: t("tenants.subtitlesDefaultNewsEsLabel") },
-    { name: "subtitlesDefaultNewsHe", label: t("tenants.subtitlesDefaultNewsHeLabel") },
   ];
+
+  const newsSwitches: Array<{
+    name: "newsButtonEnabled" | "newsDefaultGenerate";
+    label: string;
+    hint?: string;
+  }> = [
+    {
+      name: "newsButtonEnabled",
+      label: t("tenants.newsButtonEnabledLabel"),
+      hint: t("tenants.newsButtonEnabledHint"),
+    },
+    {
+      name: "newsDefaultGenerate",
+      label: t("tenants.newsDefaultGenerateLabel"),
+      hint: t("tenants.newsDefaultGenerateHint"),
+    },
+  ];
+
+  const languageOptions = WHISPER_SOURCE_LANGUAGE_OPTIONS.filter((o) => o.code !== "auto").map((o) => ({
+    label: o.label,
+    value: o.code,
+  }));
 
   const renderSwitchList = (
     items: Array<{ name: keyof FormShape; label: string; hint?: string }>,
@@ -710,6 +729,31 @@ export function AdminTenantSettingsPage() {
                 key: "subtitles",
                 label: t("tenants.tabSubtitles"),
                 children: renderSwitchList(subtitleSwitches),
+              },
+              {
+                key: "languages",
+                label: t("tenants.tabLanguages"),
+                children: (
+                  <div style={{ maxWidth: 900 }}>
+                    <Form.Item
+                      name="availableLanguages"
+                      label={t("tenants.availableLanguagesLabel")}
+                      extra={t("tenants.availableLanguagesHint")}
+                    >
+                      <Select
+                        mode="multiple"
+                        disabled={!can("tenants", "edit")}
+                        options={languageOptions}
+                        placeholder={t("tenants.availableLanguagesPlaceholder")}
+                      />
+                    </Form.Item>
+                  </div>
+                ),
+              },
+              {
+                key: "news",
+                label: t("tenants.tabNews"),
+                children: renderSwitchList(newsSwitches),
               },
               {
                 key: "syndication",

@@ -79,7 +79,10 @@ interface EditorRightPanelProps {
       verticalCropPanSettings?: EditorVerticalCropPanSettings | undefined;
     },
   ) => void;
-  onToggleClipSubtitle?: (clipId: string) => void;
+  onOpenClipSubtitleGenerate?: (clipId: string) => void;
+  onOpenClipSubtitleBurn?: (clipId: string) => void;
+  subtitlesControlsEnabled?: boolean;
+  availableLanguages?: string[];
   /** Tenant slug from URL; required for syndication API. */
   syndicationTenantId?: string;
   /** When true with tenant id, show per-clip syndication for YouTube. */
@@ -108,8 +111,9 @@ interface EditorRightPanelProps {
   onAddImageWidgetFromFile?: (clipId: string, file: File) => Promise<void>;
   /** Realtime mode: show per-clip transcript action + modal. */
   realtimeTranscriptUi?: boolean;
-  /** When true, completed VOD encodes with subtitles show transcript/news control. */
-  vodTranscriptNewsUiEnabled?: boolean;
+  /** When true, show per-clip transcript/news control. */
+  transcriptNewsUiEnabled?: boolean;
+  onUpdateClipNewsLocales?: (clipId: string, newsLocales: Record<string, boolean>) => void;
   /** Refetch VOD jobs after transcript speaker PATCH (realtime modal). */
   onVodJobsRefresh?: () => Promise<void>;
 }
@@ -151,7 +155,10 @@ export function EditorRightPanel({
   onRemoveAd,
   onAdOrderChange,
   onSaveVerticalCropFromModal,
-  onToggleClipSubtitle,
+  onOpenClipSubtitleGenerate,
+  onOpenClipSubtitleBurn,
+  subtitlesControlsEnabled = false,
+  availableLanguages = ["en", "es", "he"],
   syndicationTenantId = "",
   syndicationYoutubeEnabled = false,
   syndicationYoutubeDefaultEnabled = false,
@@ -167,7 +174,8 @@ export function EditorRightPanel({
   onAddTextWidget,
   onAddImageWidgetFromFile,
   realtimeTranscriptUi = false,
-  vodTranscriptNewsUiEnabled = true,
+  transcriptNewsUiEnabled = true,
+  onUpdateClipNewsLocales,
   onVodJobsRefresh,
 }: EditorRightPanelProps) {
   const [clipMetadataId, setClipMetadataId] = useState<string | null>(null);
@@ -286,7 +294,10 @@ export function EditorRightPanel({
                 onSelectClip(clipId);
                 setVerticalCropModalClipId(clipId);
               }}
-              onToggleClipSubtitle={onToggleClipSubtitle}
+              onOpenClipSubtitleGenerate={onOpenClipSubtitleGenerate}
+              onOpenClipSubtitleBurn={onOpenClipSubtitleBurn}
+              subtitlesControlsEnabled={subtitlesControlsEnabled}
+              availableLanguages={availableLanguages}
               onOpenSyndication={
                 (syndicationYoutubeEnabled ||
                   syndicationTwitterEnabled ||
@@ -302,7 +313,8 @@ export function EditorRightPanel({
               onAddTextWidget={onAddTextWidget}
               onAddImageWidgetFromFile={onAddImageWidgetFromFile}
               realtimeTranscriptUi={realtimeTranscriptUi}
-              vodTranscriptNewsUiEnabled={vodTranscriptNewsUiEnabled}
+              transcriptNewsUiEnabled={transcriptNewsUiEnabled}
+              onUpdateClipNewsLocales={onUpdateClipNewsLocales}
               vodJobs={vodJobs}
               clipVodEncodeErrors={clipVodEncodeErrors}
               onClipStartVodEncode={onClipStartVodEncode}

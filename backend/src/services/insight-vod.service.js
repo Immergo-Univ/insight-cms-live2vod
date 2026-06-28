@@ -17,7 +17,11 @@ import axios from "axios";
 import { config } from "../config.js";
 import { getAuthToken, resolveTenant } from "./auth.service.js";
 import { vodOutputUrls } from "./vod-output-layout.js";
-import { resolveWhisperSubtitleLanguageFromSpec } from "./subtitle-language-utils.js";
+import {
+  resolveWhisperSubtitleLanguageFromSpec,
+  subtitleLanguagesFromSpec,
+  whisperLanguageMeta,
+} from "./subtitle-language-utils.js";
 
 /** Title/description/keywords from the editor spec (clip metadata first, then root). */
 function extractMetadata(spec) {
@@ -112,23 +116,30 @@ function buildContent(spec, urls, renditions) {
 
   content.push(buildClipInfo(spec));
 
-  if (anyWhisperSubtitlesEnabled(spec) && urls.whisperSubsUrl) {
-    const whisperLang = resolveWhisperSubtitleLanguageFromSpec(spec);
-    content.push({
-      assetTypes: ["Subtitles"],
-      downloadUrl: urls.whisperSubsUrl,
-      mime_type: "text/vtt",
-      format: "vtt",
-      type: "text",
-      medium: "Subtitles",
-      typeName: "Subtitles",
-      name: whisperLang.name,
-      language: whisperLang.iso2,
-      languageName: whisperLang.name,
-      status: "pending",
-      created: now,
-      updated: now,
-    });
+  if (anyWhisperSubtitlesEnabled(spec) && urls.base) {
+    const langs = subtitleLanguagesFromSpec(spec);
+    const useLegacyNames = langs.length <= 1;
+    for (const iso2 of langs) {
+      const whisperLang = whisperLanguageMeta(iso2);
+      const downloadUrl = useLegacyNames
+        ? urls.whisperSubsUrl
+        : `${urls.base}/hls/subs_whisper_${whisperLang.iso2}.vtt`;
+      content.push({
+        assetTypes: ["Subtitles"],
+        downloadUrl,
+        mime_type: "text/vtt",
+        format: "vtt",
+        type: "text",
+        medium: "Subtitles",
+        typeName: "Subtitles",
+        name: whisperLang.name,
+        language: whisperLang.iso2,
+        languageName: whisperLang.name,
+        status: "pending",
+        created: now,
+        updated: now,
+      });
+    }
   }
 
   return content;
