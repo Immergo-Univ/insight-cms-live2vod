@@ -26,7 +26,7 @@ import {
   pickLatestRealtimeTranscribeJobForEditorClip,
   pickLatestVodEncodeJobForEditorClip,
 } from "@/types/vod-job";
-import { patchVodJobNewsBundle, patchVodJobTranscriptSpeakers } from "@/services/vod.service";
+import { backfillVodJobTranscript, patchVodJobNewsBundle, patchVodJobTranscriptSpeakers } from "@/services/vod.service";
 import type { TranscriptNewsBundle, TranscriptNewsLocaleBlock } from "@/types/vod-job";
 import { deriveTranscriptNewsBundleFromJob } from "@/utils/transcript-news-bundle";
 import {
@@ -650,6 +650,7 @@ export function EditorClipsList({
   const [imageWidgetBusy, setImageWidgetBusy] = useState(false);
   const imageWidgetFileInputRef = useRef<HTMLInputElement>(null);
   const [transcriptModalClipId, setTranscriptModalClipId] = useState<string | null>(null);
+  const [transcriptBackfillBusy, setTranscriptBackfillBusy] = useState(false);
 
   const transcriptModalClip = useMemo(
     () => (transcriptModalClipId ? clips.find((x) => x.id === transcriptModalClipId) ?? null : null),
@@ -662,6 +663,35 @@ export function EditorClipsList({
     }
     return pickLatestVodEncodeJobForEditorClip(vodJobs, transcriptModalClipId);
   }, [vodJobs, transcriptModalClipId, realtimeTranscriptUi]);
+
+  useEffect(() => {
+    if (!transcriptModalClipId || !transcriptModalJob) return;
+    if (transcriptModalJob.status !== "completed") return;
+    if (transcriptModalJob.transcriptText?.trim() || vodJobHasDiarizedTranscript(transcriptModalJob)) return;
+    if (!vodJobHadSubtitlesOrNewsRequested(transcriptModalJob)) return;
+    let cancelled = false;
+    setTranscriptBackfillBusy(true);
+    void (async () => {
+      try {
+        await backfillVodJobTranscript(transcriptModalJob.id);
+        if (!cancelled) await onVodJobsRefresh?.();
+      } catch {
+        /* artifacts may be missing; modal shows empty state */
+      } finally {
+        if (!cancelled) setTranscriptBackfillBusy(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    transcriptModalClipId,
+    transcriptModalJob?.id,
+    transcriptModalJob?.status,
+    transcriptModalJob?.updatedAt,
+    transcriptModalJob?.transcriptText,
+    onVodJobsRefresh,
+  ]);
 
   useLayoutEffect(() => {
     if (!titleEditId) return;
@@ -892,6 +922,8 @@ export function EditorClipsList({
                       channelId={channelId}
                       clipStartTime={transcriptModalClip?.startTime ?? 0}
                     />
+                  ) : transcriptBackfillBusy ? (
+                    <p className="text-tertiary">Loading transcript from encode artifacts…</p>
                   ) : (
                     <p className="text-tertiary">No text returned.</p>
                   )}

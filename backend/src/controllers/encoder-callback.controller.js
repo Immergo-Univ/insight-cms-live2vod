@@ -2,6 +2,7 @@ import { Router } from "express";
 import { config } from "../config.js";
 import { getJob, updateJob } from "../services/vod-jobs.store.js";
 import { trySyncInsightVodWhisperSubtitleLabels } from "../services/insight-vod.service.js";
+import { tryBackfillWhisperTranscriptForJob } from "../services/whisper-transcript-backfill.service.js";
 import { tryYoutubeSyndicationAfterJobCompleted } from "../services/youtube-syndication-runner.service.js";
 import { tryTwitterSyndicationAfterJobCompleted } from "../services/twitter-syndication-runner.service.js";
 import { tryFacebookSyndicationAfterJobCompleted } from "../services/facebook-syndication-runner.service.js";
@@ -69,6 +70,12 @@ encoderCallbackRouter.patch("/jobs/:jobId", requireEncoderSecret, async (req, re
   if (updatedJob) {
     if (patch.transcriptText || patch.status === "completed") {
       void trySyncInsightVodWhisperSubtitleLabels(updatedJob);
+    }
+    if (patch.status === "completed") {
+      void tryBackfillWhisperTranscriptForJob(updatedJob).catch((e) => {
+        const m = e instanceof Error ? e.message : String(e);
+        console.error(`[encoder-callback] whisper transcript backfill job=${jobId}`, m);
+      });
     }
   }
   if (patch.status === "completed") {

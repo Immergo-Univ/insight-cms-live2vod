@@ -52,6 +52,17 @@ export async function patchVodJobTranscriptSpeakers(
   return data.job;
 }
 
+export async function backfillVodJobTranscript(jobId: string): Promise<VodJobRecord> {
+  const client = httpClient.getBffClient();
+  const tenantId = httpClient.getTenantId();
+  const { data } = await client.post<{ ok?: boolean; job: VodJobRecord }>(
+    `/vod/jobs/${encodeURIComponent(jobId)}/backfill-transcript`,
+    {},
+    { params: { tenantId } },
+  );
+  return data.job;
+}
+
 /** Persist rich news fields (WYSIWYG + metadata) for a realtime transcript job. */
 export async function patchVodJobNewsBundle(
   jobId: string,

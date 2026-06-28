@@ -7,6 +7,7 @@ import {
 } from "../services/vod-jobs.store.js";
 import { startBackgroundVodJob, requestCancelJob } from "../services/vod-encode-runner.service.js";
 import { listTenantVodMp4s } from "../services/vod-s3.service.js";
+import { backfillWhisperTranscriptByJobId } from "../services/whisper-transcript-backfill.service.js";
 import { getRequestTenantId } from "../utils/tenant-cipher.js";
 
 export const vodRouter = Router();
@@ -86,6 +87,29 @@ function rebuildTranscriptTextFromDiarization(di) {
     })
     .join("\n\n");
 }
+
+vodRouter.post("/jobs/:jobId/backfill-transcript", async (req, res) => {
+  try {
+    const tenantId = getTenantId(req);
+    if (!tenantId) {
+      return res.status(400).json({ error: "Missing tenantId (query or x-tenant-id header)" });
+    }
+    await resolveTenant(tenantId);
+    const { jobId } = req.params;
+    const job = await getJob(jobId);
+    if (!job || job.tenantId !== tenantId) {
+      return res.status(404).json({ error: "Job not found" });
+    }
+    const updated = await backfillWhisperTranscriptByJobId(jobId);
+    if (!updated?.transcriptText?.trim()) {
+      return res.status(404).json({ error: "No transcript artifacts found for this job" });
+    }
+    res.json({ ok: true, job: updated });
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    res.status(400).json({ error: message });
+  }
+});
 
 vodRouter.patch("/jobs/:jobId", async (req, res) => {
   try {
