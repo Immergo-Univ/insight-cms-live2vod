@@ -1,6 +1,6 @@
 import { getSequelize } from "../db/sequelize.js";
 import { normalizeSyndicationAccountMaxByPlatform } from "./tenant-syndication-account-limits.service.js";
-import { normalizeAvailableLanguages } from "../utils/tenant-languages.js";
+import { normalizeAvailableLanguages, normalizeDefaultBurnInLanguage } from "../utils/tenant-languages.js";
 
 /**
  * Create or update tenant row when the timeline (or app) is visited for a tenantId.
@@ -82,6 +82,10 @@ export function tenantRowToApi(plain) {
     subtitlesTranscriptNewsUiEnabled:
       plain.newsButtonEnabled !== false && plain.subtitlesTranscriptNewsUiEnabled !== false,
     subtitlesDefaultBurnIn: plain.subtitlesDefaultBurnIn === true,
+    subtitlesDefaultBurnInLanguage: normalizeDefaultBurnInLanguage(
+      plain.subtitlesDefaultBurnInLanguage,
+      plain.availableLanguages,
+    ),
     subtitlesDefaultDiarization: plain.subtitlesDefaultDiarization !== false,
     subtitlesDefaultInferSpeakerNames: plain.subtitlesDefaultInferSpeakerNames === true,
     subtitlesDefaultNewsEn: plain.subtitlesDefaultNewsEn !== false,

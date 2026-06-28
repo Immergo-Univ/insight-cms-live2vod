@@ -6,7 +6,7 @@ import {
 } from "./tenant-syndication-accounts.service.js";
 import { parseSyndicationAccountMaxByPlatformInput } from "./tenant-syndication-account-limits.service.js";
 import { tenantRowToApi } from "./tenant-visit.service.js";
-import { normalizeAvailableLanguages } from "../utils/tenant-languages.js";
+import { normalizeAvailableLanguages, normalizeDefaultBurnInLanguage } from "../utils/tenant-languages.js";
 import { Op } from "sequelize";
 
 function models() {
@@ -148,6 +148,14 @@ export async function adminUpdateTenant(tenantId, body) {
   if (body.subtitlesDefaultNewsHe !== undefined) row.subtitlesDefaultNewsHe = Boolean(body.subtitlesDefaultNewsHe);
   if (body.availableLanguages !== undefined) {
     row.availableLanguages = normalizeAvailableLanguages(body.availableLanguages);
+  }
+  if (body.subtitlesDefaultBurnInLanguage !== undefined || body.availableLanguages !== undefined) {
+    row.subtitlesDefaultBurnInLanguage = normalizeDefaultBurnInLanguage(
+      body.subtitlesDefaultBurnInLanguage !== undefined
+        ? body.subtitlesDefaultBurnInLanguage
+        : row.subtitlesDefaultBurnInLanguage,
+      row.availableLanguages,
+    );
   }
   if (body.newsButtonEnabled !== undefined) {
     row.newsButtonEnabled = Boolean(body.newsButtonEnabled);

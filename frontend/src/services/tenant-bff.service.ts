@@ -7,6 +7,7 @@ export type TenantDto = {
   newsDefaultGenerate?: boolean;
   subtitlesTranscriptNewsUiEnabled?: boolean;
   subtitlesDefaultBurnIn?: boolean;
+  subtitlesDefaultBurnInLanguage?: string;
   subtitlesDefaultDiarization?: boolean;
   subtitlesDefaultInferSpeakerNames?: boolean;
   subtitlesDefaultNewsEn?: boolean;

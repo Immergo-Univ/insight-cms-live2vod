@@ -19,3 +19,18 @@ export function normalizeAvailableLanguages(raw) {
   }
   return out.length ? out : [...DEFAULT_TENANT_AVAILABLE_LANGUAGES];
 }
+
+/**
+ * Pick a valid default burn-in language from tenant pool.
+ * @param {unknown} rawLang
+ * @param {unknown} poolRaw
+ * @returns {string}
+ */
+export function normalizeDefaultBurnInLanguage(rawLang, poolRaw) {
+  const pool = normalizeAvailableLanguages(poolRaw);
+  const code = String(rawLang || "")
+    .trim()
+    .toLowerCase();
+  if (code && pool.includes(code)) return code;
+  return pool[0] ?? "en";
+}

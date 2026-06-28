@@ -11,7 +11,7 @@ import {
   postTenantSyndicationFacebookSelectPage,
 } from "@/services/tenant-syndication.service";
 
-import { WHISPER_SOURCE_LANGUAGE_OPTIONS } from "@/types/editor-whisper-languages";
+import { WHISPER_SOURCE_LANGUAGE_OPTIONS, whisperLanguageLabel } from "@/types/editor-whisper-languages";
 
 type TenantDetail = {
   tenantId: string;
@@ -22,6 +22,7 @@ type TenantDetail = {
   newsButtonEnabled?: boolean;
   newsDefaultGenerate?: boolean;
   subtitlesDefaultBurnIn?: boolean;
+  subtitlesDefaultBurnInLanguage?: string;
   subtitlesDefaultDiarization?: boolean;
   subtitlesDefaultInferSpeakerNames?: boolean;
   subtitlesDefaultNewsEn?: boolean;
@@ -58,6 +59,7 @@ type FormShape = {
   newsButtonEnabled: boolean;
   newsDefaultGenerate: boolean;
   subtitlesDefaultBurnIn: boolean;
+  subtitlesDefaultBurnInLanguage: string;
   subtitlesDefaultDiarization: boolean;
   subtitlesDefaultInferSpeakerNames: boolean;
   syndicationYoutubeEnabled: boolean;
@@ -147,19 +149,29 @@ export function AdminTenantSettingsPage() {
   const [syndicationAccounts, setSyndicationAccounts] = useState<SyndicationAccountRow[]>([]);
   const [syndicationAccountsLoading, setSyndicationAccountsLoading] = useState(false);
 
+  const burnInDefaultOn = Form.useWatch("subtitlesDefaultBurnIn", form);
+  const watchedAvailableLanguages = Form.useWatch("availableLanguages", form);
+
   const setFormFromDetail = useCallback(
     (data: TenantDetail) => {
+      const pool =
+        Array.isArray(data.availableLanguages) && data.availableLanguages.length
+          ? data.availableLanguages
+          : ["en", "es", "he"];
       form.setFieldsValue({
         subtitlesEnabled: data.subtitlesEnabled !== false,
         subtitlesDefaultEnabled: data.subtitlesDefaultEnabled === true,
-        availableLanguages:
-          Array.isArray(data.availableLanguages) && data.availableLanguages.length
-            ? data.availableLanguages
-            : ["en", "es", "he"],
+        availableLanguages: pool,
         newsButtonEnabled:
           data.newsButtonEnabled !== false && data.subtitlesTranscriptNewsUiEnabled !== false,
         newsDefaultGenerate: data.newsDefaultGenerate !== false,
         subtitlesDefaultBurnIn: data.subtitlesDefaultBurnIn === true,
+        subtitlesDefaultBurnInLanguage: (() => {
+          const raw = String(data.subtitlesDefaultBurnInLanguage || "")
+            .trim()
+            .toLowerCase();
+          return raw && pool.includes(raw) ? raw : (pool[0] ?? "en");
+        })(),
         subtitlesDefaultDiarization: data.subtitlesDefaultDiarization !== false,
         subtitlesDefaultInferSpeakerNames: data.subtitlesDefaultInferSpeakerNames === true,
         syndicationYoutubeEnabled: data.syndicationYoutubeEnabled === true,
@@ -179,6 +191,17 @@ export function AdminTenantSettingsPage() {
     },
     [form],
   );
+
+  useEffect(() => {
+    const pool = Array.isArray(watchedAvailableLanguages)
+      ? watchedAvailableLanguages.filter((c): c is string => typeof c === "string" && !!c.trim())
+      : [];
+    if (pool.length === 0) return;
+    const cur = form.getFieldValue("subtitlesDefaultBurnInLanguage");
+    if (!cur || !pool.includes(cur)) {
+      form.setFieldValue("subtitlesDefaultBurnInLanguage", pool[0]);
+    }
+  }, [watchedAvailableLanguages, form]);
 
   const loadTenant = useCallback(async () => {
     if (!tenantId) return;
@@ -283,6 +306,7 @@ export function AdminTenantSettingsPage() {
       newsDefaultGenerate: Boolean(form.getFieldValue("newsDefaultGenerate")),
       subtitlesTranscriptNewsUiEnabled: Boolean(form.getFieldValue("newsButtonEnabled")),
       subtitlesDefaultBurnIn: Boolean(form.getFieldValue("subtitlesDefaultBurnIn")),
+      subtitlesDefaultBurnInLanguage: String(form.getFieldValue("subtitlesDefaultBurnInLanguage") || "en").trim(),
       subtitlesDefaultDiarization: Boolean(form.getFieldValue("subtitlesDefaultDiarization")),
       subtitlesDefaultInferSpeakerNames: Boolean(form.getFieldValue("subtitlesDefaultInferSpeakerNames")),
       syndicationYoutubeEnabled: Boolean(form.getFieldValue("syndicationYoutubeEnabled")),
@@ -492,6 +516,54 @@ export function AdminTenantSettingsPage() {
     label: o.label,
     value: o.code,
   }));
+
+  const renderSubtitlesTab = () => {
+    const pool = Array.isArray(watchedAvailableLanguages)
+      ? watchedAvailableLanguages.filter((c): c is string => typeof c === "string" && !!c.trim())
+      : [];
+    const burnLangOptions = pool.map((code) => ({
+      value: code,
+      label: whisperLanguageLabel(code),
+    }));
+
+    return (
+      <div style={{ maxWidth: 900 }}>
+        {subtitleSwitches.map((item) => (
+          <div key={item.name}>
+            <Form.Item style={{ marginBottom: 14 }}>
+              <Space align="start" size={10}>
+                <Form.Item name={item.name} valuePropName="checked" noStyle>
+                  <Switch disabled={!can("tenants", "edit")} />
+                </Form.Item>
+                <div>
+                  <Typography.Text>{item.label}</Typography.Text>
+                  {item.hint ? (
+                    <Typography.Paragraph type="secondary" style={{ marginBottom: 0, marginTop: 4 }}>
+                      {item.hint}
+                    </Typography.Paragraph>
+                  ) : null}
+                </div>
+              </Space>
+            </Form.Item>
+            {item.name === "subtitlesDefaultBurnIn" && burnInDefaultOn ? (
+              <Form.Item
+                name="subtitlesDefaultBurnInLanguage"
+                label={t("tenants.subtitlesDefaultBurnInLanguageLabel")}
+                extra={t("tenants.subtitlesDefaultBurnInLanguageHint")}
+                style={{ marginLeft: 48, marginTop: -8, marginBottom: 16, maxWidth: 360 }}
+              >
+                <Select
+                  disabled={!can("tenants", "edit") || burnLangOptions.length === 0}
+                  options={burnLangOptions}
+                  placeholder={t("tenants.subtitlesDefaultBurnInLanguagePlaceholder")}
+                />
+              </Form.Item>
+            ) : null}
+          </div>
+        ))}
+      </div>
+    );
+  };
 
   const renderSwitchList = (
     items: Array<{ name: keyof FormShape; label: string; hint?: string }>,
@@ -728,7 +800,7 @@ export function AdminTenantSettingsPage() {
               {
                 key: "subtitles",
                 label: t("tenants.tabSubtitles"),
-                children: renderSwitchList(subtitleSwitches),
+                children: renderSubtitlesTab(),
               },
               {
                 key: "languages",

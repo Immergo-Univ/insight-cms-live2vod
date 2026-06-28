@@ -47,6 +47,16 @@ export function tenantNewsButtonEnabled(tenant: TenantDto | null | undefined): b
   return tenant.subtitlesTranscriptNewsUiEnabled !== false;
 }
 
+/** Default burn-in language from tenant admin (must be in pool). */
+export function tenantDefaultBurnInLanguage(tenant: TenantDto | null | undefined): string {
+  const langs = tenantAvailableLanguages(tenant);
+  const raw = String(tenant?.subtitlesDefaultBurnInLanguage || "")
+    .trim()
+    .toLowerCase();
+  if (raw && langs.includes(raw)) return raw;
+  return langs[0] ?? "en";
+}
+
 /** Default subtitle modal options for new clips (tenant admin overrides). */
 export function buildTenantDefaultSubtitleSettings(
   tenant: TenantDto | null | undefined,
@@ -55,16 +65,16 @@ export function buildTenantDefaultSubtitleSettings(
   transcribeInferSpeakerNames: boolean;
   burnInLanguage: string;
 } {
-  const langs = tenantAvailableLanguages(tenant);
+  const burnLang = tenantDefaultBurnInLanguage(tenant);
   const normalized = normalizeEditorSubtitleSettings({
     ...DEFAULT_EDITOR_SUBTITLE_SETTINGS,
-    burnInLanguage: langs[0] ?? "en",
+    burnInLanguage: burnLang,
     transcribeSpeakerDiarization: tenant?.subtitlesDefaultDiarization !== false,
     transcribeInferSpeakerNames: tenant?.subtitlesDefaultInferSpeakerNames === true,
   });
   return {
     ...normalized,
-    burnInLanguage: normalized.burnInLanguage ?? langs[0] ?? "en",
+    burnInLanguage: burnLang,
   };
 }
 
