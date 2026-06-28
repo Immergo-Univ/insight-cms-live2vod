@@ -100,11 +100,16 @@ vodRouter.post("/jobs/:jobId/backfill-transcript", async (req, res) => {
     if (!job || job.tenantId !== tenantId) {
       return res.status(404).json({ error: "Job not found" });
     }
-    const updated = await backfillWhisperTranscriptByJobId(jobId);
-    if (!updated?.transcriptText?.trim()) {
-      return res.status(404).json({ error: "No transcript artifacts found for this job" });
+    const result = await backfillWhisperTranscriptByJobId(jobId);
+    if (!result.ok || !result.job?.transcriptText?.trim()) {
+      return res.status(404).json({
+        error: "No transcript artifacts found for this job",
+        reason: result.reason,
+        detail: result.detail,
+        urls: result.urls,
+      });
     }
-    res.json({ ok: true, job: updated });
+    res.json({ ok: true, reason: result.reason, job: result.job });
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
     res.status(400).json({ error: message });

@@ -119,25 +119,57 @@ async function fetchText(url, timeoutMs = 20_000) {
 }
 
 /**
+ * @typedef {(
+ *   | "already_present"
+ *   | "missing_job_or_guid"
+ *   | "subtitles_not_requested"
+ *   | "no_cdn_urls"
+ *   | "artifacts_not_found"
+ *   | "empty_transcript"
+ *   | "ok"
+ * )} WhisperBackfillReason
+ */
+
+/**
+ * @typedef {object} WhisperBackfillResult
+ * @property {boolean} ok
+ * @property {WhisperBackfillReason} reason
+ * @property {import("./vod-jobs.store.js").VodJob | null} job
+ * @property {{ srtUrl?: string, vttUrl?: string }} [urls]
+ * @property {string} [detail] last fetch/parse error, for diagnostics
+ */
+
+/**
+ * Backfill the Whisper transcript from public CDN artifacts and report a precise reason,
+ * so the UI can tell the user WHY it is empty (subtitles off, artifacts missing, etc.).
+ *
  * @param {import("./vod-jobs.store.js").VodJob} job
  * @param {{ maxAttempts?: number }} [opts]
- * @returns {Promise<import("./vod-jobs.store.js").VodJob | null>}
+ * @returns {Promise<WhisperBackfillResult>}
  */
-export async function tryBackfillWhisperTranscriptForJob(job, opts = {}) {
-  if (!job?.id || !job.vodGuid) return null;
-  if (String(job.transcriptText || "").trim()) return job;
+export async function backfillWhisperTranscriptDetailed(job, opts = {}) {
+  if (!job?.id || !job.vodGuid) {
+    return { ok: false, reason: "missing_job_or_guid", job: job ?? null };
+  }
+  if (String(job.transcriptText || "").trim()) {
+    return { ok: true, reason: "already_present", job };
+  }
   const spec = job.editorSpec && typeof job.editorSpec === "object" ? job.editorSpec : null;
-  if (!whisperSubtitlesEnabledInSpec(spec)) return null;
+  if (!whisperSubtitlesEnabledInSpec(spec)) {
+    return { ok: false, reason: "subtitles_not_requested", job };
+  }
 
   const urls = await whisperArtifactUrlsForJob(job);
   if (!urls) {
     console.warn(`[whisper-backfill] no CDN URLs job=${job.id} guid=${job.vodGuid}`);
-    return null;
+    return { ok: false, reason: "no_cdn_urls", job };
   }
 
   const maxAttempts = opts.maxAttempts ?? 4;
   /** @type {string} */
   let transcriptText = "";
+  /** @type {string} */
+  let lastError = "";
 
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     try {
@@ -154,9 +186,9 @@ export async function tryBackfillWhisperTranscriptForJob(job, opts = {}) {
       }
       if (transcriptText.trim()) break;
     } catch (e) {
-      const m = e instanceof Error ? e.message : String(e);
+      lastError = e instanceof Error ? e.message : String(e);
       if (attempt === maxAttempts - 1) {
-        console.warn(`[whisper-backfill] failed job=${job.id} guid=${job.vodGuid}: ${m}`);
+        console.warn(`[whisper-backfill] failed job=${job.id} guid=${job.vodGuid}: ${lastError}`);
       }
     }
     if (attempt < maxAttempts - 1) {
@@ -164,7 +196,15 @@ export async function tryBackfillWhisperTranscriptForJob(job, opts = {}) {
     }
   }
 
-  if (!transcriptText.trim()) return null;
+  if (!transcriptText.trim()) {
+    return {
+      ok: false,
+      reason: lastError ? "artifacts_not_found" : "empty_transcript",
+      job,
+      urls: { srtUrl: urls.srtUrl, vttUrl: urls.vttUrl },
+      detail: lastError || undefined,
+    };
+  }
 
   const updated = await updateJob(job.id, {
     transcriptText: transcriptText.trim(),
@@ -173,15 +213,25 @@ export async function tryBackfillWhisperTranscriptForJob(job, opts = {}) {
   console.log(
     `[whisper-backfill] stored transcript job=${job.id} guid=${job.vodGuid} chars=${transcriptText.length}`,
   );
-  return updated;
+  return { ok: true, reason: "ok", job: updated };
+}
+
+/**
+ * @param {import("./vod-jobs.store.js").VodJob} job
+ * @param {{ maxAttempts?: number }} [opts]
+ * @returns {Promise<import("./vod-jobs.store.js").VodJob | null>}
+ */
+export async function tryBackfillWhisperTranscriptForJob(job, opts = {}) {
+  const result = await backfillWhisperTranscriptDetailed(job, opts);
+  return result.ok ? result.job : null;
 }
 
 /**
  * @param {string} jobId
- * @returns {Promise<import("./vod-jobs.store.js").VodJob | null>}
+ * @returns {Promise<WhisperBackfillResult>}
  */
 export async function backfillWhisperTranscriptByJobId(jobId) {
   const job = await getJob(jobId);
-  if (!job) return null;
-  return tryBackfillWhisperTranscriptForJob(job, { maxAttempts: 6 });
+  if (!job) return { ok: false, reason: "missing_job_or_guid", job: null };
+  return backfillWhisperTranscriptDetailed(job, { maxAttempts: 6 });
 }

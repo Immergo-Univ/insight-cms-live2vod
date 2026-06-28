@@ -112,6 +112,24 @@ function vodEncodeJobSupportsTranscriptModal(
   return false;
 }
 
+/** Human-friendly explanation for why the transcript backfill came back empty. */
+function transcriptBackfillReasonMessage(reason: string | null): string {
+  switch (reason) {
+    case "subtitles_not_requested":
+      return "This clip was encoded without subtitles enabled, so there is no transcript. Re-encode with subtitles turned on.";
+    case "no_cdn_urls":
+      return "Could not resolve the CDN location for this clip's subtitle artifacts.";
+    case "artifacts_not_found":
+      return "No subtitle artifacts (whisper.srt/vtt) were found on the CDN yet. If the encoder agent is deployed with OPENAI_API_KEY, they should appear shortly after the transcribe step.";
+    case "empty_transcript":
+      return "Subtitle artifacts were found but contained no text.";
+    case "missing_job_or_guid":
+      return "This encode job has no published VOD yet.";
+    default:
+      return "No text returned.";
+  }
+}
+
 function emptyNewsBlock(): TranscriptNewsLocaleBlock {
   const d = new Date();
   return {
@@ -651,6 +669,7 @@ export function EditorClipsList({
   const imageWidgetFileInputRef = useRef<HTMLInputElement>(null);
   const [transcriptModalClipId, setTranscriptModalClipId] = useState<string | null>(null);
   const [transcriptBackfillBusy, setTranscriptBackfillBusy] = useState(false);
+  const [transcriptBackfillReason, setTranscriptBackfillReason] = useState<string | null>(null);
 
   const transcriptModalClip = useMemo(
     () => (transcriptModalClipId ? clips.find((x) => x.id === transcriptModalClipId) ?? null : null),
@@ -671,12 +690,18 @@ export function EditorClipsList({
     if (!vodJobHadSubtitlesOrNewsRequested(transcriptModalJob)) return;
     let cancelled = false;
     setTranscriptBackfillBusy(true);
+    setTranscriptBackfillReason(null);
     void (async () => {
       try {
-        await backfillVodJobTranscript(transcriptModalJob.id);
-        if (!cancelled) await onVodJobsRefresh?.();
+        const result = await backfillVodJobTranscript(transcriptModalJob.id);
+        if (cancelled) return;
+        if (result.ok) {
+          await onVodJobsRefresh?.();
+        } else {
+          setTranscriptBackfillReason(result.reason ?? "artifacts_not_found");
+        }
       } catch {
-        /* artifacts may be missing; modal shows empty state */
+        if (!cancelled) setTranscriptBackfillReason("artifacts_not_found");
       } finally {
         if (!cancelled) setTranscriptBackfillBusy(false);
       }
@@ -868,7 +893,10 @@ export function EditorClipsList({
         <ModalOverlay
           isOpen
           onOpenChange={(open) => {
-            if (!open) setTranscriptModalClipId(null);
+            if (!open) {
+              setTranscriptModalClipId(null);
+              setTranscriptBackfillReason(null);
+            }
           }}
           isDismissable
           isKeyboardDismissDisabled={false}
@@ -925,7 +953,9 @@ export function EditorClipsList({
                   ) : transcriptBackfillBusy ? (
                     <p className="text-tertiary">Loading transcript from encode artifacts…</p>
                   ) : (
-                    <p className="text-tertiary">No text returned.</p>
+                    <p className="text-tertiary">
+                      {transcriptBackfillReasonMessage(transcriptBackfillReason)}
+                    </p>
                   )}
                 </div>
               </div>
