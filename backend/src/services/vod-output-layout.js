@@ -106,6 +106,7 @@ export function vodOutputUrls({
     base,
     masterUrl: `${base}/hls/master.m3u8`,
     posterUrl: `${base}/poster.jpg`,
+    whisperSubsUrl: `${base}/hls/subs_whisper.vtt`,
     mp4Entries,
   };
 }

@@ -350,6 +350,8 @@ export interface EditorSubtitleTranscribeNewsLocales {
  */
 export interface EditorSubtitleSettings {
   style: EditorSubtitleStyle;
+  /** When true, burn generated subtitles into the encoded video (default false). */
+  burnIn?: boolean;
   whisperSourceLanguage: WhisperLanguageCode;
   whisperOutputLanguage: WhisperSubtitleOutputLanguage;
   /** OpenAI diarization for burned subs + transcript (default true when omitted). */
@@ -510,6 +512,8 @@ export interface EditorClipSyndication {
 /** Sent in JSON when subtitle mode is on. */
 export interface EditorSubtitlesConfig {
   enabled: true;
+  /** When true, burn SRT into mezzanine before renditions (default false). */
+  burnIn?: boolean;
   whisperSourceLanguage: WhisperLanguageCode;
   whisperOutputLanguage: WhisperSubtitleOutputLanguage;
   style: EditorSubtitleStyle;
@@ -522,6 +526,7 @@ export interface EditorSubtitlesConfig {
 
 /** Default subtitle / whisper options for a new sub-clip or when fields are missing (clipping / timeline encode). */
 export const DEFAULT_EDITOR_SUBTITLE_SETTINGS: EditorSubtitleSettings = {
+  burnIn: false,
   whisperSourceLanguage: "auto",
   whisperOutputLanguage: "same",
   style: {
@@ -557,6 +562,7 @@ export function normalizeEditorSubtitleSettings(
     ...base.transcribeNewsLocales,
   };
   return {
+    burnIn: base.burnIn === true,
     whisperSourceLanguage: base.whisperSourceLanguage,
     whisperOutputLanguage: base.whisperOutputLanguage,
     style,

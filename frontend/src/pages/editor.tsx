@@ -218,6 +218,7 @@ function editorSubClipToStateJsonClip(c: EditorSubClip): EditorStateJsonClip {
       ? {
           subtitles: {
             enabled: true as const,
+            ...(st.burnIn ? { burnIn: true as const } : {}),
             whisperSourceLanguage: st.whisperSourceLanguage,
             whisperOutputLanguage: st.whisperOutputLanguage,
             style: { ...st.style },

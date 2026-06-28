@@ -29,6 +29,14 @@ function extractMetadata(spec) {
   return { title, description, keywords, mainCategory };
 }
 
+/** True when any clip (or root) requests Whisper subtitles. */
+function anyWhisperSubtitlesEnabled(spec) {
+  if (spec?.subtitles && typeof spec.subtitles === "object" && spec.subtitles.enabled === true) {
+    return true;
+  }
+  return Array.isArray(spec?.clips) && spec.clips.some((c) => c?.subtitles?.enabled === true);
+}
+
 /** Legacy-style clipInfo content entry. Times in ms, duration in seconds (placeholder until finish). */
 function buildClipInfo(spec) {
   const clips = Array.isArray(spec?.clips) ? spec.clips : [];
@@ -102,6 +110,25 @@ function buildContent(spec, urls, renditions) {
   });
 
   content.push(buildClipInfo(spec));
+
+  if (anyWhisperSubtitlesEnabled(spec) && urls.whisperSubsUrl) {
+    content.push({
+      assetTypes: ["Subtitles"],
+      downloadUrl: urls.whisperSubsUrl,
+      mime_type: "text/vtt",
+      format: "vtt",
+      type: "text",
+      medium: "Subtitles",
+      typeName: "Subtitles",
+      name: "Whisper",
+      language: "def",
+      languageName: "Whisper",
+      status: "pending",
+      created: now,
+      updated: now,
+    });
+  }
+
   return content;
 }
 

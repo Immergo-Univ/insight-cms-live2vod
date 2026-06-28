@@ -79,6 +79,29 @@ hls    = {base}/hls/{bitrate}/streamPlaylist.m3u8 + segmentos
 }
 ```
 
+## Subtítulos Whisper (OpenAI STT)
+
+Cuando el editor activa `subtitleMode`, el `spec` incluye `clips[].subtitles`:
+
+```jsonc
+{
+  "enabled": true,
+  "burnIn": false,
+  "whisperSourceLanguage": "auto",
+  "whisperOutputLanguage": "same",
+  "style": { "fontSizePx": 28, "textColor": "#FFFFFF", "outlineColor": "#000000", "outlineWidthPx": 3 },
+  "transcribeSpeakerDiarization": true,
+  "transcribeInferSpeakerNames": false
+}
+```
+
+- `burnIn: false` (default): STT + sidecar HLS + entry `Subtitles` en Mongo (`subs_whisper.vtt`).
+- `burnIn: true`: además quema subtítulos en el mezzanine antes de las renditions.
+
+El BFF pre-crea `content[]` con `assetTypes: ["Subtitles"]` apuntando a `{base}/hls/subs_whisper.vtt`.
+
+Ver deploy/env en `immergo-vod-encoder-api/docs/WHISPER-SUBTITLES.md`.
+
 ## Notificación de avance
 
 - El encoder hace `PATCH /api/encoder/jobs/:jobId` al BFF (igual que hoy) → `vod-jobs.store` → WebSocket `/api/ws/vod`.

@@ -72,6 +72,14 @@ export function EditorSubtitleStyleModal({
               <Checkbox
                 size="sm"
                 className="w-full min-w-0"
+                isSelected={draft.burnIn}
+                onChange={(v) => setDraft((d) => ({ ...d, burnIn: v }))}
+                label="Burn subtitles into video"
+                hint="When on, the encoder embeds subtitles in the video pixels (ffmpeg). When off, only HLS sidecar tracks and the Subtitles asset are generated."
+              />
+              <Checkbox
+                size="sm"
+                className="w-full min-w-0"
                 isSelected={draft.transcribeSpeakerDiarization}
                 onChange={(v) =>
                   setDraft((d) => ({
