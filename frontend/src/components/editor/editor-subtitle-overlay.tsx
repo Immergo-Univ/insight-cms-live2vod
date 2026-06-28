@@ -1,11 +1,5 @@
-import { useCallback, useState } from "react";
-import { Edit03 } from "@untitledui/icons";
 import type { EditorSubtitleSettings, EditorSubtitleStyle } from "@/types/editor";
 import type { VideoContentRect } from "./editor-vertical-crop-overlay";
-import { EditorSubtitleStyleModal } from "./editor-subtitle-style-modal";
-
-const overlayButtonClass =
-  "flex size-9 cursor-pointer items-center justify-center rounded-md bg-black/60 text-white transition-colors hover:bg-black/80 focus:outline-none focus:ring-2 focus:ring-white/50";
 
 /** Scale preview font to the visible video area (reference: 720p height). */
 function previewFontSizePx(style: EditorSubtitleStyle, contentH: number) {
@@ -30,14 +24,11 @@ function outlineTextShadow(widthPx: number, color: string): string {
 interface EditorSubtitleOverlayProps {
   contentRect: VideoContentRect;
   settings: EditorSubtitleSettings;
-  onSettingsChange: (next: EditorSubtitleSettings) => void;
 }
 
-export function EditorSubtitleOverlay({ contentRect, settings, onSettingsChange }: EditorSubtitleOverlayProps) {
+/** Read-only burn-in preview; configure via the clip row burn-in control. */
+export function EditorSubtitleOverlay({ contentRect, settings }: EditorSubtitleOverlayProps) {
   const { style } = settings;
-  const [modalOpen, setModalOpen] = useState(false);
-
-  const openModal = useCallback(() => setModalOpen(true), []);
 
   if (contentRect.w <= 0 || contentRect.h <= 0) return null;
 
@@ -45,48 +36,30 @@ export function EditorSubtitleOverlay({ contentRect, settings, onSettingsChange 
   const shadow = outlineTextShadow(style.outlineWidthPx, style.outlineColor);
 
   return (
-    <>
-      <div
-        className="pointer-events-none absolute z-[6]"
-        style={{
-          left: contentRect.x,
-          top: contentRect.y,
-          width: contentRect.w,
-          height: contentRect.h,
-        }}
-      >
-        <div className="pointer-events-none absolute right-3 bottom-4 left-3 flex items-end justify-center">
-          <div className="pointer-events-auto flex max-w-full items-center gap-2 rounded-md bg-black/35 px-2 py-1.5">
-            <span
-              className="max-w-[min(100%,28rem)] break-words text-center font-semibold"
-              style={{
-                fontSize: fs,
-                color: style.textColor,
-                textShadow: shadow,
-                lineHeight: 1.2,
-              }}
-            >
-              Example text
-            </span>
-            <button
-              type="button"
-              onClick={openModal}
-              className={overlayButtonClass}
-              title="Edit subtitle style"
-              aria-label="Edit subtitle style"
-            >
-              <Edit03 className="size-5" aria-hidden />
-            </button>
-          </div>
+    <div
+      className="pointer-events-none absolute z-[6]"
+      style={{
+        left: contentRect.x,
+        top: contentRect.y,
+        width: contentRect.w,
+        height: contentRect.h,
+      }}
+    >
+      <div className="pointer-events-none absolute right-3 bottom-4 left-3 flex items-end justify-center">
+        <div className="flex max-w-full items-center rounded-md bg-black/35 px-3 py-1.5">
+          <span
+            className="max-w-[min(100%,28rem)] break-words text-center font-semibold"
+            style={{
+              fontSize: fs,
+              color: style.textColor,
+              textShadow: shadow,
+              lineHeight: 1.2,
+            }}
+          >
+            Example text
+          </span>
         </div>
       </div>
-
-      <EditorSubtitleStyleModal
-        isOpen={modalOpen}
-        onOpenChange={setModalOpen}
-        settings={settings}
-        onSave={onSettingsChange}
-      />
-    </>
+    </div>
   );
 }

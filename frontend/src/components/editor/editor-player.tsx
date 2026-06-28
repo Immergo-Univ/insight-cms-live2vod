@@ -52,10 +52,9 @@ interface EditorPlayerProps {
   verticalCropActive?: boolean;
   verticalCropCenterX?: number;
   onVerticalCropCenterXChange?: (centerX: number) => void;
-  /** Burned-in subtitle preview (example text) over the picture. */
+  /** Burned-in subtitle preview (example text) over the picture when burn-in is enabled. */
   subtitleOverlayActive?: boolean;
   subtitleSettings?: EditorSubtitleSettings;
-  onSubtitleSettingsChange?: (next: EditorSubtitleSettings) => void;
   /** Per-clip overlay widgets (text / image); positions are relative to the widget viewport (full frame or 9:16 strip). */
   clipWidgets?: EditorClipWidget[];
   onClipWidgetsChange?: (next: EditorClipWidget[]) => void;
@@ -100,7 +99,6 @@ export const EditorPlayer = forwardRef<EditorPlayerRef, EditorPlayerProps>(
       onVerticalCropCenterXChange,
       subtitleOverlayActive = false,
       subtitleSettings,
-      onSubtitleSettingsChange,
       clipWidgets = [],
       onClipWidgetsChange,
       clipWidgetFocusRequestId = null,
@@ -295,12 +293,8 @@ export const EditorPlayer = forwardRef<EditorPlayerRef, EditorPlayerProps>(
             onCenterXChange={onVerticalCropCenterXChange}
           />
         ) : null}
-        {subtitleOverlayActive && subtitleSettings && onSubtitleSettingsChange ? (
-          <EditorSubtitleOverlay
-            contentRect={contentRect}
-            settings={subtitleSettings}
-            onSettingsChange={onSubtitleSettingsChange}
-          />
+        {subtitleOverlayActive && subtitleSettings ? (
+          <EditorSubtitleOverlay contentRect={contentRect} settings={subtitleSettings} />
         ) : null}
         {hasWidgets && onClipWidgetsChange ? (
           <EditorClipWidgetsOverlay

@@ -744,7 +744,7 @@ export function EditorPage() {
     currentTime,
   ]);
   const subtitleOverlayActive =
-    tenantSubtitlesEnabled && clipSubtitleGenerateEnabled(selectedEncodeClip ?? undefined);
+    tenantSubtitlesEnabled && clipBurnInEnabled(selectedEncodeClip ?? undefined);
   const subtitleSettingsForPlayer = normalizeEditorSubtitleSettings(
     selectedEncodeClip?.subtitleSettings ?? tenantDefaultSubtitleSettings,
   );
@@ -1374,14 +1374,7 @@ export function EditorPage() {
   );
 
   const handleSaveSubtitleGenerate = useCallback(
-    (
-      clipId: string,
-      payload: {
-        generateEnabled: boolean;
-        settings: EditorSubtitleSettings;
-        subtitleLocales: Record<string, boolean>;
-      },
-    ) => {
+    (clipId: string, payload: { generateEnabled: boolean; subtitleLocales: Record<string, boolean> }) => {
       setClips((prev) =>
         prev.map((c) => {
           if (c.id !== clipId) return c;
@@ -1393,17 +1386,14 @@ export function EditorPage() {
               burnInEnabled: false,
             };
           }
-          const merged = reconcileBurnInAfterLocaleChange(
-            { ...c, subtitleSettings: normalizeEditorSubtitleSettings(payload.settings) },
-            payload.subtitleLocales,
-          );
+          const merged = reconcileBurnInAfterLocaleChange(c, payload.subtitleLocales);
           return {
             ...c,
             subtitleGenerateEnabled: true,
             subtitleMode: true,
-            subtitleSettings: merged.subtitleSettings,
             subtitleLocales: merged.subtitleLocales,
             burnInEnabled: merged.burnInEnabled,
+            subtitleSettings: merged.subtitleSettings,
           };
         }),
       );
@@ -1412,15 +1402,14 @@ export function EditorPage() {
   );
 
   const handleSaveSubtitleBurn = useCallback(
-    (clipId: string, payload: { burnInEnabled: boolean; burnInLanguage: string }) => {
+    (clipId: string, payload: { burnInEnabled: boolean; burnInLanguage: string; settings: EditorSubtitleSettings }) => {
       setClips((prev) =>
         prev.map((c) => {
           if (c.id !== clipId) return c;
-          const st = normalizeEditorSubtitleSettings(c.subtitleSettings);
           return {
             ...c,
             burnInEnabled: payload.burnInEnabled,
-            subtitleSettings: { ...st, burnInLanguage: payload.burnInLanguage },
+            subtitleSettings: normalizeEditorSubtitleSettings(payload.settings),
           };
         }),
       );
@@ -1472,17 +1461,6 @@ export function EditorPage() {
       );
     },
     [selectedClipId, currentTime],
-  );
-
-  const handleSelectedClipSubtitleSettingsChange = useCallback(
-    (settings: EditorSubtitleSettings) => {
-      if (!selectedClipId) return;
-      const next = normalizeEditorSubtitleSettings(settings);
-      setClips((prev) =>
-        prev.map((c) => (c.id === selectedClipId ? { ...c, subtitleSettings: next } : c)),
-      );
-    },
-    [selectedClipId],
   );
 
   const stateJson: EditorStateJson | null = useMemo(() => {
@@ -1726,9 +1704,6 @@ export function EditorPage() {
                 onVerticalCropCenterXChange={handleVerticalCropCenterX}
                 subtitleOverlayActive={subtitleOverlayActive}
                 subtitleSettings={subtitleSettingsForPlayer}
-                onSubtitleSettingsChange={
-                  tenantSubtitlesEnabled ? handleSelectedClipSubtitleSettingsChange : undefined
-                }
               clipWidgets={selectedEncodeClip?.widgets ?? []}
               onClipWidgetsChange={handleClipWidgetsChange}
               clipWidgetFocusRequestId={clipWidgetFocusRequestId}
@@ -1869,9 +1844,6 @@ export function EditorPage() {
             if (!open) setSubtitleGenerateModalClipId(null);
           }}
           generateEnabled={clipSubtitleGenerateEnabled(subtitleGenerateModalClip)}
-          settings={normalizeEditorSubtitleSettings(
-            subtitleGenerateModalClip.subtitleSettings ?? tenantDefaultSubtitleSettings,
-          )}
           subtitleLocales={mergeSubtitleLocalesWithTenantPool(
             subtitleGenerateModalClip.subtitleLocales,
             tenant,
@@ -1890,8 +1862,11 @@ export function EditorPage() {
           onOpenChange={(open) => {
             if (!open) setSubtitleBurnModalClipId(null);
           }}
-          burnInEnabled={clipBurnInEnabled(subtitleBurnModalClip)}
+          burnInEnabled={subtitleBurnModalClip.burnInEnabled === true}
           burnInLanguage={resolveClipBurnInLanguage(subtitleBurnModalClip)}
+          settings={normalizeEditorSubtitleSettings(
+            subtitleBurnModalClip.subtitleSettings ?? tenantDefaultSubtitleSettings,
+          )}
           subtitleLocales={mergeSubtitleLocalesWithTenantPool(subtitleBurnModalClip.subtitleLocales, tenant)}
           onSave={(payload) => {
             handleSaveSubtitleBurn(subtitleBurnModalClip.id, payload);
