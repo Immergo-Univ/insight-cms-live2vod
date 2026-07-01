@@ -17,6 +17,7 @@ import { SexagesimalTimeInput } from "@/components/live2vod/sexagesimal-time-inp
 import { RadioGroup, RadioButton } from "@/components/base/radio-buttons/radio-buttons";
 import { useChannelDateRange } from "@/hooks/use-channel-date-range";
 import { useChannels } from "@/hooks/use-channels";
+import { useDebugToolbarVisible } from "@/hooks/use-debug-toolbar-visible";
 import { useTimezone } from "@/hooks/use-timezone";
 import type { Channel } from "@/types/channel";
 import type { EditorClipState, EditorSelectionMode } from "@/types/editor";
@@ -72,6 +73,7 @@ function selectionModeFor(mode: Live2VodWindowMode): EditorSelectionMode {
 
 export function Live2VodPage() {
   const tz = useTimezone();
+  const debugToolbarVisible = useDebugToolbarVisible();
   const { channels, loading, error } = useChannels();
   const [selectedChannel, setSelectedChannel] = useState<Channel | null>(null);
   const [windowMode, setWindowMode] = useState<Live2VodWindowMode>("epg");
@@ -334,24 +336,26 @@ export function Live2VodPage() {
         )}
       </main>
 
-      <div className="pointer-events-none fixed bottom-4 right-4 z-50 flex flex-row items-end gap-2">
-        {selectedChannel?.id ? (
-          <>
-            <div className="pointer-events-auto">
-              <ChannelTimelineSettings channelId={selectedChannel.id} />
-            </div>
-            <div className="pointer-events-auto">
-              <ClipJsonButton
-                streamUrl={selectedChannel.hlsStream ?? null}
-                timeWindow={jsonTimeWindow}
-              />
-            </div>
-          </>
-        ) : null}
-        <div className="pointer-events-auto">
-          <ProcessingClipsNavButton />
+      {debugToolbarVisible ? (
+        <div className="pointer-events-none fixed bottom-4 right-4 z-50 flex flex-row items-end gap-2">
+          {selectedChannel?.id ? (
+            <>
+              <div className="pointer-events-auto">
+                <ChannelTimelineSettings channelId={selectedChannel.id} />
+              </div>
+              <div className="pointer-events-auto">
+                <ClipJsonButton
+                  streamUrl={selectedChannel.hlsStream ?? null}
+                  timeWindow={jsonTimeWindow}
+                />
+              </div>
+            </>
+          ) : null}
+          <div className="pointer-events-auto">
+            <ProcessingClipsNavButton />
+          </div>
         </div>
-      </div>
+      ) : null}
     </div>
   );
 }

@@ -13,6 +13,9 @@ import { ThemeProvider } from "@/providers/theme-provider";
 import { AccountSettingsProvider } from "@/providers/account-settings-provider";
 import { Toaster } from "sonner";
 import "@/styles/globals.css";
+import { installDebugToolbarGlobals } from "@/utils/debug-toolbar";
+
+installDebugToolbarGlobals();
 
 createRoot(document.getElementById("root")!).render(
     <StrictMode>
