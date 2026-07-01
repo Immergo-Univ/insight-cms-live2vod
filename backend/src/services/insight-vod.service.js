@@ -19,6 +19,11 @@ import { getAuthToken, resolveTenant } from "./auth.service.js";
 import { vodOutputUrls } from "./vod-output-layout.js";
 import { uploadEditorPostersForVod } from "./vod-poster-upload.service.js";
 import {
+  extensionFromDownloadUrl,
+  mimeTypeForImageFormat,
+  resolveInsightContentTypes,
+} from "./insight-content-types.service.js";
+import {
   resolveWhisperSubtitleLanguageFromSpec,
   subtitleLanguagesFromSpec,
   whisperLanguageMeta,
@@ -62,49 +67,83 @@ function buildClipInfo(spec) {
 }
 
 /**
+ * Legacy createClip-style poster content entry (posterTypes + finish/pending status).
+ * @param {object} opts
+ * @param {string} opts.downloadUrl
+ * @param {string} opts.assetType
+ * @param {object} [opts.posterType]
+ * @param {boolean} opts.isDefault
+ * @param {"pending"|"finish"} opts.status
+ * @param {number} opts.now
+ */
+function buildPosterContentEntry({ downloadUrl, assetType, posterType, isDefault, status, now }) {
+  const format = extensionFromDownloadUrl(downloadUrl);
+  const pt = posterType && typeof posterType === "object" ? posterType : {};
+  const name = pt.title || (isDefault ? "Thumbnail at video" : "Poster");
+  return {
+    assetTypes: [assetType],
+    downloadUrl,
+    mime_type: mimeTypeForImageFormat(format),
+    format,
+    type: "image",
+    medium: "image",
+    typeName: assetType,
+    ...(pt._id ? { type_id: String(pt._id) } : {}),
+    ...(pt.title ? { typeAlias: pt.title } : {}),
+    ...(pt.aspect ? { aspectRatio: pt.aspect } : {}),
+    name,
+    default: isDefault,
+    status,
+    created: now,
+    updated: now,
+  };
+}
+
+/**
  * Pre-populated `content[]` matching legacy createClip:
  * poster + mp4 per rendition + hls master (default) + clipInfo.
  * @param {Array<{ publicUrl: string, assetType: string, mime: string, format: string, default: boolean }>} [uploadedPosters]
+ * @param {{ posterForAssetType?: (assetType: string) => object, videoType?: object } | null} [contentTypes]
  */
-function buildContent(spec, urls, renditions, uploadedPosters = []) {
+function buildContent(spec, urls, renditions, uploadedPosters = [], contentTypes = null) {
   const now = Date.now();
   const content = [];
+  const posterForAssetType =
+    typeof contentTypes?.posterForAssetType === "function"
+      ? contentTypes.posterForAssetType
+      : () => ({});
+  const videoType = contentTypes?.videoType || { _id: null, name: "Main video" };
 
   if (uploadedPosters.length > 0) {
     for (const p of uploadedPosters) {
-      content.push({
-        assetTypes: [p.assetType],
-        downloadUrl: p.publicUrl,
-        mime_type: p.mime,
-        format: p.format,
-        type: "image",
-        medium: "image",
-        typeName: p.assetType,
-        name: p.default ? "Thumbnail at video" : "Poster",
-        default: p.default,
-        status: "finish",
-        created: now,
-        updated: now,
-      });
+      content.push(
+        buildPosterContentEntry({
+          downloadUrl: p.publicUrl,
+          assetType: p.assetType,
+          posterType: posterForAssetType(p.assetType),
+          isDefault: p.default,
+          status: "finish",
+          now,
+        }),
+      );
     }
   } else {
-    content.push({
-      assetTypes: ["Poster H"],
-      downloadUrl: urls.posterUrl,
-      mime_type: "image/jpeg",
-      format: "jpg",
-      type: "image",
-      medium: "image",
-      typeName: "Poster H",
-      name: "Thumbnail at video",
-      default: true,
-      status: "pending",
-      created: now,
-      updated: now,
-    });
+    content.push(
+      buildPosterContentEntry({
+        downloadUrl: urls.posterUrl,
+        assetType: "Poster H",
+        posterType: posterForAssetType("Poster H"),
+        isDefault: true,
+        status: "pending",
+        now,
+      }),
+    );
   }
 
   for (const entry of urls.mp4Entries || []) {
+    const profile = renditions.find(
+      (r) => (r.res || r.resolution) === entry.resolution,
+    );
     content.push({
       assetTypes: ["mp4"],
       resolution: entry.resolution,
@@ -113,7 +152,11 @@ function buildContent(spec, urls, renditions, uploadedPosters = []) {
       format: "mp4",
       type: "video",
       medium: "video",
-      name: entry.resolution,
+      name: profile?.title || entry.resolution,
+      ...(profile?.description ? { description: profile.description } : {}),
+      typeName: videoType.name,
+      ...(videoType._id ? { type_id: String(videoType._id) } : {}),
+      ...(profile?.aspectRatio ? { aspectRatio: profile.aspectRatio } : {}),
       created: now,
       updated: now,
     });
@@ -131,6 +174,8 @@ function buildContent(spec, urls, renditions, uploadedPosters = []) {
     name: brList.length ? `HLS ${brList.join(", ")}` : "HLS ABR",
     description: "Adaptative Bitrate HLS",
     default: true,
+    typeName: videoType.name,
+    ...(videoType._id ? { type_id: String(videoType._id) } : {}),
     created: now,
     updated: now,
   });
@@ -365,7 +410,13 @@ export async function createInsightVod({
     }
   }
 
-  const content = buildContent(spec, urls, renditions, uploadedPosters);
+  const contentTypes = await resolveInsightContentTypes({ accountId, tenantId }).catch(() => ({
+    defaultPoster: {},
+    posterForAssetType: () => ({}),
+    videoType: { _id: null, name: "Main video" },
+  }));
+
+  const content = buildContent(spec, urls, renditions, uploadedPosters, contentTypes);
   await axios.post(url, { _id: vodId, accountId, content }, { headers });
 
   const whisperLang = resolveWhisperSubtitleLanguageFromSpec(spec);

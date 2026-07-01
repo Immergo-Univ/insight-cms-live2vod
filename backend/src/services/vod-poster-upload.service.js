@@ -4,6 +4,7 @@
  */
 
 import { config } from "../config.js";
+import { extensionFromDownloadUrl } from "./insight-content-types.service.js";
 import { loadEditorPosterBuffer, mimeForPosterExt } from "./editor-posters.service.js";
 import { putTenantTranscodedObject } from "./vod-tenant-s3.service.js";
 
@@ -94,10 +95,14 @@ async function resolvePosterImageBuffer(poster, ctx) {
 }
 
 /**
+ * Primary poster follows immergo layout: always Poster H at poster.jpg (Elements preview uses Poster H).
+ * Additional editor posters may use Poster V when captured in portrait mode.
  * @param {object} poster
+ * @param {number} index
  * @returns {"Poster H" | "Poster V"}
  */
-function posterAssetType(poster) {
+function posterAssetType(poster, index) {
+  if (index === 0) return "Poster H";
   const o = String(poster?.orientation || "").toLowerCase();
   return o === "portrait" ? "Poster V" : "Poster H";
 }
@@ -139,7 +144,7 @@ export async function uploadEditorPostersForVod({
     const image = await resolvePosterImageBuffer(poster, ctx);
     if (!image) continue;
 
-    const { format, ext } = formatFromMime(image.mime);
+    const { ext } = { ext: formatFromMime(image.mime).ext };
     const fileName = i === 0 ? "poster.jpg" : `poster_${poster.id || i}${ext}`;
 
     await putTenantTranscodedObject({
@@ -153,9 +158,9 @@ export async function uploadEditorPostersForVod({
 
     uploaded.push({
       publicUrl: `${baseUrl}/${fileName}`,
-      assetType: posterAssetType(poster),
+      assetType: posterAssetType(poster, i),
       mime: image.mime,
-      format: i === 0 ? "jpg" : format,
+      format: extensionFromDownloadUrl(`${baseUrl}/${fileName}`),
       default: i === 0,
     });
   }
