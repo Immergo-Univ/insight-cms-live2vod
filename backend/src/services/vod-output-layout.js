@@ -110,3 +110,30 @@ export function vodOutputUrls({
     mp4Entries,
   };
 }
+
+/**
+ * S3 object key for a transcoded asset (same layout as immergo agent: `{output}/{guid}/{file}`).
+ *
+ * @param {object} opts
+ * @param {string} opts.tenantId
+ * @param {string} opts.guid
+ * @param {string} opts.fileName e.g. poster.jpg
+ * @param {string} [opts.provider]
+ * @param {string} [opts.bucket]
+ * @param {string} [opts.customerFolder]
+ */
+export function vodTranscodedObjectKey({
+  tenantId,
+  guid,
+  fileName,
+  provider,
+  bucket,
+  customerFolder,
+}) {
+  const { keyPrefix } = vodLayout({ tenantId, provider, bucket, customerFolder });
+  const safeGuid = String(guid || "").replace(/[^a-zA-Z0-9_-]/g, "_");
+  const safeFile = String(fileName || "")
+    .replace(/^\/+/, "")
+    .replace(/\.\./g, "");
+  return `${keyPrefix}/${safeGuid}/${safeFile}`;
+}

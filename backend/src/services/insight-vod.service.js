@@ -17,6 +17,7 @@ import axios from "axios";
 import { config } from "../config.js";
 import { getAuthToken, resolveTenant } from "./auth.service.js";
 import { vodOutputUrls } from "./vod-output-layout.js";
+import { uploadEditorPostersForVod } from "./vod-poster-upload.service.js";
 import {
   resolveWhisperSubtitleLanguageFromSpec,
   subtitleLanguagesFromSpec,
@@ -63,11 +64,31 @@ function buildClipInfo(spec) {
 /**
  * Pre-populated `content[]` matching legacy createClip:
  * poster + mp4 per rendition + hls master (default) + clipInfo.
+ * @param {Array<{ publicUrl: string, assetType: string, mime: string, format: string, default: boolean }>} [uploadedPosters]
  */
-function buildContent(spec, urls, renditions) {
+function buildContent(spec, urls, renditions, uploadedPosters = []) {
   const now = Date.now();
-  const content = [
-    {
+  const content = [];
+
+  if (uploadedPosters.length > 0) {
+    for (const p of uploadedPosters) {
+      content.push({
+        assetTypes: [p.assetType],
+        downloadUrl: p.publicUrl,
+        mime_type: p.mime,
+        format: p.format,
+        type: "image",
+        medium: "image",
+        typeName: p.assetType,
+        name: p.default ? "Thumbnail at video" : "Poster",
+        default: p.default,
+        status: "finish",
+        created: now,
+        updated: now,
+      });
+    }
+  } else {
+    content.push({
       assetTypes: ["Poster H"],
       downloadUrl: urls.posterUrl,
       mime_type: "image/jpeg",
@@ -80,8 +101,8 @@ function buildContent(spec, urls, renditions) {
       status: "pending",
       created: now,
       updated: now,
-    },
-  ];
+    });
+  }
 
   for (const entry of urls.mp4Entries || []) {
     content.push({
@@ -261,6 +282,7 @@ export async function trySyncInsightVodWhisperSubtitleLabels(job) {
  * @param {object} [opts.s3]       resolved tenant S3 (uses s3.cdnBase for public URLs)
  * @param {string} [opts.customerFolder] legacy customer folder override
  * @param {Array<object>} [opts.renditions] tenant video profiles (encoder shape)
+ * @param {string} [opts.editorClipId] correlates posters to the encoded sub-clip
  * @returns {Promise<{ vodId: string, guid: string, masterUrl: string }>}
  */
 export async function createInsightVod({
@@ -270,6 +292,7 @@ export async function createInsightVod({
   s3,
   customerFolder,
   renditions = [],
+  editorClipId,
 }) {
   if (!accountId) throw new Error("createInsightVod: missing accountId");
   if (!tenantId) throw new Error("createInsightVod: missing tenantId");
@@ -319,7 +342,30 @@ export async function createInsightVod({
     customerFolder: folder,
     renditions,
   });
-  const content = buildContent(spec, urls, renditions);
+
+  let uploadedPosters = [];
+  if (s3?.bucket && s3?.key && s3?.secret) {
+    try {
+      uploadedPosters = await uploadEditorPostersForVod({
+        s3,
+        tenantId,
+        guid,
+        spec,
+        editorClipId,
+        baseUrl: urls.base,
+      });
+      if (uploadedPosters.length > 0) {
+        console.log(
+          `[insight-vod] uploaded ${uploadedPosters.length} editor poster(s) guid=${guid} tenant=${tenantId}`,
+        );
+      }
+    } catch (e) {
+      const m = e instanceof Error ? e.message : String(e);
+      console.error(`[insight-vod] editor poster upload failed guid=${guid} tenant=${tenantId}: ${m}`);
+    }
+  }
+
+  const content = buildContent(spec, urls, renditions, uploadedPosters);
   await axios.post(url, { _id: vodId, accountId, content }, { headers });
 
   const whisperLang = resolveWhisperSubtitleLanguageFromSpec(spec);

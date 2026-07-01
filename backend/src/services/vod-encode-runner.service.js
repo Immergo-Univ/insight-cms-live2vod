@@ -90,9 +90,18 @@ function buildEncoderS3Payload(s3, tenantId) {
  * @param {object} [opts.s3]
  * @param {Array<object>} [opts.renditions]
  * @param {string} opts.jobId
+ * @param {string} [opts.editorClipId]
  * @returns {Promise<{ vodGuid?: string, insightWebhook?: object }>}
  */
-async function createInsightVodForJob({ tenantId, spec, accountId, s3, renditions, jobId }) {
+async function createInsightVodForJob({
+  tenantId,
+  spec,
+  accountId,
+  s3,
+  renditions,
+  jobId,
+  editorClipId,
+}) {
   if (spec?.realtimeTranscribeOnly === true || !accountId) return {};
   try {
     const { guid } = await createInsightVod({
@@ -102,6 +111,7 @@ async function createInsightVodForJob({ tenantId, spec, accountId, s3, rendition
       s3,
       customerFolder: s3?.customerFolder,
       renditions,
+      editorClipId,
     });
     const insightWebhook = {
       url: `${config.insightApiBase}/cms/pentity/${encodeURIComponent(tenantId)}/vods/webhook`,
@@ -229,6 +239,7 @@ export async function startBackgroundVodJob(opts) {
         s3,
         renditions,
         jobId,
+        editorClipId,
       });
       const res = await fetch(`${serviceUrl}/encoder/jobs`, {
         method: "POST",

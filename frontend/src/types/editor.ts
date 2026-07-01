@@ -697,6 +697,8 @@ export interface EditorStateJson {
   sourceM3u8: string;
   startTime: number;
   endTime: number;
+  /** Channel id for thumbnail microservice (capture posters at encode time). */
+  channelId?: string;
   posters: EditorPosterEntry[];
   clips: EditorStateJsonClip[];
   ads: Array<{

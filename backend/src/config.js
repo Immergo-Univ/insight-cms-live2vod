@@ -161,6 +161,12 @@ export const config = {
     backend: (process.env.ENCODER_BACKEND || "lite").trim().toLowerCase(),
   },
 
+  /** Thumbnail microservice for editor capture posters (same as frontend editor-constants). */
+  thumbnailApiBase: (
+    process.env.THUMBNAIL_API_BASE ||
+    "https://556gh0y4oh.execute-api.us-east-1.amazonaws.com/dev/genThumbTime"
+  ).trim(),
+
   /**
    * YouTube Data API v3 (syndication). OAuth redirect must match Google Cloud console exactly.
    * Env: YOUTUBE_CLIENT_ID, YOUTUBE_CLIENT_SECRET, YOUTUBE_REDIRECT_URI (backend callback URL).
