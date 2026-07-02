@@ -228,6 +228,24 @@ export async function startBackgroundVodJob(opts) {
     return jobId;
   }
 
+  // Diagnostic: news is generated on the encoder only when spec.transcribeGenerateNews !== false.
+  // The editor sets it to (subtitleGeneration && anyNewsLocaleOn); log it so a "no news" result is traceable.
+  {
+    const genNews = spec?.transcribeGenerateNews;
+    const newsLocales = spec?.transcribeNewsLocales;
+    const onLocales =
+      newsLocales && typeof newsLocales === "object"
+        ? Object.entries(newsLocales)
+            .filter(([, v]) => v === true)
+            .map(([k]) => k)
+        : [];
+    vodEncodeStdout(
+      `news spec job=${jobId} transcribeGenerateNews=${JSON.stringify(genNews)} ` +
+        `newsLocalesOn=[${onLocales.join(",")}] subtitleLanguages=[${(spec?.subtitleLanguages || []).join(",")}] ` +
+        `willGenerateNews=${genNews !== false}`,
+    );
+  }
+
   void (async () => {
     try {
       const { accountId, s3, renditions } = await resolveTenantContext(tenantId, jobId);
