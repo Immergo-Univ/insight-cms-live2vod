@@ -388,8 +388,21 @@ export async function createInsightVod({
     renditions,
   });
 
+  const specPosterCount = Array.isArray(spec?.clips)
+    ? spec.clips.reduce((n, c) => n + (Array.isArray(c?.posters) ? c.posters.length : 0), 0)
+    : 0;
+
   let uploadedPosters = [];
-  if (s3?.bucket && s3?.key && s3?.secret) {
+  const s3Ready = Boolean(s3?.bucket && s3?.key && s3?.secret);
+  if (!s3Ready) {
+    console.warn(
+      `[insight-vod] guid=${guid} tenant=${tenantId}: tenant S3 not resolved ` +
+        `(bucket=${s3?.bucket ? "y" : "n"} key=${s3?.key ? "y" : "n"} secret=${s3?.secret ? "y" : "n"}); ` +
+        `cannot upload ${specPosterCount} editor poster(s), falling back to placeholder poster`,
+    );
+  } else if (specPosterCount === 0) {
+    console.log(`[insight-vod] guid=${guid} tenant=${tenantId}: no editor posters in spec`);
+  } else {
     try {
       uploadedPosters = await uploadEditorPostersForVod({
         s3,
@@ -402,6 +415,10 @@ export async function createInsightVod({
       if (uploadedPosters.length > 0) {
         console.log(
           `[insight-vod] uploaded ${uploadedPosters.length} editor poster(s) guid=${guid} tenant=${tenantId}`,
+        );
+      } else {
+        console.warn(
+          `[insight-vod] guid=${guid} tenant=${tenantId}: spec had ${specPosterCount} poster(s) but none resolved/uploaded; using placeholder poster`,
         );
       }
     } catch (e) {

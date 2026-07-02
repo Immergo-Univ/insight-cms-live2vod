@@ -52,6 +52,40 @@ function buildThumbnailFetchUrl(clipUrl, timeSeconds, channelId) {
 }
 
 /**
+ * Resolve the local backend base URL so we can fetch same-origin editor poster files
+ * (`/api/channels/.../editor/posters/{id}/file`) when the buffer isn't on this instance.
+ * @returns {string}
+ */
+function selfBackendBase() {
+  const explicit = (process.env.SELF_PUBLIC_BASE || process.env.PUBLIC_BASE_URL || "").trim();
+  if (explicit) return explicit.replace(/\/+$/, "");
+  const port = config.port || process.env.PORT || 3001;
+  return `http://127.0.0.1:${port}`;
+}
+
+/**
+ * Best-effort HTTP fetch of an uploaded editor poster (absolute previewUrl, or relative
+ * `/api/...` resolved against this backend).
+ * @param {object} poster
+ * @returns {Promise<{ buffer: Buffer, mime: string, ext: string } | null>}
+ */
+async function fetchPosterOverHttp(poster) {
+  const preview = String(poster?.previewUrl || "").trim();
+  if (!preview) return null;
+  const url = /^https?:\/\//i.test(preview) ? preview : `${selfBackendBase()}${preview}`;
+  try {
+    const res = await fetch(url, { signal: AbortSignal.timeout(30_000) });
+    if (!res.ok) return null;
+    const buf = Buffer.from(await res.arrayBuffer());
+    if (!buf.length) return null;
+    const mime = res.headers.get("content-type") || "image/jpeg";
+    return { buffer: buf, mime, ext: formatFromMime(mime).ext };
+  } catch {
+    return null;
+  }
+}
+
+/**
  * @param {object} poster editor clip poster entry
  * @param {{ clipUrl: string, channelId: string }} ctx
  * @returns {Promise<{ buffer: Buffer, mime: string, ext: string } | null>}
@@ -63,15 +97,26 @@ async function resolvePosterImageBuffer(poster, ctx) {
     const posterId = String(poster.id || "").trim();
     if (!posterId) return null;
     const loaded = await loadEditorPosterBuffer(posterId);
-    if (!loaded?.buffer?.length) return null;
-    const ext = poster.storedRelative
-      ? String(poster.storedRelative).match(/(\.[a-z0-9]+)$/i)?.[1]?.toLowerCase() || ".jpg"
-      : formatFromMime(loaded.mime).ext;
-    return {
-      buffer: loaded.buffer,
-      mime: loaded.mime || mimeForPosterExt(ext),
-      ext,
-    };
+    if (loaded?.buffer?.length) {
+      const ext = poster.storedRelative
+        ? String(poster.storedRelative).match(/(\.[a-z0-9]+)$/i)?.[1]?.toLowerCase() || ".jpg"
+        : formatFromMime(loaded.mime).ext;
+      return {
+        buffer: loaded.buffer,
+        mime: loaded.mime || mimeForPosterExt(ext),
+        ext,
+      };
+    }
+
+    // Fallback: this backend instance may not have the poster on disk / S3-logos
+    // (e.g. uploaded to another replica). Fetch it over HTTP via its preview URL.
+    const httpBuf = await fetchPosterOverHttp(poster);
+    if (httpBuf) return httpBuf;
+
+    console.warn(
+      `[poster-upload] upload poster id=${posterId} not found on disk/S3-logos/HTTP (storedRelative=${poster.storedRelative || "?"})`,
+    );
+    return null;
   }
 
   if (poster.kind === "capture") {
@@ -129,32 +174,63 @@ export async function uploadEditorPostersForVod({
 }) {
   const clip = resolveClipForPosters(spec, editorClipId);
   const posters = Array.isArray(clip?.posters) ? clip.posters : [];
-  if (posters.length === 0) return [];
+  if (posters.length === 0) {
+    console.log(`[poster-upload] guid=${guid} tenant=${tenantId}: spec clip has no posters`);
+    return [];
+  }
 
   const ctx = {
     clipUrl: String(spec?.clipUrl || "").trim(),
     channelId: String(spec?.channelId || "").trim(),
   };
+  console.log(
+    `[poster-upload] guid=${guid} tenant=${tenantId}: resolving ${posters.length} poster(s) ` +
+      `kinds=[${posters.map((p) => p?.kind || "?").join(",")}] channelId=${ctx.channelId || "none"}`,
+  );
 
   /** @type {Array<{ publicUrl: string, assetType: string, mime: string, format: string, default: boolean }>} */
   const uploaded = [];
 
   for (let i = 0; i < posters.length; i++) {
     const poster = posters[i];
-    const image = await resolvePosterImageBuffer(poster, ctx);
-    if (!image) continue;
+    // Never let a single failing poster (e.g. a capture whose thumbnail 4xx'd) abort the rest.
+    let image = null;
+    try {
+      image = await resolvePosterImageBuffer(poster, ctx);
+    } catch (e) {
+      const m = e instanceof Error ? e.message : String(e);
+      console.error(
+        `[poster-upload] guid=${guid} poster#${i} id=${poster?.id || "?"} kind=${poster?.kind || "?"} resolve failed: ${m}`,
+      );
+      continue;
+    }
+    if (!image) {
+      console.warn(
+        `[poster-upload] guid=${guid} poster#${i} id=${poster?.id || "?"} kind=${poster?.kind || "?"} produced no image buffer (skipped)`,
+      );
+      continue;
+    }
 
-    const { ext } = { ext: formatFromMime(image.mime).ext };
+    const { ext } = formatFromMime(image.mime);
     const fileName = i === 0 ? "poster.jpg" : `poster_${poster.id || i}${ext}`;
 
-    await putTenantTranscodedObject({
-      s3,
-      tenantId,
-      guid,
-      fileName,
-      body: image.buffer,
-      contentType: image.mime,
-    });
+    try {
+      const { key } = await putTenantTranscodedObject({
+        s3,
+        tenantId,
+        guid,
+        fileName,
+        body: image.buffer,
+        contentType: image.mime,
+      });
+      console.log(
+        `[poster-upload] guid=${guid} uploaded poster#${i} key=${key} bytes=${image.buffer.length}`,
+      );
+    } catch (e) {
+      const m = e instanceof Error ? e.message : String(e);
+      console.error(`[poster-upload] guid=${guid} poster#${i} S3 upload failed: ${m}`);
+      continue;
+    }
 
     uploaded.push({
       publicUrl: `${baseUrl}/${fileName}`,
@@ -165,6 +241,9 @@ export async function uploadEditorPostersForVod({
     });
   }
 
+  console.log(
+    `[poster-upload] guid=${guid} tenant=${tenantId}: ${uploaded.length}/${posters.length} poster(s) uploaded to tenant S3`,
+  );
   return uploaded;
 }
 
