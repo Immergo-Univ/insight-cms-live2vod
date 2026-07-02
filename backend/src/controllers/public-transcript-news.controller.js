@@ -77,12 +77,20 @@ publicTranscriptNewsRouter.get("/transcript-news/:tenantId/:jobId", async (req, 
     if (!job || job.tenantId !== tenantId) {
       return res.status(404).type("text/plain").send("Not found");
     }
-    if (job.jobKind !== "realtime_transcribe" || job.status !== "completed") {
-      return res.status(404).type("text/plain").send("Not found");
-    }
 
     /** @type {any} */
     const bundle = job.transcriptNewsBundle && typeof job.transcriptNewsBundle === "object" ? job.transcriptNewsBundle : {};
+
+    // Serve any completed job (realtime transcribe OR vod encode) that actually has news content.
+    // News drafts are stored per job in transcriptNewsBundle (JSONB) + legacy plain fields.
+    const bundleHasLocale = Object.keys(bundle).some((k) => k !== "version");
+    const hasPlainNews = ["transcriptNewsEn", "transcriptNewsEs", "transcriptNewsHe"].some(
+      (k) => typeof job[k] === "string" && job[k].trim(),
+    );
+    const hasNews = bundleHasLocale || hasPlainNews;
+    if (job.status !== "completed" || !hasNews) {
+      return res.status(404).type("text/plain").send("Not found");
+    }
     const block = bundle[locale] && typeof bundle[locale] === "object" ? bundle[locale] : {};
     const plainKey = locale === "es" ? "transcriptNewsEs" : locale === "he" ? "transcriptNewsHe" : "transcriptNewsEn";
     const fallbackPlain = typeof job[plainKey] === "string" ? job[plainKey].trim() : "";
