@@ -48,6 +48,8 @@ export interface TranscriptNewsBundle {
   en?: TranscriptNewsLocaleBlock;
   es?: TranscriptNewsLocaleBlock;
   he?: TranscriptNewsLocaleBlock;
+  /** Any additional tenant locale (e.g. "ar"): the bundle is keyed by ISO 639-1 code. */
+  [locale: string]: TranscriptNewsLocaleBlock | number | undefined;
 }
 
 /** OpenAI usage rollup saved on realtime transcribe jobs (encoder → backend). */

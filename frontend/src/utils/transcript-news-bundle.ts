@@ -78,41 +78,63 @@ function blockFromPlain(
 
 /**
  * Build or hydrate rich news bundle from job fields (client-side defaults).
+ *
+ * Locale-agnostic: preserves EVERY locale present in `job.transcriptNewsBundle` (the encoder
+ * output, e.g. "ar"), not just the legacy en/es/he flat fields. Optionally ensures a block
+ * exists for each requested locale (tenant `availableLanguages`) so all news tabs render.
  */
 export function deriveTranscriptNewsBundleFromJob(
   job: VodJobRecord,
-  opts: { defaultPosterUrl?: string },
+  opts: { defaultPosterUrl?: string; locales?: string[] },
 ): TranscriptNewsBundle {
   const updatedAt = job.updatedAt || job.createdAt;
   const posterUrl = opts.defaultPosterUrl?.trim() || undefined;
-  const enBase = blockFromPlain(job.transcriptNewsEn?.trim() ?? "", { posterUrl, updatedAt });
-  const esBase = blockFromPlain(job.transcriptNewsEs?.trim() ?? "", { posterUrl, updatedAt });
-  const heBase = blockFromPlain(job.transcriptNewsHe?.trim() ?? "", { posterUrl, updatedAt });
-  const base: TranscriptNewsBundle = {
-    version: 1,
-    en: enBase,
-    es: esBase,
-    he: heBase,
+
+  // Legacy flat fields only ever existed for en/es/he.
+  const legacyPlain: Record<string, string> = {
+    en: job.transcriptNewsEn?.trim() ?? "",
+    es: job.transcriptNewsEs?.trim() ?? "",
+    he: job.transcriptNewsHe?.trim() ?? "",
   };
+
   const existing = job.transcriptNewsBundle;
-  if (!existing || typeof existing !== "object") return base;
-  const mergeLocale = (
-    loc: "en" | "es" | "he",
-    fallback: TranscriptNewsLocaleBlock,
-  ): TranscriptNewsLocaleBlock => {
-    const ex = existing[loc];
-    if (!ex || typeof ex !== "object") return fallback;
-    return normalizeLocaleBlock({
-      ...fallback,
-      ...ex,
-      posterUrl: ex.posterUrl ?? fallback.posterUrl ?? null,
-      posterDataUrl: ex.posterDataUrl ?? fallback.posterDataUrl ?? null,
-    });
-  };
-  return {
-    version: 1,
-    en: mergeLocale("en", enBase),
-    es: mergeLocale("es", esBase),
-    he: mergeLocale("he", heBase),
-  };
+  const existingObj: Record<string, unknown> =
+    existing && typeof existing === "object" ? (existing as Record<string, unknown>) : {};
+
+  // Union of locales to render: requested (tenant pool) + present in the encoder bundle + legacy.
+  const codes = new Set<string>();
+  for (const c of opts.locales ?? []) {
+    const code = String(c || "").trim().toLowerCase();
+    if (code) codes.add(code);
+  }
+  for (const key of Object.keys(existingObj)) {
+    if (key === "version") continue;
+    codes.add(key.toLowerCase());
+  }
+  for (const [code, plain] of Object.entries(legacyPlain)) {
+    if (plain) codes.add(code);
+  }
+  if (codes.size === 0) {
+    codes.add("en");
+    codes.add("es");
+    codes.add("he");
+  }
+
+  const out: TranscriptNewsBundle = { version: 1 };
+  for (const code of codes) {
+    const fallback = blockFromPlain(legacyPlain[code] ?? "", { posterUrl, updatedAt });
+    const ex = existingObj[code];
+    out[code] =
+      ex && typeof ex === "object"
+        ? normalizeLocaleBlock({
+            ...fallback,
+            ...(ex as Partial<TranscriptNewsLocaleBlock>),
+            posterUrl:
+              (ex as TranscriptNewsLocaleBlock).posterUrl ?? fallback.posterUrl ?? null,
+            posterDataUrl:
+              (ex as TranscriptNewsLocaleBlock).posterDataUrl ?? fallback.posterDataUrl ?? null,
+          })
+        : fallback;
+  }
+  return out;
 }

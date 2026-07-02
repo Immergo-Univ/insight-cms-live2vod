@@ -181,7 +181,7 @@ function TranscriptAndNewsTabs({
   );
 
   const [bundle, setBundle] = useState<TranscriptNewsBundle>(() =>
-    deriveTranscriptNewsBundleFromJob(job, { defaultPosterUrl }),
+    deriveTranscriptNewsBundleFromJob(job, { defaultPosterUrl, locales: availableLanguages }),
   );
   const [newsSaveErr, setNewsSaveErr] = useState<string | null>(null);
   const [newsSaving, setNewsSaving] = useState(false);
