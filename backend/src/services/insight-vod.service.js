@@ -443,5 +443,10 @@ export async function createInsightVod({
     );
   }
 
-  return { vodId: String(vodId), guid, masterUrl: urls.masterUrl };
+  // Default poster for the public news page: the editor's uploaded default poster, else the
+  // deterministic VOD poster.jpg (encoder-generated). Always a stable public CDN URL.
+  const posterUrl =
+    (uploadedPosters.find((p) => p.default) || uploadedPosters[0])?.publicUrl || urls.posterUrl;
+
+  return { vodId: String(vodId), guid, masterUrl: urls.masterUrl, posterUrl };
 }

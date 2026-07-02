@@ -104,7 +104,7 @@ async function createInsightVodForJob({
 }) {
   if (spec?.realtimeTranscribeOnly === true || !accountId) return {};
   try {
-    const { guid } = await createInsightVod({
+    const { guid, posterUrl } = await createInsightVod({
       accountId,
       tenantId,
       spec,
@@ -118,11 +118,13 @@ async function createInsightVodForJob({
       mediaId: guid,
       headers: { "x-tenant-id": tenantId },
     };
-    // Persist the guid for traceability (in-memory field + editorSpec for Postgres).
+    // Persist the guid + default news poster URL (editorSpec is JSONB; no migration needed).
     await updateJob(jobId, { vodGuid: guid });
-    await mergeJobEditorSpec(jobId, (prev) => ({ ...(prev || {}), __vodGuid: guid })).catch(
-      () => {},
-    );
+    await mergeJobEditorSpec(jobId, (prev) => ({
+      ...(prev || {}),
+      __vodGuid: guid,
+      ...(posterUrl ? { __vodPosterUrl: posterUrl } : {}),
+    })).catch(() => {});
     vodEncodeStdout(`insight VOD created job=${jobId} guid=${guid}`);
     return { vodGuid: guid, insightWebhook };
   } catch (e) {

@@ -1,9 +1,30 @@
 import { Router } from "express";
+import { config } from "../config.js";
 import { resolveTenant } from "../services/auth.service.js";
 import { getJob } from "../services/vod-jobs.store.js";
 import { decodeTenantParam } from "../middleware/decode-tenant.middleware.js";
 import { getSequelize } from "../db/sequelize.js";
 import { normalizeAvailableLanguages } from "../utils/tenant-languages.js";
+
+/**
+ * Clip thumbnail (genThumbTime) from the stored editor spec — universal poster fallback for
+ * older jobs that predate the persisted __vodPosterUrl. No insight-api call required.
+ * @param {any} spec
+ * @returns {string}
+ */
+function clipThumbnailUrlFromSpec(spec) {
+  const base = (config.thumbnailApiBase || "").trim();
+  const clipUrl = typeof spec?.clipUrl === "string" ? spec.clipUrl.trim() : "";
+  const channelId = typeof spec?.channelId === "string" ? spec.channelId.trim() : "";
+  if (!base || !clipUrl || !channelId) return "";
+  const startTime =
+    Array.isArray(spec?.clips) && spec.clips[0] ? Number(spec.clips[0].startTime) || 0 : 0;
+  const params = new URLSearchParams();
+  params.set("url", clipUrl);
+  params.set("time", String(startTime));
+  params.set("channelId", channelId);
+  return `${base}?${params.toString()}`;
+}
 
 export const publicTranscriptNewsRouter = Router();
 
@@ -105,10 +126,21 @@ publicTranscriptNewsRouter.get("/transcript-news/:tenantId/:jobId", async (req, 
       typeof block.posterCaption === "string" && block.posterCaption.trim() ? block.posterCaption.trim() : "";
     const date = typeof block.date === "string" ? block.date.trim() : "";
     const time = typeof block.time === "string" ? block.time.trim() : "";
-    const posterUrlHttp =
+    // Fall back to the VOD's default poster (editor upload / poster.jpg on tenant S3) persisted
+    // on the job at creation, so news pages show an image even when the AI block has no posterUrl.
+    const jobPosterUrl =
+      job.editorSpec && typeof job.editorSpec === "object" && typeof job.editorSpec.__vodPosterUrl === "string"
+        ? job.editorSpec.__vodPosterUrl.trim()
+        : "";
+    const blockPosterUrl =
       typeof block.posterUrl === "string" && /^https?:\/\//i.test(block.posterUrl.trim())
         ? block.posterUrl.trim()
         : "";
+    const clipThumbUrl = clipThumbnailUrlFromSpec(job.editorSpec);
+    const posterUrlHttp =
+      blockPosterUrl ||
+      (/^https?:\/\//i.test(jobPosterUrl) ? jobPosterUrl : "") ||
+      (/^https?:\/\//i.test(clipThumbUrl) ? clipThumbUrl : "");
     const posterData =
       typeof block.posterDataUrl === "string" && block.posterDataUrl.trim().startsWith("data:")
         ? block.posterDataUrl.trim()
