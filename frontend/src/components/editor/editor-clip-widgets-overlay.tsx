@@ -212,6 +212,8 @@ export function EditorClipWidgetsOverlay({
   const [widgetEditModalId, setWidgetEditModalId] = useState<string | null>(null);
   const [modalColor, setModalColor] = useState("#ffffff");
   const [modalFontSizeStr, setModalFontSizeStr] = useState("28");
+  /** Live text HTML mirror for the modal preview (contentEditable is uncontrolled). */
+  const [modalPreviewHtml, setModalPreviewHtml] = useState(TEXT_WIDGET_PLACEHOLDER_INNER_HTML);
   const [modalOffsetInStr, setModalOffsetInStr] = useState("0:00");
   const [modalOffsetOutStr, setModalOffsetOutStr] = useState("0:00");
   const modalEditorRef = useRef<HTMLDivElement>(null);
@@ -307,6 +309,7 @@ export function EditorClipWidgetsOverlay({
     setModalFontSizeStr(
       String(Math.round(clamp(tw.fontSizePx, TEXT_WIDGET_FONT_SIZE_MIN_PX, TEXT_WIDGET_FONT_SIZE_MAX_PX))),
     );
+    setModalPreviewHtml(modalInitialHtmlForTextWidget(tw.html));
     const id = requestAnimationFrame(() => {
       const el = modalEditorRef.current;
       if (el) el.innerHTML = modalInitialHtmlForTextWidget(tw.html);
@@ -392,6 +395,7 @@ export function EditorClipWidgetsOverlay({
     insertEmojiIntoContentEditable(el, widgetTextEmojiRangeRef.current, data.emoji);
     widgetTextEmojiRangeRef.current = null;
     setEmojiPickerOpen(false);
+    setModalPreviewHtml(el.innerHTML);
     requestAnimationFrame(() => el.focus());
   }, []);
 
@@ -483,6 +487,16 @@ export function EditorClipWidgetsOverlay({
   };
 
   const editingWidget = widgetEditModalId ? widgets.find((x) => x.id === widgetEditModalId) ?? null : null;
+
+  // Clamped numeric font size for the slider + preview (modalFontSizeStr is the source of truth).
+  const modalFontSizeNum = (() => {
+    const parsed = parseInt(modalFontSizeStr.trim(), 10);
+    return Number.isFinite(parsed)
+      ? Math.round(clamp(parsed, TEXT_WIDGET_FONT_SIZE_MIN_PX, TEXT_WIDGET_FONT_SIZE_MAX_PX))
+      : TEXT_WIDGET_FONT_SIZE_MIN_PX;
+  })();
+  // Cap only the on-screen preview so huge sizes stay usable in the modal (real overlay is unbounded).
+  const modalPreviewFontSize = Math.min(modalFontSizeNum, 140);
 
   return (
     <>
@@ -694,27 +708,31 @@ export function EditorClipWidgetsOverlay({
                       <label className="flex flex-col gap-1.5">
                         <span className="text-xs font-medium text-secondary">Size (px)</span>
                         <input
-                          type="text"
-                          inputMode="numeric"
-                          autoComplete="off"
-                          spellCheck={false}
+                          type="range"
+                          min={TEXT_WIDGET_FONT_SIZE_MIN_PX}
+                          max={TEXT_WIDGET_FONT_SIZE_MAX_PX}
+                          step={1}
                           aria-label="Widget text size in pixels"
-                          title={`Integer ${TEXT_WIDGET_FONT_SIZE_MIN_PX}–${TEXT_WIDGET_FONT_SIZE_MAX_PX}`}
-                          value={modalFontSizeStr}
-                          onChange={(e) => setModalFontSizeStr(e.target.value.replace(/\D/g, ""))}
-                          onBlur={() => {
-                            const parsed = parseInt(modalFontSizeStr.trim(), 10);
-                            setModalFontSizeStr(
-                              String(
-                                Number.isFinite(parsed)
-                                  ? Math.round(clamp(parsed, TEXT_WIDGET_FONT_SIZE_MIN_PX, TEXT_WIDGET_FONT_SIZE_MAX_PX))
-                                  : TEXT_WIDGET_FONT_SIZE_MIN_PX,
-                              ),
-                            );
-                          }}
-                          className="rounded-lg border border-secondary bg-primary px-3 py-2 text-sm text-primary tabular-nums"
+                          value={modalFontSizeNum}
+                          onChange={(e) => setModalFontSizeStr(String(e.target.value))}
+                          className="w-full accent-brand-solid"
                         />
+                        <span className="text-xs text-tertiary tabular-nums">{modalFontSizeNum}px</span>
                       </label>
+
+                      <div className="flex flex-col gap-1.5">
+                        <span className="text-xs font-medium text-secondary">Preview</span>
+                        <div className="flex max-h-[200px] min-h-[96px] items-center justify-center overflow-hidden rounded-lg border border-secondary bg-black/90 px-3 py-3">
+                          <div
+                            className="max-w-full overflow-hidden text-center font-bold leading-snug break-words [&_*]:[color:inherit] [&_*]:[font-size:inherit] [&_*]:[font-family:inherit] [&_*]:[line-height:inherit]"
+                            style={{ color: modalColor.length === 7 ? modalColor : "#ffffff", fontSize: modalPreviewFontSize }}
+                            dangerouslySetInnerHTML={{ __html: modalPreviewHtml || "<p></p>" }}
+                          />
+                        </div>
+                        <span className="text-[11px] text-tertiary">
+                          Approximate look of the overlay; on the player it scales with video height.
+                        </span>
+                      </div>
                       <div className="flex flex-col gap-1.5">
                         <div className="relative flex items-center justify-between gap-2">
                           <span className="text-xs font-medium text-secondary">Text</span>
@@ -760,6 +778,7 @@ export function EditorClipWidgetsOverlay({
                           ref={modalEditorRef}
                           contentEditable
                           suppressContentEditableWarning
+                          onInput={(e) => setModalPreviewHtml((e.target as HTMLDivElement).innerHTML)}
                           className={cx(
                             "min-h-[160px] rounded-lg border border-secondary bg-primary px-3 py-2 text-sm font-normal leading-relaxed text-primary outline-none",
                             "focus:border-brand focus:ring-1 focus:ring-brand-secondary/40",
