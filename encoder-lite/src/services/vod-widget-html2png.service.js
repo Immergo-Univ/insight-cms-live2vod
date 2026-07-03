@@ -182,6 +182,13 @@ export async function renderTextWidgetToPng(opts) {
       max-width: 100%;
       word-break: break-word;
     }
+    /* Match the editor baseline (Tailwind preflight resets element margins). Without this,
+       default <p>/<h*> margins are 1em and EXPLODE at large font sizes — pushing text out of
+       the box (clipped output) and inflating measured height (shrink-to-fit collapses to min). */
+    .inner *, .inner p, .inner div, .inner ul, .inner ol, .inner li, .inner h1, .inner h2, .inner h3, .inner h4 {
+      margin: 0 !important;
+      padding: 0;
+    }
     .inner * {
       max-width: 100%;
       color: inherit !important;
