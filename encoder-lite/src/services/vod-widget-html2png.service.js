@@ -114,6 +114,18 @@ export function previewFontSizePx(fontSizePx, viewportH) {
 }
 
 /**
+ * Design-space font size scaled to the output frame WITHOUT the legacy [12,96] cap, so large
+ * sizes actually render large in the encode. Overflow is handled by shrink-to-fit at render time.
+ * @param {number} fontSizePx
+ * @param {number} viewportH
+ */
+export function overlayStartFontPx(fontSizePx, viewportH) {
+  const H = Number(viewportH) || 720;
+  const fs = Number(fontSizePx) || 28;
+  return Math.max(6, Math.round((fs * H) / 720));
+}
+
+/**
  * Renders one text widget box to a transparent PNG (size = boxW × boxH).
  *
  * @param {object} opts
@@ -130,7 +142,7 @@ export async function renderTextWidgetToPng(opts) {
   const { browser, html, color, fontSizePx, viewportH, boxW, boxH, destPath } = opts;
   const W = Math.max(2, Math.round(Number(boxW) || 2));
   const H = Math.max(2, Math.round(Number(boxH) || 2));
-  const fontPx = previewFontSizePx(fontSizePx, viewportH);
+  const startFontPx = overlayStartFontPx(fontSizePx, viewportH);
   const c = cssSafeColor(color);
   const placeholder = isTextWidgetPlaceholderHtml(html);
   const payloadHtml = placeholder ? "<span>New text</span>" : String(html || "");
@@ -158,18 +170,16 @@ export async function renderTextWidgetToPng(opts) {
       justify-content: center;
       padding: 12px;
       color: ${c};
-      font-size: ${fontPx}px;
+      font-size: ${startFontPx}px;
       font-weight: 700;
       font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial,
-        "Noto Sans", "Liberation Sans", sans-serif;
+        "Noto Sans", "Liberation Sans", "Noto Color Emoji", "Apple Color Emoji", "Segoe UI Emoji", sans-serif;
       line-height: 1.375;
       text-align: center;
     }
     .inner {
       min-width: 0;
       max-width: 100%;
-      max-height: 100%;
-      overflow: hidden;
       word-break: break-word;
     }
     .inner * {
@@ -179,6 +189,7 @@ export async function renderTextWidgetToPng(opts) {
       font-family: inherit !important;
       line-height: inherit !important;
     }
+    .inner img.emoji { height: 1em; width: 1em; vertical-align: -0.125em; }
   </style>
 </head>
 <body>
@@ -208,10 +219,30 @@ export async function renderTextWidgetToPng(opts) {
     });
 
     await page.setContent(shell, { waitUntil: "commit", timeout: stepMs });
-    await page.evaluate((h) => {
-      const el = document.getElementById("content");
-      if (el) el.innerHTML = h;
-    }, payloadHtml);
+    // Inject text, then shrink-to-fit so it is NEVER clipped by the box (matches editor intent).
+    await page.evaluate(
+      ({ h, startPx, minPx }) => {
+        const outer = document.querySelector(".outer");
+        const inner = document.getElementById("content");
+        if (!outer || !inner) return;
+        inner.innerHTML = h;
+        const availW = Math.max(1, outer.clientWidth - 24);
+        const availH = Math.max(1, outer.clientHeight - 24);
+        let fs = startPx;
+        outer.style.fontSize = fs + "px";
+        for (let i = 0; i < 40; i++) {
+          const ow = inner.scrollWidth;
+          const oh = inner.scrollHeight;
+          if ((ow <= availW && oh <= availH) || fs <= minPx) break;
+          const ratio = Math.min(availW / Math.max(1, ow), availH / Math.max(1, oh));
+          const next = Math.max(minPx, Math.floor(fs * Math.min(0.96, ratio || 0.96)));
+          if (next === fs) break;
+          fs = next;
+          outer.style.fontSize = fs + "px";
+        }
+      },
+      { h: payloadHtml, startPx: startFontPx, minPx: 6 },
+    );
     await new Promise((r) => setTimeout(r, 80));
     await page.screenshot({
       path: destPath,

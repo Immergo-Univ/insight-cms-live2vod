@@ -10,7 +10,12 @@ RUN apk add --no-cache \
     freetype \
     harfbuzz \
     ca-certificates \
-    ttf-freefont
+    ttf-freefont \
+    font-noto \
+    font-noto-emoji \
+    font-noto-cjk \
+    fontconfig && \
+    fc-cache -f
 
 ENV PLAYWRIGHT_CHROMIUM_PATH=/usr/bin/chromium
 
