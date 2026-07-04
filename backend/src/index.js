@@ -19,10 +19,8 @@ import { encoderCallbackRouter } from "./controllers/encoder-callback.controller
 import { tenantsRouter } from "./controllers/tenants.controller.js";
 import { adminRouter } from "./routes/admin.routes.js";
 import { config } from "./config.js";
-import { startLogoScanScheduler } from "./services/logo-scheduler.service.js";
-import { startLogoLiveMatchingService } from "./services/logo-live-matching.service.js";
+import { startAdRecognitionService } from "./services/ad-recognition.service.js";
 import { isS3LogosEnabled, logS3LogosStartup } from "./services/s3-logos.service.js";
-import { syncAllChannelLogosFromS3, startChannelLogosS3Sync } from "./services/channel-logos-sync.service.js";
 import { syncChannelAdsSnapshotsFromS3OnStartup } from "./services/channel-ads-s3-backup.service.js";
 import { getResolvedTiktokDomainVerificationFile } from "./services/admin-settings.service.js";
 import { resolveTenant } from "./services/auth.service.js";
@@ -188,11 +186,8 @@ initVodJobsPersistence()
       logS3LogosStartup();
       if (isS3LogosEnabled()) {
         syncChannelAdsSnapshotsFromS3OnStartup().catch((e) => console.warn("[channel-ads-s3] startup:", e.message));
-        syncAllChannelLogosFromS3().catch(() => {});
-        startChannelLogosS3Sync();
       }
-      startLogoScanScheduler();
-      startLogoLiveMatchingService();
+      startAdRecognitionService();
     });
   })
   .catch((err) => {
