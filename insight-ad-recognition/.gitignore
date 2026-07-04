@@ -1,0 +1,13 @@
+node_modules/
+*.log
+.env
+.DS_Store
+
+# Runtime work dirs
+tmp/
+work/
+
+# Model artifacts pulled at build/runtime
+ml/models_cache/
+models/
+*.bin

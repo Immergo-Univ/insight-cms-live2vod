@@ -1,0 +1,11 @@
+node_modules
+npm-debug.log
+.env
+.git
+.gitignore
+tmp
+work
+ml/models_cache
+models
+**/__pycache__
+*.md

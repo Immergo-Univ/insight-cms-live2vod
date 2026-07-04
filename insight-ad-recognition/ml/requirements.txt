@@ -1,0 +1,13 @@
+# Python ML sidecar dependencies.
+# torch (CPU) is installed separately in the Dockerfile from the CPU wheel index to keep size down.
+fastapi==0.115.6
+uvicorn==0.34.0
+transformers==4.46.3
+# SigLIP tokenizer is SentencePiece-based; protobuf is required to load some tokenizer configs.
+sentencepiece==0.2.0
+protobuf==5.28.3
+pillow==11.0.0
+# Pinned <2 for broad compatibility with onnxruntime/opencv used by RapidOCR.
+numpy==1.26.4
+# RapidOCR = PaddleOCR PP-OCR models running on onnxruntime (no heavy paddlepaddle dependency).
+rapidocr-onnxruntime==1.4.4
