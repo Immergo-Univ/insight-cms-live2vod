@@ -17,8 +17,10 @@
  */
 
 import { config } from "../config.js";
+import { isSequelizeReady } from "../db/sequelize.js";
 import { resolveTenant } from "./auth.service.js";
 import { fetchChannelsWithArchive } from "./channels.service.js";
+import { getTenantById } from "./tenant-visit.service.js";
 import {
   mergeChannelSnapshotFields,
   readChannelSnapshotById,
@@ -55,6 +57,33 @@ function tenantsForRecognition() {
 /** @param {{ hlsStream?: string, hlsMaster?: string }} row */
 function channelHlsUrl(row) {
   return row.hlsStream || row.hlsMaster || "";
+}
+
+/**
+ * Whether AD recognition should run for a tenant. This is strictly OPT-IN: it only runs when the
+ * tenant row exists and has `adRecognitionEnabled === true`. Any other case (DB unavailable,
+ * tenant deleted/missing, flag off) → disabled, so nothing is probed unless explicitly activated.
+ */
+async function isTenantAdRecognitionEnabled(tenantId) {
+  try {
+    if (!isSequelizeReady()) return false;
+    const tenant = await getTenantById(tenantId);
+    return tenant?.adRecognitionEnabled === true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Drop in-memory hysteresis state for all channels of a tenant (used when a tenant is deleted).
+ * @param {string} tenantId
+ */
+export function purgeTenantFromMemory(tenantId) {
+  const tid = String(tenantId || "").trim();
+  if (!tid) return;
+  for (const [channelId, st] of channelStates.entries()) {
+    if (st && String(st.tenantId || "") === tid) channelStates.delete(channelId);
+  }
 }
 
 /**
@@ -214,6 +243,8 @@ async function discoverChannels() {
   const results = await Promise.all(
     tenantIds.map(async (tenantId) => {
       try {
+        // Skip tenants that have AD recognition disabled from their admin settings.
+        if (!(await isTenantAdRecognitionEnabled(tenantId))) return { tenantId, rows: [] };
         const t = await resolveTenant(tenantId);
         const rows = await fetchChannelsWithArchive({ accountId: t.accountId, tenantId });
         return { tenantId, rows };
@@ -274,4 +305,4 @@ export function stopAdRecognitionService() {
   serviceRunning = false;
 }
 
-export default { startAdRecognitionService, stopAdRecognitionService, applyDetection };
+export default { startAdRecognitionService, stopAdRecognitionService, applyDetection, purgeTenantFromMemory };

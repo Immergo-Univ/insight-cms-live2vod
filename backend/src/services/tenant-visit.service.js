@@ -77,6 +77,7 @@ export function tenantRowToApi(plain) {
     typeof plain.tiktokUsername === "string" && plain.tiktokUsername.trim() ? plain.tiktokUsername.trim() : null;
   return {
     tenantId: plain.tenantId,
+    adRecognitionEnabled: plain.adRecognitionEnabled === true,
     subtitlesEnabled: plain.subtitlesEnabled !== false,
     subtitlesDefaultEnabled: plain.subtitlesDefaultEnabled === true,
     subtitlesTranscriptNewsUiEnabled:

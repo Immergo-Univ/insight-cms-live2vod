@@ -15,6 +15,7 @@ import { WHISPER_SOURCE_LANGUAGE_OPTIONS, whisperLanguageLabel } from "@/types/e
 
 type TenantDetail = {
   tenantId: string;
+  adRecognitionEnabled?: boolean;
   subtitlesEnabled: boolean;
   subtitlesDefaultEnabled?: boolean;
   subtitlesTranscriptNewsUiEnabled?: boolean;
@@ -53,6 +54,7 @@ type TenantDetail = {
 };
 
 type FormShape = {
+  adRecognitionEnabled: boolean;
   subtitlesEnabled: boolean;
   subtitlesDefaultEnabled: boolean;
   availableLanguages: string[];
@@ -159,6 +161,7 @@ export function AdminTenantSettingsPage() {
           ? data.availableLanguages
           : ["en", "es", "he"];
       form.setFieldsValue({
+        adRecognitionEnabled: data.adRecognitionEnabled === true,
         subtitlesEnabled: data.subtitlesEnabled !== false,
         subtitlesDefaultEnabled: data.subtitlesDefaultEnabled === true,
         availableLanguages: pool,
@@ -297,6 +300,7 @@ export function AdminTenantSettingsPage() {
     }
 
     const payload = {
+      adRecognitionEnabled: Boolean(form.getFieldValue("adRecognitionEnabled")),
       subtitlesEnabled: Boolean(form.getFieldValue("subtitlesEnabled")),
       subtitlesDefaultEnabled: Boolean(form.getFieldValue("subtitlesDefaultEnabled")),
       availableLanguages: (form.getFieldValue("availableLanguages") ?? []).filter(
@@ -801,6 +805,27 @@ export function AdminTenantSettingsPage() {
                 key: "subtitles",
                 label: t("tenants.tabSubtitles"),
                 children: renderSubtitlesTab(),
+              },
+              {
+                key: "streams",
+                label: t("tenants.tabStreams"),
+                children: (
+                  <div style={{ maxWidth: 900 }}>
+                    <Form.Item style={{ marginBottom: 14 }}>
+                      <Space align="start" size={10}>
+                        <Form.Item name="adRecognitionEnabled" valuePropName="checked" noStyle>
+                          <Switch disabled={!can("tenants", "edit")} />
+                        </Form.Item>
+                        <div>
+                          <Typography.Text>{t("tenants.adRecognitionEnabledLabel")}</Typography.Text>
+                          <Typography.Paragraph type="secondary" style={{ marginBottom: 0, marginTop: 4 }}>
+                            {t("tenants.adRecognitionEnabledHint")}
+                          </Typography.Paragraph>
+                        </div>
+                      </Space>
+                    </Form.Item>
+                  </div>
+                ),
               },
               {
                 key: "languages",

@@ -7,7 +7,11 @@ import fs from "fs/promises";
 import path from "path";
 import { randomBytes } from "node:crypto";
 import { config } from "../config.js";
-import { isS3LogosEnabled, putChannelAdsBackupDocument } from "./s3-logos.service.js";
+import {
+  deleteChannelAdsBackupObject,
+  isS3LogosEnabled,
+  putChannelAdsBackupDocument,
+} from "./s3-logos.service.js";
 
 const __channelsDir = config.channelsDataDir;
 const __indexPath = path.join(__channelsDir, "_index.json");
@@ -203,6 +207,48 @@ export async function clearChannelAdsSnapshot(channelId) {
   }
 
   return { localExisted };
+}
+
+/**
+ * Remove ALL channel snapshots (ads + live probe data) belonging to a tenant, from local disk,
+ * the HLS index and the S3 backup. Used when a tenant is deleted so no channel keeps lingering
+ * ad-recognition data. Only touches the insight-cms-live2vod data store.
+ *
+ * @param {string} tenantId
+ * @returns {Promise<{ channels: number }>}
+ */
+export async function clearTenantChannelSnapshots(tenantId) {
+  const tid = String(tenantId || "").trim();
+  if (!tid) return { channels: 0 };
+
+  let entries = [];
+  try {
+    entries = await fs.readdir(__channelsDir);
+  } catch {
+    return { channels: 0 };
+  }
+
+  const channelIds = [];
+  for (const name of entries) {
+    if (!name.endsWith(".json") || name === "_index.json") continue;
+    const doc = await readJsonIfExists(path.join(__channelsDir, name));
+    if (doc && typeof doc === "object" && String(doc.tenantId || "") === tid && doc.channelId) {
+      channelIds.push(String(doc.channelId));
+    }
+  }
+
+  for (const channelId of channelIds) {
+    await clearChannelAdsSnapshot(channelId);
+    if (isS3LogosEnabled()) {
+      try {
+        await deleteChannelAdsBackupObject(channelId);
+      } catch {
+        /* best effort S3 cleanup */
+      }
+    }
+  }
+
+  return { channels: channelIds.length };
 }
 
 export { resolveBaseUrl as resolveHlsBaseUrl };

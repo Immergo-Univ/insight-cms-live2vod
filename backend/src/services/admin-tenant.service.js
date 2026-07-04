@@ -6,6 +6,8 @@ import {
 } from "./tenant-syndication-accounts.service.js";
 import { parseSyndicationAccountMaxByPlatformInput } from "./tenant-syndication-account-limits.service.js";
 import { tenantRowToApi } from "./tenant-visit.service.js";
+import { clearTenantChannelSnapshots } from "./channel-ads-disk.service.js";
+import { purgeTenantFromMemory } from "./ad-recognition.service.js";
 import { normalizeAvailableLanguages, normalizeDefaultBurnInLanguage } from "../utils/tenant-languages.js";
 import { Op } from "sequelize";
 
@@ -131,6 +133,7 @@ export async function adminUpdateTenant(tenantId, body) {
   const { Tenant } = models();
   const row = await Tenant.findByPk(String(tenantId || "").trim());
   if (!row) return null;
+  if (body.adRecognitionEnabled !== undefined) row.adRecognitionEnabled = Boolean(body.adRecognitionEnabled);
   if (body.subtitlesEnabled !== undefined) row.subtitlesEnabled = Boolean(body.subtitlesEnabled);
   if (body.subtitlesDefaultEnabled !== undefined) row.subtitlesDefaultEnabled = Boolean(body.subtitlesDefaultEnabled);
   if (body.subtitlesTranscriptNewsUiEnabled !== undefined) {
@@ -215,6 +218,53 @@ export async function adminUpdateTenant(tenantId, body) {
   }
   await row.save();
   return tenantRowToApi(row.get({ plain: true }));
+}
+
+/**
+ * Permanently delete a tenant and ALL of its data stored in the insight-cms-live2vod database and
+ * local/S3 data store. This intentionally does NOT touch insight-api (channels, EPG, accounts live
+ * there and are read-only from this service).
+ *
+ * Removes:
+ *  - VodJob rows (encoded clips / jobs) for the tenant.
+ *  - TenantSyndicationAccount rows for the tenant.
+ *  - The Tenant row itself.
+ *  - Per-channel ad snapshots (disk + HLS index + S3 backup) belonging to the tenant.
+ *  - In-memory AD recognition state for the tenant's channels (so nothing keeps processing).
+ *
+ * @param {string} tenantId
+ * @returns {Promise<{ tenantId: string, vodJobs: number, syndicationAccounts: number, channels: number } | null>}
+ */
+export async function adminDeleteTenant(tenantId) {
+  const id = String(tenantId || "").trim();
+  if (!id) return null;
+  const { Tenant, VodJob, TenantSyndicationAccount } = models();
+
+  const row = await Tenant.findByPk(id);
+  if (!row) return null;
+
+  // DB rows scoped to this tenant (this DB only).
+  const vodJobs = await VodJob.destroy({ where: { tenantId: id } });
+  const syndicationAccounts = await TenantSyndicationAccount.destroy({ where: { tenantId: id } });
+  await row.destroy();
+
+  // Disk + S3 channel snapshots (ad windows / live probe data).
+  let channels = 0;
+  try {
+    const res = await clearTenantChannelSnapshots(id);
+    channels = res.channels;
+  } catch (e) {
+    console.warn(`[admin-tenant] snapshot cleanup failed for ${id}:`, e && e.message ? e.message : e);
+  }
+
+  // Stop any in-memory ad-recognition state for this tenant's channels.
+  try {
+    purgeTenantFromMemory(id);
+  } catch {
+    /* ignore */
+  }
+
+  return { tenantId: id, vodJobs, syndicationAccounts, channels };
 }
 
 /**

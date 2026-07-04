@@ -12,6 +12,8 @@ export function registerTenantModel(sequelize) {
     "Tenant",
     {
       tenantId: { type: DataTypes.STRING(128), primaryKey: true },
+      /** Opt-in: only when true are this tenant's live channels probed by the AD recognition scheduler. */
+      adRecognitionEnabled: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
       subtitlesEnabled: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
       subtitlesDefaultEnabled: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
       /** Show transcript & news viewer on completed VOD encode rows. */

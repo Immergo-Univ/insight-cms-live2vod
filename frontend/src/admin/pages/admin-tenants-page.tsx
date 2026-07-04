@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
-import { App, Table, Tag, Typography } from "antd";
+import { App, Button, Popconfirm, Space, Table, Tag, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router";
 import { getAdminClient } from "@/admin/admin-api";
+import { useAdminAuth } from "@/admin/admin-auth-context";
 
 type TenantRow = {
   tenantId: string;
@@ -30,9 +31,11 @@ type TenantRow = {
 export function AdminTenantsPage() {
   const { t } = useTranslation("admin");
   const { message } = App.useApp();
+  const { can } = useAdminAuth();
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
   const [rows, setRows] = useState<TenantRow[]>([]);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -46,6 +49,23 @@ export function AdminTenantsPage() {
       setLoading(false);
     }
   }, [message]);
+
+  const onDeleteTenant = useCallback(
+    async (tenantId: string) => {
+      setDeletingId(tenantId);
+      try {
+        await getAdminClient().delete(`/tenants/${encodeURIComponent(tenantId)}`);
+        message.success(t("tenants.deleted", { id: tenantId }));
+        await load();
+      } catch (e: unknown) {
+        const err = e as { response?: { data?: { error?: string } } };
+        message.error(err.response?.data?.error || "Error");
+      } finally {
+        setDeletingId(null);
+      }
+    },
+    [load, message, t],
+  );
 
   useEffect(() => {
     void load();
@@ -115,6 +135,31 @@ export function AdminTenantsPage() {
     },
     { title: t("tenants.timezone"), dataIndex: "timezoneLastSeen", key: "timezoneLastSeen", ellipsis: true },
     { title: t("tenants.lastSeen"), dataIndex: "lastSeenAt", key: "lastSeenAt", width: 200 },
+    ...(can("tenants", "delete")
+      ? [
+          {
+            title: t("tenants.actions"),
+            key: "actions",
+            width: 120,
+            render: (_: unknown, record: TenantRow) => (
+              <Space onClick={(e) => e.stopPropagation()}>
+                <Popconfirm
+                  title={t("tenants.deleteConfirmTitle")}
+                  description={t("tenants.deleteConfirmDescription", { id: record.tenantId })}
+                  okText={t("tenants.delete")}
+                  okButtonProps={{ danger: true }}
+                  cancelText={t("common.cancel")}
+                  onConfirm={() => void onDeleteTenant(record.tenantId)}
+                >
+                  <Button danger size="small" loading={deletingId === record.tenantId}>
+                    {t("tenants.delete")}
+                  </Button>
+                </Popconfirm>
+              </Space>
+            ),
+          } as ColumnsType<TenantRow>[number],
+        ]
+      : []),
   ];
 
   return (

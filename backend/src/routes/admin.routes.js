@@ -212,6 +212,16 @@ adminSecured.patch("/tenants/:tenantId", requireAdminPermission("tenants", "edit
   }
 });
 
+adminSecured.delete("/tenants/:tenantId", requireAdminPermission("tenants", "delete"), async (req, res) => {
+  try {
+    const result = await adminTenants.adminDeleteTenant(req.params.tenantId);
+    if (!result) return res.status(404).json({ error: "Not found" });
+    res.json({ ok: true, ...result });
+  } catch (e) {
+    res.status(500).json({ error: e instanceof Error ? e.message : String(e) });
+  }
+});
+
 adminSecured.post(
   "/tenants/:tenantId/youtube/disconnect",
   requireAdminPermission("tenants", "edit"),
