@@ -39,6 +39,40 @@ export const AD_CONFIRM_SAMPLES = 3;
  */
 export const PROGRAM_CONFIRM_SAMPLES = 3;
 
+/**
+ * Some channel HLS URLs are DVR/archive playlists (e.g. `streamPlaylist-archive.m3u8` or the
+ * `fillgaps` proxy) that only serve content when given a bounded window via startTime/endTime.
+ * For those we request the last N seconds on every probe so the origin returns a small playlist
+ * (the detect service then samples the live edge of that window). Change here if needed.
+ */
+export const PROBE_WINDOW_SECONDS = 120;
+
+/** Heuristic: URLs that require a startTime/endTime window to return media. */
+function needsArchiveWindow(url) {
+  return /archive|fillgaps/i.test(url);
+}
+
+/**
+ * Build the URL to probe. For archive/DVR playlists without an explicit window, append
+ * `startTime`/`endTime` for the last {@link PROBE_WINDOW_SECONDS} seconds. Live playlists are
+ * left untouched.
+ * @param {string} hls
+ */
+export function buildProbeUrl(hls) {
+  try {
+    const u = new URL(hls);
+    const alreadyWindowed = u.searchParams.has("startTime") || u.searchParams.has("endTime");
+    if (!alreadyWindowed && needsArchiveWindow(hls)) {
+      const now = Math.floor(Date.now() / 1000);
+      u.searchParams.set("startTime", String(now - PROBE_WINDOW_SECONDS));
+      u.searchParams.set("endTime", String(now));
+    }
+    return u.toString();
+  } catch {
+    return hls;
+  }
+}
+
 let serviceRunning = false;
 let loopPromise = null;
 
@@ -198,7 +232,8 @@ async function probeChannel(channel) {
 
   let result;
   try {
-    result = await callDetect(hls);
+    // Archive/DVR playlists need a bounded window (last PROBE_WINDOW_SECONDS); live playlists pass as-is.
+    result = await callDetect(buildProbeUrl(hls));
   } catch (e) {
     st.lastError = e && typeof e.message === "string" ? e.message : String(e);
     await persistChannel(channelId, st);
