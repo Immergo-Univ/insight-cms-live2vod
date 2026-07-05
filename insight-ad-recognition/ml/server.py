@@ -63,6 +63,32 @@ class TextRequest(BaseModel):
     text: str = ""
 
 
+def _warmup():
+    """Run one dummy inference per model so the FIRST real request doesn't pay the lazy graph-init
+    cost (which otherwise blows past the client's /vision timeout). Never blocks readiness."""
+    import tempfile
+
+    from PIL import Image
+
+    tmp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tf:
+            tmp_path = tf.name
+        Image.new("RGB", (224, 224), (16, 16, 16)).save(tmp_path, "JPEG")
+        STATE["siglip"].classify_frames([tmp_path])
+        STATE["ocr"].analyze_frames([tmp_path])
+        STATE["text"].classify("warmup")
+        print("[ml] warmup inference done", flush=True)
+    except Exception as e:  # noqa: BLE001 - warmup must never prevent the sidecar from serving
+        print(f"[ml] warmup skipped: {e}", flush=True)
+    finally:
+        if tmp_path:
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
+
+
 @app.on_event("startup")
 def _load_models():
     try:
@@ -76,6 +102,8 @@ def _load_models():
         STATE["siglip"] = SiglipClassifier(siglip_id, _categories())
         STATE["text"] = TextCommercialClassifier(text_id)
         STATE["ocr"] = OcrEngine()
+        # Prime the graphs before advertising readiness so the first probe is fast.
+        _warmup()
         STATE["ready"] = True
         print("[ml] all models loaded, sidecar ready", flush=True)
     except Exception as e:  # noqa: BLE001 - report and stay up in a not-ready state

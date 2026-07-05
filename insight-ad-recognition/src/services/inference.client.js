@@ -34,7 +34,7 @@ async function postJson(pathname, payload, timeoutMs) {
  * @param {string[]} framePaths absolute paths readable by the sidecar (shared filesystem)
  */
 export function inferVision(framePaths) {
-  return postJson("/vision", { frames: framePaths }, config.limits.requestTimeoutMs);
+  return postJson("/vision", { frames: framePaths }, config.limits.visionTimeoutMs);
 }
 
 /**

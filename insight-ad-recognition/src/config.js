@@ -67,6 +67,12 @@ export const config = {
 
   limits: {
     requestTimeoutMs: intEnv("REQUEST_TIMEOUT_MS", 15000),
+    /**
+     * Dedicated budget for the `/vision` sidecar call (SigLIP over N frames + OCR). On CPU this is
+     * far slower than the generic 15s request timeout, so it gets its own (larger) limit. Kept under
+     * the scheduler's per-probe budget (AD_RECOGNITION_TIMEOUT_MS, default 60s).
+     */
+    visionTimeoutMs: intEnv("VISION_TIMEOUT_MS", 45000),
     maxConcurrentJobs: Math.max(1, intEnv("MAX_CONCURRENT_JOBS", 4)),
   },
 
