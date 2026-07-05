@@ -61,10 +61,17 @@ export function classify(p) {
   }
 
   // OCR advertising cues.
-  const ocrAdHits = [p.ocr_brand, p.ocr_price, p.ocr_cta, p.ocr_legal].filter(Boolean).length;
+  const ocrAdHits = [p.ocr_brand, p.ocr_price, p.ocr_cta, p.ocr_legal, p.ocr_phone].filter(Boolean).length;
   if (ocrAdHits > 0) {
     adScore += Math.min(0.3, ocrAdHits * 0.1);
     reasons.push(`ocr:ad_cues=${ocrAdHits}`);
+  }
+
+  // A visible phone number (esp. toll-free 0800 / 1-800) is a hallmark of direct-response
+  // commercials, so add extra evidence beyond the generic OCR-cue bump above.
+  if (p.ocr_phone) {
+    adScore += 0.12;
+    reasons.push("ocr:phone");
   }
 
   // Commercials are typically fast-cut and busy.

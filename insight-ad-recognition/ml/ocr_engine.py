@@ -1,9 +1,15 @@
-"""OCR stage using RapidOCR (PaddleOCR PP-OCR models on onnxruntime).
+"""OCR stage using Tesseract (via pytesseract).
+
+Tesseract is used instead of a single-script engine because the channels are multilingual
+(English + Hebrew + Spanish). Tesseract combines scripts in one pass with `-l eng+heb+spa`
+(configurable via OCR_LANGUAGES) and returns per-word boxes, which we reuse for the
+ticker / lower-third / logo layout heuristics.
 
 Extracts text + boxes from each frame, aggregates them and derives the `ocr_*` profile fields
-and the ticker / lower-third / logo layout flags.
+and the layout flags.
 """
 
+import os
 import threading
 
 from PIL import Image
@@ -14,39 +20,58 @@ from ocr_heuristics import analyze_text, layout_flags
 class OcrEngine:
     def __init__(self):
         self._lock = threading.Lock()
+        # e.g. "eng+heb+spa" — must match installed Tesseract traineddata (tesseract-ocr-<lang>).
+        self.languages = (os.environ.get("OCR_LANGUAGES", "eng+heb+spa") or "eng").strip()
+        # Discard low-confidence detections to reduce OCR noise on video frames.
+        try:
+            self.min_conf = float(os.environ.get("OCR_MIN_CONFIDENCE", "40"))
+        except ValueError:
+            self.min_conf = 40.0
         # Import here so the (optional) dependency only loads when the sidecar starts.
-        from rapidocr_onnxruntime import RapidOCR
+        import pytesseract
 
-        self.engine = RapidOCR()
+        self._pytesseract = pytesseract
 
     def _run_frame(self, path: str):
-        """Return (list_of_boxes, list_of_words, img_w, img_h)."""
+        """Return (list_of_boxes, list_of_words, img_w, img_h, density)."""
         try:
             with Image.open(path) as im:
-                img_w, img_h = im.size
+                img = im.convert("RGB")
+                img_w, img_h = img.size
+                data = self._pytesseract.image_to_data(
+                    img,
+                    lang=self.languages,
+                    output_type=self._pytesseract.Output.DICT,
+                )
         except Exception:
-            img_w, img_h = 0, 0
-
-        try:
-            result, _elapse = self.engine(path)
-        except Exception:
-            result = None
+            return [], [], 0, 0, 0.0
 
         boxes = []
         words = []
         text_area = 0.0
-        if result:
-            for item in result:
-                # item = [box(4 points), text, score]
-                box, text, _score = item[0], item[1], item[2]
-                xs = [pt[0] for pt in box]
-                ys = [pt[1] for pt in box]
-                x0, x1 = min(xs), max(xs)
-                y0, y1 = min(ys), max(ys)
-                boxes.append({"x0": x0, "y0": y0, "x1": x1, "y1": y1})
-                text_area += max(0.0, (x1 - x0)) * max(0.0, (y1 - y0))
-                if text:
-                    words.extend(str(text).split())
+
+        n = len(data.get("text", []))
+        for i in range(n):
+            text = (data["text"][i] or "").strip()
+            if not text:
+                continue
+            try:
+                conf = float(data["conf"][i])
+            except (TypeError, ValueError):
+                conf = -1.0
+            if conf < self.min_conf:
+                continue
+
+            x0 = float(data["left"][i])
+            y0 = float(data["top"][i])
+            w = float(data["width"][i])
+            h = float(data["height"][i])
+            x1 = x0 + w
+            y1 = y0 + h
+
+            boxes.append({"x0": x0, "y0": y0, "x1": x1, "y1": y1})
+            text_area += max(0.0, w) * max(0.0, h)
+            words.extend(text.split())
 
         density = 0.0
         if img_w > 0 and img_h > 0:

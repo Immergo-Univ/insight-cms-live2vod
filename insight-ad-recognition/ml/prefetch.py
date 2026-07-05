@@ -3,7 +3,9 @@
 Downloads and caches:
   - SigLIP model + processor
   - Zero-shot text classifier
-  - RapidOCR PP-OCR onnx models
+
+(OCR uses Tesseract, whose language data is installed as system packages in the Dockerfile, so it
+needs no prefetch here.)
 """
 
 import os
@@ -23,11 +25,6 @@ def main():
     from transformers import pipeline
 
     pipeline("zero-shot-classification", model=text_id, device=-1)
-
-    print("[prefetch] RapidOCR models", flush=True)
-    from rapidocr_onnxruntime import RapidOCR
-
-    RapidOCR()
 
     print("[prefetch] done", flush=True)
 

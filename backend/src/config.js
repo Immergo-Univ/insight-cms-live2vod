@@ -98,8 +98,12 @@ export const config = {
     secret: (process.env.AD_RECOGNITION_SECRET || "change-me").trim(),
     /** Milliseconds between probe cycles (all channels probed in parallel each cycle). */
     intervalMs: parseInt(process.env.AD_RECOGNITION_INTERVAL_MS || "30000", 10),
-    /** Per-request timeout; the detect service can take ~15-30s to respond. */
-    requestTimeoutMs: parseInt(process.env.AD_RECOGNITION_TIMEOUT_MS || "60000", 10),
+    /**
+     * Per-request timeout for the detect call. With 20s analysis windows on CPU (ffmpeg extraction
+     * + whisper + SigLIP/OCR over ~20 frames) a probe can take well over a minute, so this budget
+     * is generous. Env: AD_RECOGNITION_TIMEOUT_MS.
+     */
+    requestTimeoutMs: parseInt(process.env.AD_RECOGNITION_TIMEOUT_MS || "180000", 10),
     /**
      * Optional restriction: when set, only these tenant IDs are probed (intersected with the tenants
      * that have `adRecognitionEnabled === true`). When empty, ALL enabled tenants are probed.

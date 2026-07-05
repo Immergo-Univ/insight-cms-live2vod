@@ -34,16 +34,20 @@ export const config = {
   apiSecret: (process.env.API_SECRET ?? "").trim(),
 
   segment: {
-    seconds: Math.max(1, intEnv("SEGMENT_SECONDS", 5)),
+    // Analysis window length (seconds). Longer windows give whisper/vision more context per probe.
+    seconds: Math.max(1, intEnv("SEGMENT_SECONDS", 20)),
     fps: Math.max(1, intEnv("FRAMES_PER_SECOND", 1)),
-    liveEdgeMaxSegments: Math.max(1, intEnv("LIVE_EDGE_MAX_SEGMENTS", 6)),
+    liveEdgeMaxSegments: Math.max(1, intEnv("LIVE_EDGE_MAX_SEGMENTS", 8)),
   },
 
   tools: {
     ffmpeg: process.env.FFMPEG_BIN || "ffmpeg",
     ffprobe: process.env.FFPROBE_BIN || "ffprobe",
     whisperBin: process.env.WHISPER_BIN || "whisper-cli",
-    whisperModel: process.env.WHISPER_MODEL || path.join(appRoot, "models", "ggml-tiny.en.bin"),
+    // Multilingual ggml model (NOT the *.en model) so Hebrew/Spanish/English are all supported.
+    whisperModel: process.env.WHISPER_MODEL || path.join(appRoot, "models", "ggml-base.bin"),
+    // "auto" lets whisper detect the spoken language (Hebrew, Spanish, English, ...).
+    whisperLanguage: (process.env.WHISPER_LANGUAGE || "auto").trim(),
     whisperThreads: Math.max(1, intEnv("WHISPER_THREADS", 4)),
     python: process.env.PYTHON_BIN || "python3",
   },
@@ -66,13 +70,17 @@ export const config = {
   },
 
   limits: {
-    requestTimeoutMs: intEnv("REQUEST_TIMEOUT_MS", 15000),
+    // ffmpeg window extraction (frames + audio). Scaled up for the longer 20s window.
+    requestTimeoutMs: intEnv("REQUEST_TIMEOUT_MS", 30000),
     /**
      * Dedicated budget for the `/vision` sidecar call (SigLIP over N frames + OCR). On CPU this is
-     * far slower than the generic 15s request timeout, so it gets its own (larger) limit. Kept under
-     * the scheduler's per-probe budget (AD_RECOGNITION_TIMEOUT_MS, default 60s).
+     * far slower than the generic request timeout, and grows with the window length (more frames),
+     * so it gets its own (larger) limit. Kept under the scheduler's per-probe budget
+     * (AD_RECOGNITION_TIMEOUT_MS).
      */
-    visionTimeoutMs: intEnv("VISION_TIMEOUT_MS", 45000),
+    visionTimeoutMs: intEnv("VISION_TIMEOUT_MS", 90000),
+    /** whisper.cpp transcription budget (grows with the window length + multilingual model). */
+    whisperTimeoutMs: intEnv("WHISPER_TIMEOUT_MS", 60000),
     maxConcurrentJobs: Math.max(1, intEnv("MAX_CONCURRENT_JOBS", 4)),
   },
 

@@ -94,6 +94,7 @@ export async function analyzeVideo(videoUrl, workDir) {
     ocr_price: Boolean(ocr.ocr_price),
     ocr_cta: Boolean(ocr.ocr_cta),
     ocr_legal: Boolean(ocr.ocr_legal),
+    ocr_phone: Boolean(ocr.ocr_phone),
     ocr_news: Boolean(ocr.ocr_news),
     ocr_sports: Boolean(ocr.ocr_sports),
     ocr_credits: Boolean(ocr.ocr_credits),

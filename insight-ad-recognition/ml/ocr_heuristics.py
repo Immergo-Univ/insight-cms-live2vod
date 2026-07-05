@@ -37,9 +37,30 @@ _CREDITS = [
 _PRICE_RE = re.compile(r"(?:[$€£₪¥]\s?\d|(?:\d[\d.,]*)\s?(?:%|usd|eur|ils|nis))", re.IGNORECASE)
 _BRAND_RE = re.compile(r"\b[A-Z][A-Z0-9&'.-]{2,}\b")  # ALL-CAPS token, brand-like
 
+# Toll-free / special commercial numbers — strong direct-response ad signal.
+#   LatAm: 0800 / 0810 / 0600 / 0900 / 0610 ...   US: 1-800 / 888 / 877 / 866 / 855 / 844 / 833
+_TOLL_FREE_RE = re.compile(
+    r"\b(?:0(?:800|810|600|900|610)[\s.\-]?\d{2,}"
+    r"|1?[\s.\-]?(?:800|888|877|866|855|844|833)[\s.\-]?\d{3}[\s.\-]?\d{4})\b"
+)
+# Generic phone-like run (7–15 digits allowing spaces/dashes/parens/dots), validated by digit count
+# below to avoid matching prices, scores or dates.
+_PHONE_RE = re.compile(r"(?<!\d)\+?\d[\d\s().\-]{5,}\d(?!\d)")
+
 
 def _contains_any(text: str, words) -> bool:
     return any(w in text for w in words)
+
+
+def _looks_like_phone(text: str) -> bool:
+    """True when the OCR text contains a toll-free (0800-style) or generic phone number."""
+    if _TOLL_FREE_RE.search(text):
+        return True
+    for m in _PHONE_RE.finditer(text):
+        digits = re.sub(r"\D", "", m.group(0))
+        if 7 <= len(digits) <= 15:
+            return True
+    return False
 
 
 def analyze_text(joined_text: str) -> dict:
@@ -50,6 +71,7 @@ def analyze_text(joined_text: str) -> dict:
         "ocr_brand": bool(_BRAND_RE.search(joined_text)) or _contains_any(lower, ["®", "™"]),
         "ocr_cta": _contains_any(lower, _CTA),
         "ocr_legal": _contains_any(lower, _LEGAL),
+        "ocr_phone": _looks_like_phone(joined_text),
         "ocr_news": _contains_any(lower, _NEWS),
         "ocr_sports": _contains_any(lower, _SPORTS),
         "ocr_credits": _contains_any(lower, _CREDITS),

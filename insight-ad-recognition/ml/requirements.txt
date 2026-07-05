@@ -7,7 +7,7 @@ transformers==4.46.3
 sentencepiece==0.2.0
 protobuf==5.28.3
 pillow==11.0.0
-# Pinned <2 for broad compatibility with onnxruntime/opencv used by RapidOCR.
 numpy==1.26.4
-# RapidOCR = PaddleOCR PP-OCR models running on onnxruntime (no heavy paddlepaddle dependency).
-rapidocr-onnxruntime==1.4.4
+# OCR via Tesseract (system binary + language traineddata installed in the Dockerfile). Chosen over
+# single-script engines because channels are multilingual (English + Hebrew + Spanish).
+pytesseract==0.3.13

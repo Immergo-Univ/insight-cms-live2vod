@@ -1,7 +1,7 @@
 /**
- * whisper.cpp integration. Transcribes the extracted 16 kHz mono WAV to English text using the
- * smallest model (ggml-tiny.en). Returns transcript text plus a speech_ratio derived from the
- * timestamped segments (spoken time / window time).
+ * whisper.cpp integration. Transcribes the extracted 16 kHz mono WAV using a multilingual ggml
+ * model with language auto-detection (Hebrew / Spanish / English / ...). Returns transcript text
+ * plus a speech_ratio derived from the timestamped segments (spoken time / window time).
  */
 
 import fs from "node:fs/promises";
@@ -60,7 +60,8 @@ export async function transcribe(audioPath, workDir, durationSec) {
     "-f",
     audioPath,
     "-l",
-    "en",
+    // "auto" → whisper detects Hebrew/Spanish/English/... per window (requires a multilingual model).
+    config.tools.whisperLanguage || "auto",
     "-t",
     String(config.tools.whisperThreads),
     "-nt", // no timestamps in the plain text output
@@ -71,7 +72,7 @@ export async function transcribe(audioPath, workDir, durationSec) {
 
   let stdout = "";
   try {
-    const res = await run(config.tools.whisperBin, args, { timeoutMs: config.limits.requestTimeoutMs });
+    const res = await run(config.tools.whisperBin, args, { timeoutMs: config.limits.whisperTimeoutMs });
     stdout = res.stdout || "";
   } catch (e) {
     logger.warn("whisper.cpp invocation failed", { error: String(e?.message || e) });

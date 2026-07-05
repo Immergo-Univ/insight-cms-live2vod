@@ -1,6 +1,6 @@
 # insight-ad-recognition — single self-contained image.
-# Node.js API + Python ML sidecar (SigLIP + zero-shot text classifier + RapidOCR/PP-OCR) +
-# whisper.cpp (tiny.en) + ffmpeg. No docker-compose, no external services.
+# Node.js API + Python ML sidecar (SigLIP + zero-shot text classifier + Tesseract OCR eng+heb+spa) +
+# whisper.cpp (multilingual ggml-base) + ffmpeg. No docker-compose, no external services.
 #
 # Notes on image size: the heavy weight comes from the ML stack (torch CPU, transformers,
 # onnxruntime) which is inherent to the requirement of bundling SigLIP + Whisper in-container.
@@ -19,7 +19,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
 WORKDIR /app
 
 # ---- System dependencies ---------------------------------------------------------------------
-# Runtime: ffmpeg, python3, libgl/glib (for opencv used by RapidOCR).
+# Runtime: ffmpeg, python3, libgl/glib, Tesseract OCR + English/Hebrew/Spanish traineddata.
 # Build-only: git, cmake, build-essential (whisper.cpp) + curl — removed afterwards.
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ffmpeg \
@@ -28,6 +28,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       python3-venv \
       libgl1 \
       libglib2.0-0 \
+      tesseract-ocr \
+      tesseract-ocr-eng \
+      tesseract-ocr-heb \
+      tesseract-ocr-spa \
       ca-certificates \
       curl \
       git \
@@ -35,14 +39,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-# ---- whisper.cpp (compile tiny.en) -----------------------------------------------------------
+# ---- whisper.cpp (compile + multilingual ggml-base model) ------------------------------------
+# ggml-base (multilingual) is used instead of *.en so Hebrew/Spanish/English are all supported.
 RUN git clone --depth 1 https://github.com/ggerganov/whisper.cpp /tmp/whisper.cpp \
     && cmake -S /tmp/whisper.cpp -B /tmp/whisper.cpp/build -DCMAKE_BUILD_TYPE=Release \
     && cmake --build /tmp/whisper.cpp/build --config Release -j "$(nproc)" \
     && cp /tmp/whisper.cpp/build/bin/whisper-cli /usr/local/bin/whisper-cli \
     && mkdir -p /app/models \
-    && curl -fsSL -o /app/models/ggml-tiny.en.bin \
-       https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.en.bin \
+    && curl -fsSL -o /app/models/ggml-base.bin \
+       https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin \
     && rm -rf /tmp/whisper.cpp
 
 # ---- Python virtualenv + ML dependencies -----------------------------------------------------
@@ -73,7 +78,10 @@ RUN python3 /app/ml/prefetch.py
 ENV PORT=8081 \
     PYTHON_BIN=/opt/venv/bin/python3 \
     WHISPER_BIN=whisper-cli \
-    WHISPER_MODEL=/app/models/ggml-tiny.en.bin \
+    WHISPER_MODEL=/app/models/ggml-base.bin \
+    WHISPER_LANGUAGE=auto \
+    OCR_LANGUAGES=eng+heb+spa \
+    SEGMENT_SECONDS=20 \
     ML_SIDECAR_AUTOSTART=true \
     ML_SIDECAR_HOST=127.0.0.1 \
     ML_SIDECAR_PORT=8100
