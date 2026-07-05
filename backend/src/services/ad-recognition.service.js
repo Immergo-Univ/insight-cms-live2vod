@@ -322,6 +322,20 @@ async function discoverChannels() {
 
 async function runCycle() {
   const channels = await discoverChannels();
+
+  // Every cycle: list the m3u8 URLs that will be analyzed this round (confirms discovery is working).
+  if (channels.length === 0) {
+    console.log(
+      "[ad-recognition] cycle: 0 channel(s) to analyze " +
+        "(no tenant with adRecognitionEnabled=true, or none of their channels have archive/hls)",
+    );
+  } else {
+    const lines = channels
+      .map((c, i) => `  ${i + 1}. title="${c.title}" tenant=${c.tenantId} m3u8=${buildProbeUrl(c.hls)}`)
+      .join("\n");
+    console.log(`[ad-recognition] cycle: analyzing ${channels.length} channel(s):\n${lines}`);
+  }
+
   if (channels.length === 0) return;
   // All channels probed in parallel; one slow/failing channel does not block the others.
   await Promise.allSettled(channels.map((c) => probeChannel(c)));
