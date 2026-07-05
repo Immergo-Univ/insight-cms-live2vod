@@ -230,14 +230,16 @@ async function callDetect(hlsUrl) {
 }
 
 async function probeChannel(channel) {
-  const { channelId, tenantId, hls } = channel;
+  const { channelId, tenantId, hls, title } = channel;
   const st = await getOrInitState(channelId, { tenantId, hlsStream: hls });
   st.lastProbeAt = new Date().toISOString();
 
+  // Archive/DVR playlists need a bounded window (last PROBE_WINDOW_SECONDS); live playlists pass as-is.
+  const probeUrl = buildProbeUrl(hls);
+
   let result;
   try {
-    // Archive/DVR playlists need a bounded window (last PROBE_WINDOW_SECONDS); live playlists pass as-is.
-    result = await callDetect(buildProbeUrl(hls));
+    result = await callDetect(probeUrl);
   } catch (e) {
     st.lastError = e && typeof e.message === "string" ? e.message : String(e);
     await persistChannel(channelId, st);
@@ -255,6 +257,13 @@ async function probeChannel(channel) {
 
   applyDetection(st, detection, epoch);
   st.segments = trimOldSegments(st.segments);
+
+  // Positive recognition log: full detect JSON alongside the requested m3u8 (channel title + probed URL).
+  console.log(
+    `[ad-recognition] detect OK title="${title || channelId}" tenant=${tenantId} ` +
+      `detection=${detection} score=${score} m3u8=${probeUrl}\n` +
+      JSON.stringify(result, null, 2),
+  );
 
   await persistChannel(channelId, st);
 }
@@ -275,7 +284,7 @@ async function persistChannel(channelId, st) {
 }
 
 async function discoverChannels() {
-  /** @type {Array<{ channelId: string, tenantId: string, hls: string }>} */
+  /** @type {Array<{ channelId: string, tenantId: string, hls: string, title: string }>} */
   const discovered = [];
   const tenantIds = tenantsForRecognition();
 
@@ -297,7 +306,8 @@ async function discoverChannels() {
     for (const row of rows) {
       const hls = channelHlsUrl(row);
       if (!hls) continue;
-      discovered.push({ channelId: String(row._id), tenantId, hls });
+      const title = typeof row.title === "string" && row.title ? row.title : String(row._id);
+      discovered.push({ channelId: String(row._id), tenantId, hls, title });
     }
   }
   return discovered;
