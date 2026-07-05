@@ -20,7 +20,7 @@ import { config } from "../config.js";
 import { isSequelizeReady } from "../db/sequelize.js";
 import { resolveTenant } from "./auth.service.js";
 import { fetchChannelsWithArchive } from "./channels.service.js";
-import { getTenantById } from "./tenant-visit.service.js";
+import { listAdRecognitionEnabledTenantIds } from "./tenant-visit.service.js";
 import {
   mergeChannelSnapshotFields,
   readChannelSnapshotById,
@@ -87,29 +87,33 @@ function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-function tenantsForRecognition() {
-  const extra = config.adRecognition.tenantIds;
-  return extra.length > 0 ? extra : config.tenants;
+/**
+ * Tenants to probe this cycle: EVERY tenant known to this service that has opted into AD recognition
+ * (`adRecognitionEnabled === true` in the DB). There is no hardcoded tenant list — the admin flag is
+ * the single source of truth. `AD_RECOGNITION_TENANTS` (env) is only an optional restriction: when
+ * set, we probe the intersection with the enabled tenants (handy for debugging a single tenant).
+ * @returns {Promise<string[]>}
+ */
+async function tenantsForRecognition() {
+  if (!isSequelizeReady()) return [];
+  let enabled;
+  try {
+    enabled = await listAdRecognitionEnabledTenantIds();
+  } catch (e) {
+    console.warn("[ad-recognition] enabled-tenants query failed:", e && e.message ? e.message : e);
+    return [];
+  }
+  const allowlist = config.adRecognition.tenantIds;
+  if (allowlist.length > 0) {
+    const set = new Set(allowlist);
+    return enabled.filter((id) => set.has(id));
+  }
+  return enabled;
 }
 
 /** @param {{ hlsStream?: string, hlsMaster?: string }} row */
 function channelHlsUrl(row) {
   return row.hlsStream || row.hlsMaster || "";
-}
-
-/**
- * Whether AD recognition should run for a tenant. This is strictly OPT-IN: it only runs when the
- * tenant row exists and has `adRecognitionEnabled === true`. Any other case (DB unavailable,
- * tenant deleted/missing, flag off) → disabled, so nothing is probed unless explicitly activated.
- */
-async function isTenantAdRecognitionEnabled(tenantId) {
-  try {
-    if (!isSequelizeReady()) return false;
-    const tenant = await getTenantById(tenantId);
-    return tenant?.adRecognitionEnabled === true;
-  } catch {
-    return false;
-  }
 }
 
 /**
@@ -286,17 +290,20 @@ async function persistChannel(channelId, st) {
 async function discoverChannels() {
   /** @type {Array<{ channelId: string, tenantId: string, hls: string, title: string }>} */
   const discovered = [];
-  const tenantIds = tenantsForRecognition();
+  const tenantIds = await tenantsForRecognition();
+  if (tenantIds.length === 0) return [];
 
   const results = await Promise.all(
     tenantIds.map(async (tenantId) => {
       try {
-        // Skip tenants that have AD recognition disabled from their admin settings.
-        if (!(await isTenantAdRecognitionEnabled(tenantId))) return { tenantId, rows: [] };
         const t = await resolveTenant(tenantId);
         const rows = await fetchChannelsWithArchive({ accountId: t.accountId, tenantId });
         return { tenantId, rows };
-      } catch {
+      } catch (e) {
+        console.warn(
+          `[ad-recognition] channel discovery failed tenant=${tenantId}:`,
+          e && e.message ? e.message : e,
+        );
         return { tenantId, rows: [] };
       }
     }),

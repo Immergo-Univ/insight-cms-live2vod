@@ -140,3 +140,20 @@ export async function getTenantById(tenantId) {
   if (!row) return null;
   return tenantRowToApi(row.get({ plain: true }));
 }
+
+/**
+ * All tenant IDs (across every tenant known to this service) that have opted into AD recognition.
+ * This is the source of truth for the scheduler — no hardcoded tenant list.
+ *
+ * @returns {Promise<string[]>}
+ */
+export async function listAdRecognitionEnabledTenantIds() {
+  const sequelize = getSequelize();
+  if (!sequelize) return [];
+  const { Tenant } = sequelize.models;
+  const rows = await Tenant.findAll({
+    where: { adRecognitionEnabled: true },
+    attributes: ["tenantId"],
+  });
+  return rows.map((r) => String(r.get("tenantId") || "").trim()).filter(Boolean);
+}

@@ -63,8 +63,11 @@ export const config = {
   port: process.env.PORT || 3001,
   insightApiUsername: process.env.INSIGHT_API_USERNAME,
   insightApiPassword: process.env.INSIGHT_API_PASSWORD,
-  /** Default tenant IDs (same as x-tenant-id) for live discovery when env lists are empty. */
-  tenants: ["channel14", "rjr"],
+  /**
+   * Deprecated: AD recognition no longer uses a hardcoded tenant list. The scheduler discovers every
+   * tenant with `adRecognitionEnabled === true` in the DB. Kept only for backwards-compat (unused).
+   */
+  tenants: [],
 
   backendRoot,
 
@@ -97,7 +100,10 @@ export const config = {
     intervalMs: parseInt(process.env.AD_RECOGNITION_INTERVAL_MS || "30000", 10),
     /** Per-request timeout; the detect service can take ~15-30s to respond. */
     requestTimeoutMs: parseInt(process.env.AD_RECOGNITION_TIMEOUT_MS || "60000", 10),
-    /** Optional tenant allowlist (defaults to config.tenants when empty). */
+    /**
+     * Optional restriction: when set, only these tenant IDs are probed (intersected with the tenants
+     * that have `adRecognitionEnabled === true`). When empty, ALL enabled tenants are probed.
+     */
     tenantIds: (process.env.AD_RECOGNITION_TENANTS || "")
       .split(",")
       .map((s) => s.trim())
