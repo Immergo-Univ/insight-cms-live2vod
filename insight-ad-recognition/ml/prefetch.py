@@ -13,7 +13,7 @@ import os
 
 def main():
     siglip_id = os.environ.get("SIGLIP_MODEL", "google/siglip-base-patch16-224")
-    text_id = os.environ.get("TEXT_MODEL", "typeform/distilbert-base-uncased-mnli")
+    text_id = os.environ.get("TEXT_MODEL", "MoritzLaurer/mDeBERTa-v3-base-mnli-xnli")
 
     print(f"[prefetch] SigLIP: {siglip_id}", flush=True)
     from transformers import AutoModel, AutoProcessor

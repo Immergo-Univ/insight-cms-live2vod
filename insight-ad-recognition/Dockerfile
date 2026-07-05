@@ -71,7 +71,7 @@ COPY ml /app/ml
 
 # ---- Prefetch ML models into the image (fully offline at runtime) ----------------------------
 ENV SIGLIP_MODEL=google/siglip-base-patch16-224 \
-    TEXT_MODEL=typeform/distilbert-base-uncased-mnli
+    TEXT_MODEL=MoritzLaurer/mDeBERTa-v3-base-mnli-xnli
 RUN python3 /app/ml/prefetch.py
 
 # ---- Runtime config --------------------------------------------------------------------------

@@ -65,7 +65,8 @@ export const config = {
 
   models: {
     siglip: process.env.SIGLIP_MODEL || "google/siglip-base-patch16-224",
-    text: process.env.TEXT_MODEL || "typeform/distilbert-base-uncased-mnli",
+    // Multilingual XNLI zero-shot model so Hebrew/Spanish/English transcripts are all classified.
+    text: process.env.TEXT_MODEL || "MoritzLaurer/mDeBERTa-v3-base-mnli-xnli",
     hfHome: process.env.HF_HOME || path.join(appRoot, "ml", "models_cache"),
   },
 

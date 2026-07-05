@@ -97,7 +97,7 @@ def _load_models():
         from ocr_engine import OcrEngine
 
         siglip_id = os.environ.get("SIGLIP_MODEL", "google/siglip-base-patch16-224")
-        text_id = os.environ.get("TEXT_MODEL", "typeform/distilbert-base-uncased-mnli")
+        text_id = os.environ.get("TEXT_MODEL", "MoritzLaurer/mDeBERTa-v3-base-mnli-xnli")
 
         STATE["siglip"] = SiglipClassifier(siglip_id, _categories())
         STATE["text"] = TextCommercialClassifier(text_id)
