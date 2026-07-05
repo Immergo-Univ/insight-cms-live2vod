@@ -47,9 +47,13 @@ export const PROGRAM_CONFIRM_SAMPLES = 3;
  */
 export const PROBE_WINDOW_SECONDS = 120;
 
-/** Heuristic: URLs that require a startTime/endTime window to return media. */
+/**
+ * Heuristic: DVR/archive playlists that only return media when given a startTime/endTime window.
+ * Covers the `-archive` playlists, the `fillgaps` proxy and the immergo encoder DVR origin
+ * (`encoders.immergo.tv`), whose path is a plain `streamPlaylist.m3u8` but still needs the window.
+ */
 function needsArchiveWindow(url) {
-  return /archive|fillgaps/i.test(url);
+  return /archive|fillgaps|encoders\.immergo\.tv/i.test(url);
 }
 
 /**
