@@ -82,6 +82,7 @@ ENV PORT=8081 \
     WHISPER_LANGUAGE=auto \
     OCR_LANGUAGES=eng+heb+spa \
     SEGMENT_SECONDS=20 \
+    PREVIEW_PUBLIC_BASE_URL=https://insight-cms-live2vod-id2z9.ondigitalocean.app/insight-cms-live2vod-insight-ad \
     ML_SIDECAR_AUTOSTART=true \
     ML_SIDECAR_HOST=127.0.0.1 \
     ML_SIDECAR_PORT=8100

@@ -16,9 +16,11 @@ _CTA = [
 ]
 _LEGAL = [
     "terms", "conditions", "apply", "restrictions", "warning", "disclaimer", "rights reserved",
-    "see store", "may vary", "while supplies last", "*", "©", "™", "®",
+    "see store", "may vary", "while supplies last",
     # Spanish
     "términos", "condiciones", "aplican", "consulte", "reservados",
+    # NOTE: symbols like "*", "©", "™", "®" were removed — they fire on short codes (e.g. *5076),
+    # footnotes and OCR noise on non-Latin frames, causing false-positive ad detections.
 ]
 _NEWS = [
     "breaking", "news", "live", "report", "update", "headlines", "weather", "forecast",
@@ -35,7 +37,9 @@ _CREDITS = [
 ]
 
 _PRICE_RE = re.compile(r"(?:[$€£₪¥]\s?\d|(?:\d[\d.,]*)\s?(?:%|usd|eur|ils|nis))", re.IGNORECASE)
-_BRAND_RE = re.compile(r"\b[A-Z][A-Z0-9&'.-]{2,}\b")  # ALL-CAPS token, brand-like
+# ALL-CAPS token, brand-like. Require 4+ chars to avoid matching OCR noise (stray 2–3 char Latin
+# fragments produced when the frame text is actually Hebrew/other non-Latin script).
+_BRAND_RE = re.compile(r"\b[A-Z][A-Z0-9&'.-]{3,}\b")
 
 # Toll-free / special commercial numbers — strong direct-response ad signal.
 #   LatAm: 0800 / 0810 / 0600 / 0900 / 0610 ...   US: 1-800 / 888 / 877 / 866 / 855 / 844 / 833
@@ -68,7 +72,8 @@ def analyze_text(joined_text: str) -> dict:
     lower = joined_text.lower()
     return {
         "ocr_price": bool(_PRICE_RE.search(joined_text)),
-        "ocr_brand": bool(_BRAND_RE.search(joined_text)) or _contains_any(lower, ["®", "™"]),
+        # Symbol-only (®/™) matching was removed: OCR frequently hallucinates these on non-Latin text.
+        "ocr_brand": bool(_BRAND_RE.search(joined_text)),
         "ocr_cta": _contains_any(lower, _CTA),
         "ocr_legal": _contains_any(lower, _LEGAL),
         "ocr_phone": _looks_like_phone(joined_text),

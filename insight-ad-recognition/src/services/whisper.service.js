@@ -19,6 +19,21 @@ async function fileExists(p) {
   }
 }
 
+function parseTranscriptFromJson(jsonStr) {
+  try {
+    const doc = JSON.parse(jsonStr);
+    const segs = doc?.transcription || doc?.segments || [];
+    const parts = [];
+    for (const s of segs) {
+      const txt = typeof s?.text === "string" ? s.text : "";
+      if (txt) parts.push(txt.trim());
+    }
+    return parts.join(" ").replace(/\s+/g, " ").trim();
+  } catch {
+    return "";
+  }
+}
+
 function parseTimestampsToSpeechSec(jsonOrTxt) {
   // Prefer JSON with segment timestamps when available.
   try {
@@ -65,7 +80,8 @@ export async function transcribe(audioPath, workDir, durationSec) {
     "-t",
     String(config.tools.whisperThreads),
     "-nt", // no timestamps in the plain text output
-    "-oj", // also emit JSON (with timestamps) for speech_ratio
+    "-oj", // emit JSON (segments + timestamps): primary transcript + speech_ratio source
+    "-otxt", // also write a .txt fallback
     "-of",
     outBase,
   ];
@@ -80,20 +96,28 @@ export async function transcribe(audioPath, workDir, durationSec) {
   }
 
   let transcript = "";
-  const txtPath = `${outBase}.txt`;
-  if (await fileExists(txtPath)) {
-    transcript = (await fs.readFile(txtPath, "utf8")).trim();
-  } else {
-    transcript = stdout.replace(/\[[0-9:.\s\->]+\]/g, "").trim();
-  }
-
   let speechRatio = null;
+
+  // Primary source: the JSON emitted by -oj (deterministic; stdout/-nt behavior varies by build).
   const jsonPath = `${outBase}.json`;
   if (await fileExists(jsonPath)) {
-    const spoken = parseTimestampsToSpeechSec(await fs.readFile(jsonPath, "utf8"));
+    const jsonRaw = await fs.readFile(jsonPath, "utf8");
+    transcript = parseTranscriptFromJson(jsonRaw);
+    const spoken = parseTimestampsToSpeechSec(jsonRaw);
     if (spoken != null && durationSec > 0) {
       speechRatio = Math.max(0, Math.min(1, spoken / durationSec));
     }
+  }
+
+  // Fallbacks: the .txt file, then stdout with any timestamp markers stripped.
+  if (!transcript) {
+    const txtPath = `${outBase}.txt`;
+    if (await fileExists(txtPath)) {
+      transcript = (await fs.readFile(txtPath, "utf8")).trim();
+    }
+  }
+  if (!transcript) {
+    transcript = stdout.replace(/\[[0-9:.\s\->]+\]/g, "").trim();
   }
 
   return { transcript, speechRatio, ok: true };

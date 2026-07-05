@@ -114,12 +114,19 @@ export async function sweepPreviews() {
 export function previewUrl(fileName, req) {
   if (!fileName) return null;
   const routePath = `${config.previews.route}/${encodeURIComponent(fileName)}`;
+  // Explicit override (e.g. PREVIEW_PUBLIC_BASE_URL=https://host/insight-cms-live2vod-insight-ad).
   if (config.previews.publicBaseUrl) {
     return `${config.previews.publicBaseUrl}${routePath}`;
   }
   const proto = (req.headers["x-forwarded-proto"] || req.protocol || "http").split(",")[0].trim();
   const host = req.get("host");
-  return `${proto}://${host}${routePath}`;
+  // Honor the reverse-proxy mount path (e.g. "/insight-cms-live2vod-insight-ad") so the public URL
+  // includes the prefix under which this service is exposed, not just the bare host.
+  const prefix = String(req.headers["x-forwarded-prefix"] || "")
+    .split(",")[0]
+    .trim()
+    .replace(/\/+$/, "");
+  return `${proto}://${host}${prefix}${routePath}`;
 }
 
 export default { buildMosaic, sweepPreviews, previewUrl, ensurePreviewDir, sanitizeVideoName };

@@ -11,6 +11,15 @@
 
 /** Vision categories that strongly indicate a commercial / non-program filler. */
 const AD_CATEGORIES = new Set(["TV commercial", "Slate", "Test pattern", "Logo bumper", "Credits"]);
+
+/**
+ * Minimum absolute ad score required to declare "ad". Below this, weak/noisy evidence (e.g. a couple
+ * of OCR cues) must NOT flip the verdict away from "program". Tunable via AD_MIN_SCORE.
+ */
+const AD_MIN_SCORE = (() => {
+  const v = parseFloat(process.env.AD_MIN_SCORE ?? "");
+  return Number.isFinite(v) ? v : 0.3;
+})();
 const BLACK_CATEGORIES = new Set(["Black screen"]);
 const PROGRAM_CATEGORIES = new Set([
   "Television program",
@@ -60,17 +69,24 @@ export function classify(p) {
     reasons.push("audio:commercial");
   }
 
-  // OCR advertising cues.
-  const ocrAdHits = [p.ocr_brand, p.ocr_price, p.ocr_cta, p.ocr_legal, p.ocr_phone].filter(Boolean).length;
-  if (ocrAdHits > 0) {
-    adScore += Math.min(0.3, ocrAdHits * 0.1);
-    reasons.push(`ocr:ad_cues=${ocrAdHits}`);
+  // OCR advertising cues, split by reliability:
+  //  - strong: price / CTA / phone (rarely appear outside ads)
+  //  - weak: brand-like ALL-CAPS / legal wording (prone to OCR noise, especially on non-Latin frames)
+  const strongOcr = [p.ocr_price, p.ocr_cta, p.ocr_phone].filter(Boolean).length;
+  const weakOcr = [p.ocr_brand, p.ocr_legal].filter(Boolean).length;
+  if (strongOcr > 0) {
+    adScore += Math.min(0.3, strongOcr * 0.12);
+    reasons.push(`ocr:strong=${strongOcr}`);
+  }
+  if (weakOcr > 0) {
+    adScore += Math.min(0.1, weakOcr * 0.05);
+    reasons.push(`ocr:weak=${weakOcr}`);
   }
 
   // A visible phone number (esp. toll-free 0800 / 1-800) is a hallmark of direct-response
-  // commercials, so add extra evidence beyond the generic OCR-cue bump above.
+  // commercials, so add extra evidence on top of the strong-cue bump above.
   if (p.ocr_phone) {
-    adScore += 0.12;
+    adScore += 0.2;
     reasons.push("ocr:phone");
   }
 
@@ -114,7 +130,9 @@ export function classify(p) {
   let detection = "program";
   if ((p.blackscreen_ratio ?? 0) >= 0.6 && blackScore >= adScore && blackScore >= programScore) {
     detection = "black";
-  } else if (adScore >= programScore && adScore >= blackScore) {
+  } else if (adScore >= programScore && adScore >= blackScore && adScore >= AD_MIN_SCORE) {
+    // Only call "ad" when the evidence clears a minimum bar — prevents weak OCR noise from flipping
+    // a normal program (e.g. a call-in show with an on-screen short code) to "ad".
     detection = "ad";
   } else if (blackScore >= programScore && blackScore > adScore) {
     detection = "black";
