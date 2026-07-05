@@ -5,6 +5,7 @@ import { registerAdminModels } from "../models/register-admin-models.js";
 import { registerTenantModel } from "../models/tenant.model.js";
 import { registerTenantSyndicationAccountModel } from "../models/tenant-syndication-account.model.js";
 import { registerAppSettingModel } from "../models/app-setting.model.js";
+import { registerAdRecognitionScanModel } from "../models/ad-recognition-scan.model.js";
 import { seedAdminIfNeeded } from "../services/admin-seed.service.js";
 import { runPendingMigrations } from "./migration-runner.js";
 
@@ -44,6 +45,7 @@ export function registerAllModels(sq) {
   registerTenantModel(sq);
   registerTenantSyndicationAccountModel(sq);
   registerAppSettingModel(sq);
+  registerAdRecognitionScanModel(sq);
 }
 
 export function getSequelize() {

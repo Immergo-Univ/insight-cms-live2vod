@@ -217,3 +217,17 @@
 .admin-root .ant-btn.admin-connection-pill {
   font-size: 13px;
 }
+
+/* AD-recognition scan rows: non-program (ad/black/error) green, program yellow. */
+.admin-root .ad-scan-row-nonprogram > td.ant-table-cell {
+  background-color: #ecfdf3;
+}
+.admin-root .ad-scan-row-nonprogram:hover > td.ant-table-cell {
+  background-color: #d1fadf;
+}
+.admin-root .ad-scan-row-program > td.ant-table-cell {
+  background-color: #fffaeb;
+}
+.admin-root .ad-scan-row-program:hover > td.ant-table-cell {
+  background-color: #fef0c7;
+}

@@ -16,8 +16,9 @@
  * OpenCV logo-detector pipeline.
  */
 
+import { Op } from "sequelize";
 import { config } from "../config.js";
-import { isSequelizeReady } from "../db/sequelize.js";
+import { getSequelize, isSequelizeReady } from "../db/sequelize.js";
 import { resolveTenant } from "./auth.service.js";
 import { fetchChannelsWithArchive } from "./channels.service.js";
 import { listAdRecognitionEnabledTenantIds } from "./tenant-visit.service.js";
@@ -233,10 +234,39 @@ async function callDetect(hlsUrl) {
   }
 }
 
+/**
+ * Insert one scan row into the DB (best-effort; never throws to the caller).
+ * @param {object} scan AdRecognitionScan attributes
+ */
+async function persistScanToDb(scan) {
+  const sequelize = getSequelize();
+  const Model = sequelize?.models?.AdRecognitionScan;
+  if (!Model) return;
+  try {
+    await Model.create(scan);
+  } catch (e) {
+    console.warn("[ad-recognition] scan DB insert failed:", e && e.message ? e.message : e);
+  }
+}
+
+/** Drop scan rows older than the ads retention window to bound table growth. */
+async function pruneOldScansFromDb() {
+  const sequelize = getSequelize();
+  const Model = sequelize?.models?.AdRecognitionScan;
+  if (!Model) return;
+  const cutoff = new Date(Date.now() - config.adsRetentionHours * 3600 * 1000);
+  try {
+    await Model.destroy({ where: { scannedAt: { [Op.lt]: cutoff } } });
+  } catch (e) {
+    console.warn("[ad-recognition] scan prune failed:", e && e.message ? e.message : e);
+  }
+}
+
 async function probeChannel(channel) {
   const { channelId, tenantId, hls, title } = channel;
   const st = await getOrInitState(channelId, { tenantId, hlsStream: hls });
   st.lastProbeAt = new Date().toISOString();
+  const scannedAt = new Date();
 
   // Archive/DVR playlists need a bounded window (last PROBE_WINDOW_SECONDS); live playlists pass as-is.
   const probeUrl = buildProbeUrl(hls);
@@ -245,8 +275,25 @@ async function probeChannel(channel) {
   try {
     result = await callDetect(probeUrl);
   } catch (e) {
-    st.lastError = e && typeof e.message === "string" ? e.message : String(e);
+    const msg = e && typeof e.message === "string" ? e.message : String(e);
+    st.lastError = msg;
     await persistChannel(channelId, st);
+    await persistScanToDb({
+      tenantId,
+      channelId,
+      channelTitle: title || null,
+      hlsUrl: probeUrl,
+      detection: "error",
+      score: null,
+      confidence: null,
+      scores: null,
+      transcript: null,
+      ocrText: null,
+      profile: null,
+      error: msg,
+      probeEpoch: Math.floor(Date.now() / 1000),
+      scannedAt,
+    });
     return;
   }
 
@@ -270,6 +317,22 @@ async function probeChannel(channel) {
   );
 
   await persistChannel(channelId, st);
+  await persistScanToDb({
+    tenantId,
+    channelId,
+    channelTitle: title || null,
+    hlsUrl: probeUrl,
+    detection,
+    score,
+    confidence: typeof result?.confidence === "number" ? result.confidence : null,
+    scores: result?.scores ?? null,
+    transcript: typeof result?.transcript === "string" ? result.transcript : null,
+    ocrText: typeof result?.ocr_text === "string" ? result.ocr_text : null,
+    profile: result?.profile ?? null,
+    error: null,
+    probeEpoch: epoch,
+    scannedAt,
+  });
 }
 
 async function persistChannel(channelId, st) {
@@ -339,6 +402,8 @@ async function runCycle() {
   if (channels.length === 0) return;
   // All channels probed in parallel; one slow/failing channel does not block the others.
   await Promise.allSettled(channels.map((c) => probeChannel(c)));
+  // Bound the scan history table (once per cycle, best-effort).
+  await pruneOldScansFromDb();
 }
 
 async function schedulerLoop() {

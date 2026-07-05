@@ -8,6 +8,7 @@ import * as roles from "../services/admin-role.service.js";
 import * as matrix from "../services/admin-matrix.service.js";
 import * as clips from "../services/admin-clip.service.js";
 import * as adminTenants from "../services/admin-tenant.service.js";
+import * as adminStreams from "../services/admin-stream.service.js";
 import * as appSettings from "../services/admin-settings.service.js";
 import { isSequelizeReady } from "../db/sequelize.js";
 
@@ -318,6 +319,37 @@ adminSecured.delete(
       res.json(row);
     } catch (e) {
       res.status(400).json({ error: e instanceof Error ? e.message : String(e) });
+    }
+  },
+);
+
+adminSecured.get(
+  "/tenants/:tenantId/streams",
+  requireAdminPermission("tenants", "view"),
+  async (req, res) => {
+    try {
+      const streams = await adminStreams.adminListTenantStreams(req.params.tenantId);
+      res.json({ streams });
+    } catch (e) {
+      res.status(500).json({ error: e instanceof Error ? e.message : String(e) });
+    }
+  },
+);
+
+adminSecured.get(
+  "/tenants/:tenantId/streams/:channelId/scans",
+  requireAdminPermission("tenants", "view"),
+  async (req, res) => {
+    try {
+      const limit = parseInt(String(req.query.limit || "1000"), 10);
+      const scans = await adminStreams.adminListChannelScans(
+        req.params.tenantId,
+        req.params.channelId,
+        { limit },
+      );
+      res.json({ scans });
+    } catch (e) {
+      res.status(500).json({ error: e instanceof Error ? e.message : String(e) });
     }
   },
 );

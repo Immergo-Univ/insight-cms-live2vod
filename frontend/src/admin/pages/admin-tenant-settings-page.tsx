@@ -6,6 +6,7 @@ import { useTranslation } from "react-i18next";
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { getAdminClient } from "@/admin/admin-api";
 import { useAdminAuth } from "@/admin/admin-auth-context";
+import { StreamScansModal } from "@/admin/components/stream-scans-modal";
 import {
   fetchTenantSyndicationFacebookPages,
   postTenantSyndicationFacebookSelectPage,
@@ -76,6 +77,24 @@ type FormShape = {
   syndicationTiktokDefaultEnabled: boolean;
   syndicationAccountMaxByPlatform: SyndicationAccountMaxByPlatform;
   metadataJson: string;
+};
+
+type StreamRow = {
+  channelId: string;
+  title: string;
+  hlsStream: string;
+  hlsMaster: string;
+  effectiveHls: string;
+  archive: boolean;
+  posterUrl: string;
+  scanCount: number;
+  lastScan: {
+    detection: string;
+    score: number | null;
+    error: string | null;
+    probeEpoch: number | null;
+    scannedAt: string;
+  } | null;
 };
 
 type FacebookPageOption = { id: string; name: string };
@@ -150,6 +169,9 @@ export function AdminTenantSettingsPage() {
   const [dashboardLoading, setDashboardLoading] = useState(false);
   const [syndicationAccounts, setSyndicationAccounts] = useState<SyndicationAccountRow[]>([]);
   const [syndicationAccountsLoading, setSyndicationAccountsLoading] = useState(false);
+  const [streams, setStreams] = useState<StreamRow[]>([]);
+  const [streamsLoading, setStreamsLoading] = useState(false);
+  const [scansModalStream, setScansModalStream] = useState<{ channelId: string; title: string } | null>(null);
 
   const burnInDefaultOn = Form.useWatch("subtitlesDefaultBurnIn", form);
   const watchedAvailableLanguages = Form.useWatch("availableLanguages", form);
@@ -236,10 +258,27 @@ export function AdminTenantSettingsPage() {
     }
   }, [message, tenantId]);
 
+  const loadStreams = useCallback(async () => {
+    if (!tenantId) return;
+    setStreamsLoading(true);
+    try {
+      const { data } = await getAdminClient().get<{ streams: StreamRow[] }>(
+        `/tenants/${encodeURIComponent(tenantId)}/streams`,
+      );
+      setStreams(Array.isArray(data?.streams) ? data.streams : []);
+    } catch (e: unknown) {
+      message.error(readErrorMessage(e));
+      setStreams([]);
+    } finally {
+      setStreamsLoading(false);
+    }
+  }, [message, tenantId]);
+
   useEffect(() => {
     void loadTenant();
     void loadSyndicationAccounts();
-  }, [loadTenant, loadSyndicationAccounts]);
+    void loadStreams();
+  }, [loadTenant, loadSyndicationAccounts, loadStreams]);
 
   const loadDashboard = useCallback(async () => {
     if (!tenantId) return;
@@ -569,6 +608,113 @@ export function AdminTenantSettingsPage() {
     );
   };
 
+  const detectionTagColor = (detection: string): string => {
+    switch (detection) {
+      case "ad":
+        return "green";
+      case "program":
+        return "gold";
+      case "error":
+        return "red";
+      default:
+        return "default";
+    }
+  };
+
+  const streamColumns: ColumnsType<StreamRow> = [
+    {
+      title: t("streams.colTitle"),
+      dataIndex: "title",
+      key: "title",
+      render: (v: string) => v || <Typography.Text type="secondary">—</Typography.Text>,
+    },
+    {
+      title: t("streams.colHls"),
+      dataIndex: "effectiveHls",
+      key: "effectiveHls",
+      ellipsis: true,
+      render: (v: string) =>
+        v ? (
+          <Typography.Text copyable={{ text: v }} style={{ maxWidth: 360 }} ellipsis>
+            {v}
+          </Typography.Text>
+        ) : (
+          "—"
+        ),
+    },
+    {
+      title: t("streams.colLastDetection"),
+      key: "lastDetection",
+      width: 150,
+      render: (_, r) =>
+        r.lastScan ? <Tag color={detectionTagColor(r.lastScan.detection)}>{r.lastScan.detection}</Tag> : "—",
+    },
+    {
+      title: t("streams.colLastProbe"),
+      key: "lastProbe",
+      width: 190,
+      render: (_, r) => {
+        if (!r.lastScan) return "—";
+        const ms =
+          r.lastScan.probeEpoch != null ? r.lastScan.probeEpoch * 1000 : Date.parse(r.lastScan.scannedAt);
+        return Number.isFinite(ms) ? new Date(ms).toLocaleString() : "—";
+      },
+    },
+    {
+      title: t("streams.colScanCount"),
+      dataIndex: "scanCount",
+      key: "scanCount",
+      width: 100,
+    },
+    {
+      title: t("streams.colActions"),
+      key: "actions",
+      width: 140,
+      render: (_, r) => (
+        <Button size="small" onClick={() => setScansModalStream({ channelId: r.channelId, title: r.title })}>
+          {t("streams.viewScans")}
+        </Button>
+      ),
+    },
+  ];
+
+  const renderStreamsTab = () => (
+    <div>
+      <div style={{ maxWidth: 900 }}>
+        <Form.Item style={{ marginBottom: 14 }}>
+          <Space align="start" size={10}>
+            <Form.Item name="adRecognitionEnabled" valuePropName="checked" noStyle>
+              <Switch disabled={!can("tenants", "edit")} />
+            </Form.Item>
+            <div>
+              <Typography.Text>{t("tenants.adRecognitionEnabledLabel")}</Typography.Text>
+              <Typography.Paragraph type="secondary" style={{ marginBottom: 0, marginTop: 4 }}>
+                {t("tenants.adRecognitionEnabledHint")}
+              </Typography.Paragraph>
+            </div>
+          </Space>
+        </Form.Item>
+      </div>
+
+      <Space style={{ width: "100%", justifyContent: "space-between", marginBottom: 8 }}>
+        <Typography.Text strong>{t("streams.availableStreams")}</Typography.Text>
+        <Button size="small" onClick={() => void loadStreams()} loading={streamsLoading}>
+          {t("streams.reload")}
+        </Button>
+      </Space>
+      <Table<StreamRow>
+        rowKey="channelId"
+        size="small"
+        loading={streamsLoading}
+        dataSource={streams}
+        columns={streamColumns}
+        pagination={false}
+        locale={{ emptyText: t("streams.streamsEmpty") }}
+        scroll={{ x: true }}
+      />
+    </div>
+  );
+
   const renderSwitchList = (
     items: Array<{ name: keyof FormShape; label: string; hint?: string }>,
   ) => (
@@ -809,23 +955,7 @@ export function AdminTenantSettingsPage() {
               {
                 key: "streams",
                 label: t("tenants.tabStreams"),
-                children: (
-                  <div style={{ maxWidth: 900 }}>
-                    <Form.Item style={{ marginBottom: 14 }}>
-                      <Space align="start" size={10}>
-                        <Form.Item name="adRecognitionEnabled" valuePropName="checked" noStyle>
-                          <Switch disabled={!can("tenants", "edit")} />
-                        </Form.Item>
-                        <div>
-                          <Typography.Text>{t("tenants.adRecognitionEnabledLabel")}</Typography.Text>
-                          <Typography.Paragraph type="secondary" style={{ marginBottom: 0, marginTop: 4 }}>
-                            {t("tenants.adRecognitionEnabledHint")}
-                          </Typography.Paragraph>
-                        </div>
-                      </Space>
-                    </Form.Item>
-                  </div>
-                ),
+                children: renderStreamsTab(),
               },
               {
                 key: "languages",
@@ -1076,6 +1206,14 @@ export function AdminTenantSettingsPage() {
           />
         </Form>
       </Spin>
+
+      <StreamScansModal
+        open={scansModalStream !== null}
+        onClose={() => setScansModalStream(null)}
+        tenantId={tenantId}
+        channelId={scansModalStream?.channelId ?? ""}
+        channelTitle={scansModalStream?.title ?? ""}
+      />
     </div>
   );
 }
