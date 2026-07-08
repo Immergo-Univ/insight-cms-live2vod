@@ -1,7 +1,7 @@
 {
   "name": "insight-ad-recognition",
   "version": "1.0.0",
-  "description": "Live channel AD recognition API (Node.js orchestrator + in-container Whisper/SigLIP/OCR).",
+  "description": "Live channel AD recognition API (Node.js orchestrator + in-container CLAP audio zero-shot classifier + Whisper).",
   "type": "module",
   "private": true,
   "engines": {

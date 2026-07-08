@@ -1,141 +1,131 @@
 /**
- * Deterministic decision layer.
+ * Deterministic decision layer — audio-only version.
  *
- * Consumes the assembled profile JSON and produces the final verdict:
- *   { detection: "ad" | "program" | "black", score, confidence }
+ * Consumes the assembled profile JSON (built from CLAP + local audio metrics only) and produces
+ * the final verdict:
+ *   { detection: "ad" | "program" | "silence", score, confidence, scores, reasons }
  *
- * The scoring is fully transparent (weighted evidence, no learned model) so its behavior is
- * predictable and tunable. Each contributing signal is bounded and combined into three class
- * scores; the winner and its normalized margin drive `score`/`confidence`.
+ * The primary signal is the CLAP category of the LAST chunk in the window (live edge = "what's
+ * on right now"). The window-average CLAP scores are used as a secondary signal so a single
+ * misclassified chunk doesn't flip a stable window. Silence (heavy silence_ratio + very low RMS)
+ * is emitted as its own class, replacing the previous frame-based "black" detection.
  */
 
-/** Vision categories that strongly indicate a commercial / non-program filler. */
-const AD_CATEGORIES = new Set(["TV commercial", "Slate", "Test pattern", "Logo bumper", "Credits"]);
-
-/**
- * Minimum absolute ad score required to declare "ad". Below this, weak/noisy evidence (e.g. a couple
- * of OCR cues) must NOT flip the verdict away from "program". Tunable via AD_MIN_SCORE.
- */
-const AD_MIN_SCORE = (() => {
-  const v = parseFloat(process.env.AD_MIN_SCORE ?? "");
-  return Number.isFinite(v) ? v : 0.3;
-})();
-const BLACK_CATEGORIES = new Set(["Black screen"]);
-const PROGRAM_CATEGORIES = new Set([
-  "Television program",
-  "Movie",
-  "News broadcast",
-  "Sports broadcast",
-  "Talk show",
-  "Studio",
-  "Animation",
-]);
+import { config } from "../config.js";
 
 function clamp01(x) {
   return Math.max(0, Math.min(1, x));
 }
 
+function round(x) {
+  return Math.round(x * 100) / 100;
+}
+
+/** Set of category names (from `config.adCategories`) that flip the verdict to "ad". */
+const AD_CATEGORY_SET = new Set(config.adCategories.map(String));
+
+function isAdCategory(name) {
+  return typeof name === "string" && AD_CATEGORY_SET.has(name);
+}
+
 /**
- * @param {object} p assembled profile
- * @returns {{ detection: string, score: number, confidence: number, scores: object, reasons: string[] }}
+ * @param {object} p assembled profile (audio-only shape defined in profile.service.js)
+ * @returns {{
+ *   detection: "ad" | "program" | "silence",
+ *   score: number,
+ *   confidence: number,
+ *   scores: { ad: number, program: number, silence: number },
+ *   reasons: string[]
+ * }}
  */
 export function classify(p) {
   const reasons = [];
 
-  // ---- Black screen evidence -------------------------------------------------
-  let blackScore = 0;
-  blackScore += 0.7 * (p.blackscreen_ratio ?? 0);
-  if (BLACK_CATEGORIES.has(p.video_category_avg)) {
-    blackScore += 0.4 * (p.video_category_score_avg ?? 0.5);
-    reasons.push("vision:black");
-  }
-  // Very low energy + high silence reinforces a static black/slate frame.
-  if ((p.energy_avg ?? 0) < 0.05 && (p.silence_ratio ?? 0) > 0.7) {
-    blackScore += 0.25;
-    reasons.push("static+silent");
-  }
-  blackScore = clamp01(blackScore);
+  const lastChunk = p.audio_clap_last || null;
+  const avg = p.audio_clap_score_avg ?? 0;
+  const avgCat = p.audio_clap_category_avg || "unknown";
+  const perCat = p.audio_clap_per_category || {};
 
-  // ---- Advertisement evidence ------------------------------------------------
+  // ---- Silence / dead-air evidence ------------------------------------------
+  // The old pipeline emitted "black" when the video went to black between segments. In the
+  // audio-only pipeline we detect the equivalent by looking at silence_ratio + a very low RMS —
+  // both derived purely from ffmpeg's astats/silencedetect on the extracted WAV.
+  let silenceScore = 0;
+  const silenceRatio = p.silence_ratio ?? 0;
+  const audioRms = p.audio_rms ?? 0;
+  if (silenceRatio >= config.thresholds.silenceRatio && audioRms < 0.05) {
+    silenceScore = clamp01(0.6 + 0.4 * silenceRatio);
+    reasons.push(`silence:ratio=${silenceRatio.toFixed(2)}`);
+  } else if (silenceRatio >= 0.7 && audioRms < 0.1) {
+    silenceScore = 0.35;
+    reasons.push(`silence:soft`);
+  }
+
+  // ---- Advertisement evidence -----------------------------------------------
+  // The last chunk (live edge) is the strongest signal for "what's playing right now". We give
+  // it most of the weight so the moment CLAP flips to Advertisement / Television commercial we
+  // can react without waiting for the whole window to average out.
   let adScore = 0;
 
-  if (AD_CATEGORIES.has(p.video_category_avg)) {
-    adScore += 0.35 * (p.video_category_score_avg ?? 0.5);
-    reasons.push(`vision:${p.video_category_avg}`);
+  if (lastChunk && isAdCategory(lastChunk.category)) {
+    adScore += 0.7 * (lastChunk.score ?? 0);
+    reasons.push(`clap:last=${lastChunk.category}@${(lastChunk.score ?? 0).toFixed(2)}`);
   }
 
-  if (p.audio_category === "TV Commercial" || p.audio_category === "commercial") {
-    adScore += 0.3 * (p.audio_category_score ?? 0.5);
-    reasons.push("audio:commercial");
+  // Window average as a stability signal: if the dominant category across the whole window is
+  // an ad, that reinforces the verdict even when the last chunk is a borderline non-ad.
+  if (isAdCategory(avgCat)) {
+    adScore += 0.3 * avg;
+    reasons.push(`clap:avg=${avgCat}@${avg.toFixed(2)}`);
+  } else {
+    // Sum of per-category probabilities for all ad-like classes (average). Captures cases where
+    // the dominant category is non-ad but a large chunk of probability mass sits in ad classes.
+    let adMass = 0;
+    for (const cat of AD_CATEGORY_SET) {
+      const v = perCat[cat];
+      if (typeof v === "number" && Number.isFinite(v)) adMass += v;
+    }
+    if (adMass > 0.35) {
+      adScore += 0.2 * clamp01(adMass);
+      reasons.push(`clap:adMass=${adMass.toFixed(2)}`);
+    }
   }
 
-  // OCR advertising cues, split by reliability:
-  //  - strong: price / CTA / phone (rarely appear outside ads)
-  //  - weak: brand-like ALL-CAPS / legal wording (prone to OCR noise, especially on non-Latin frames)
-  const strongOcr = [p.ocr_price, p.ocr_cta, p.ocr_phone].filter(Boolean).length;
-  const weakOcr = [p.ocr_brand, p.ocr_legal].filter(Boolean).length;
-  if (strongOcr > 0) {
-    adScore += Math.min(0.3, strongOcr * 0.12);
-    reasons.push(`ocr:strong=${strongOcr}`);
-  }
-  if (weakOcr > 0) {
-    adScore += Math.min(0.1, weakOcr * 0.05);
-    reasons.push(`ocr:weak=${weakOcr}`);
-  }
-
-  // A visible phone number (esp. toll-free 0800 / 1-800) is a hallmark of direct-response
-  // commercials, so add extra evidence on top of the strong-cue bump above.
-  if (p.ocr_phone) {
-    adScore += 0.2;
-    reasons.push("ocr:phone");
-  }
-
-  // Commercials are typically fast-cut and busy.
-  adScore += 0.1 * clamp01((p.scene_change_rate ?? 0) * 0.7 + (p.motion_avg ?? 0) * 0.3);
-
-  // Channel logo often removed during ad breaks (weak signal).
-  if (p.channel_logo_present === false) adScore += 0.05;
-
-  // Music-bed heavy with little speech leans commercial.
-  if ((p.music_probability ?? 0) > 0.6 && (p.speech_ratio ?? 0) < 0.3) {
-    adScore += 0.08;
-    reasons.push("audio:musicbed");
-  }
   adScore = clamp01(adScore);
 
-  // ---- Program evidence ------------------------------------------------------
+  // ---- Program evidence -----------------------------------------------------
   let programScore = 0;
-  if (PROGRAM_CATEGORIES.has(p.video_category_avg)) {
-    programScore += 0.45 * (p.video_category_score_avg ?? 0.5);
-    reasons.push(`vision:${p.video_category_avg}`);
+
+  if (lastChunk && !isAdCategory(lastChunk.category)) {
+    programScore += 0.7 * (lastChunk.score ?? 0);
+    reasons.push(`clap:last=${lastChunk.category}@${(lastChunk.score ?? 0).toFixed(2)}`);
   }
-  if (p.channel_logo_present === true) programScore += 0.15;
-  if (p.ticker_present) programScore += 0.1;
-  if (p.lower_third_present) programScore += 0.05;
-  if (p.ocr_news || p.ocr_sports) programScore += 0.1;
-  if ((p.speech_ratio ?? 0) > 0.4) programScore += 0.1;
-  if (p.audio_category === "program" || p.audio_category === "Program") {
-    programScore += 0.2 * (p.audio_category_score ?? 0.5);
+  if (!isAdCategory(avgCat)) {
+    programScore += 0.3 * avg;
+    reasons.push(`clap:avg=${avgCat}@${avg.toFixed(2)}`);
   }
+
   programScore = clamp01(programScore);
 
-  // ---- Decision --------------------------------------------------------------
+  // ---- Decision -------------------------------------------------------------
   const scores = {
     ad: round(adScore),
     program: round(programScore),
-    black: round(blackScore),
+    silence: round(silenceScore),
   };
 
-  // Black wins outright when the frame really is black-dominant.
   let detection = "program";
-  if ((p.blackscreen_ratio ?? 0) >= 0.6 && blackScore >= adScore && blackScore >= programScore) {
-    detection = "black";
-  } else if (adScore >= programScore && adScore >= blackScore && adScore >= AD_MIN_SCORE) {
-    // Only call "ad" when the evidence clears a minimum bar — prevents weak OCR noise from flipping
-    // a normal program (e.g. a call-in show with an on-screen short code) to "ad".
+  // Silence trumps everything when the window is genuinely dead air.
+  if (silenceScore >= 0.6 && silenceScore >= adScore && silenceScore >= programScore) {
+    detection = "silence";
+  } else if (
+    adScore >= programScore &&
+    adScore >= silenceScore &&
+    adScore >= config.thresholds.adMinScore
+  ) {
     detection = "ad";
-  } else if (blackScore >= programScore && blackScore > adScore) {
-    detection = "black";
+  } else if (silenceScore > adScore && silenceScore > programScore) {
+    detection = "silence";
   } else {
     detection = "program";
   }
@@ -145,16 +135,10 @@ export function classify(p) {
     .filter(([k]) => k !== detection)
     .map(([, v]) => v);
   const runnerUp = others.length ? Math.max(...others) : 0;
-
-  // Confidence blends absolute winning score with its margin over the runner-up.
   const margin = clamp01(winning - runnerUp);
   const confidence = round(clamp01(0.5 * winning + 0.5 * (0.4 + margin)));
 
   return { detection, score: round(winning), confidence, scores, reasons };
-}
-
-function round(x) {
-  return Math.round(x * 100) / 100;
 }
 
 export default { classify };

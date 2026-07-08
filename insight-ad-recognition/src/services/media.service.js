@@ -1,7 +1,8 @@
 /**
  * Extracts the analysis window from a resolved input:
- *  - N frames (1 per second by default) as JPEGs.
- *  - A 16 kHz mono WAV audio track for whisper.cpp.
+ *  - N frames (1 per second by default) as JPEGs — used ONLY for the mosaic preview.
+ *  - A 48 kHz mono WAV for the CLAP audio classifier (primary signal).
+ *  - A 16 kHz mono WAV for whisper.cpp transcription (secondary, observability only).
  *
  * For HLS we point ffmpeg at the local live-edge playlist and take the LAST `SEGMENT_SECONDS`
  * seconds so the capture matches "the end of the video" (live edge). For files we take the
@@ -36,7 +37,8 @@ async function listFrames(framesDir) {
  * @param {string} workDir
  * @returns {Promise<{
  *   framePaths: string[],
- *   audioPath: string | null,
+ *   audioClapPath: string | null,
+ *   audioWhisperPath: string | null,
  *   durationSec: number,
  *   isLive: boolean,
  *   inputMeta: object
@@ -48,7 +50,8 @@ export async function extractWindow(videoUrl, workDir) {
   const framesDir = path.join(workDir, "frames");
   await fs.mkdir(framesDir, { recursive: true });
   const framePattern = path.join(framesDir, "frame_%03d.jpg");
-  const audioPath = path.join(workDir, "audio.wav");
+  const audioClapPath = path.join(workDir, "audio_clap.wav");
+  const audioWhisperPath = path.join(workDir, "audio_whisper.wav");
 
   const seconds = config.segment.seconds;
   const fps = config.segment.fps;
@@ -80,7 +83,8 @@ export async function extractWindow(videoUrl, workDir) {
     seekArgs = ["-sseof", `-${seconds}`];
   }
 
-  // Single ffmpeg invocation producing both frames and audio.
+  // Single ffmpeg invocation producing frames + both audio flavors. Two audio outputs are cheap
+  // (audio is a tiny fraction of the decode cost) and avoid a second pass over the network.
   const args = [
     "-nostdin",
     "-hide_banner",
@@ -93,7 +97,7 @@ export async function extractWindow(videoUrl, workDir) {
     ffmpegInput,
     "-t",
     String(seconds),
-    // Video → 1 frame per second, capped to `seconds` frames.
+    // Video → 1 frame per second (debug mosaic only).
     "-map",
     "0:v:0?",
     "-vf",
@@ -103,7 +107,7 @@ export async function extractWindow(videoUrl, workDir) {
     "-q:v",
     "3",
     framePattern,
-    // Audio → 16 kHz mono wav for whisper.cpp.
+    // Audio for CLAP → 48 kHz mono PCM (CLAP training sample rate).
     "-map",
     "0:a:0?",
     "-t",
@@ -111,10 +115,22 @@ export async function extractWindow(videoUrl, workDir) {
     "-ac",
     "1",
     "-ar",
-    "16000",
+    String(config.audio.clapSampleRate),
     "-c:a",
     "pcm_s16le",
-    audioPath,
+    audioClapPath,
+    // Audio for whisper.cpp → 16 kHz mono PCM.
+    "-map",
+    "0:a:0?",
+    "-t",
+    String(seconds),
+    "-ac",
+    "1",
+    "-ar",
+    String(config.audio.whisperSampleRate),
+    "-c:a",
+    "pcm_s16le",
+    audioWhisperPath,
   ];
 
   const res = await run(config.tools.ffmpeg, args, { timeoutMs: config.limits.requestTimeoutMs });
@@ -124,23 +140,29 @@ export async function extractWindow(videoUrl, workDir) {
     throw new Error(`ffmpeg produced no frames (code=${res.code}): ${(res.stderr || "").slice(-500)}`);
   }
 
-  let finalAudio = audioPath;
-  try {
-    const st = await fs.stat(audioPath);
-    if (st.size < 128) finalAudio = null;
-  } catch {
-    finalAudio = null;
-  }
+  // Validate each audio output — an empty/tiny file means the source had no audio track.
+  const finalClap = (await fileNonEmpty(audioClapPath)) ? audioClapPath : null;
+  const finalWhisper = (await fileNonEmpty(audioWhisperPath)) ? audioWhisperPath : null;
 
   const durationSec = framePaths.length / fps;
 
   return {
     framePaths,
-    audioPath: finalAudio,
+    audioClapPath: finalClap,
+    audioWhisperPath: finalWhisper,
     durationSec,
     isLive,
     inputMeta: { kind, ...meta },
   };
+}
+
+async function fileNonEmpty(p) {
+  try {
+    const st = await fs.stat(p);
+    return st.size >= 128;
+  } catch {
+    return false;
+  }
 }
 
 export default { extractWindow };

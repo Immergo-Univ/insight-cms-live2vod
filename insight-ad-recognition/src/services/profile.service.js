@@ -1,31 +1,27 @@
 /**
- * Orchestrates the full per-request pipeline and assembles the profile JSON described in
- * docs/insight-ad-recognition.md.
+ * Orchestrates the full per-request pipeline and assembles the audio-only profile JSON.
  *
- * Stages (video/audio/vision/text run concurrently where possible):
- *   1. Resolve input + extract window (frames + audio)         [media.service]
- *   2a. Local video metrics (energy/motion/blackscreen/...)    [frames.service]
- *   2b. Local audio metrics (rms/dynamic range/silence/...)    [audio.service]
- *   2c. whisper.cpp transcription (English)                    [whisper.service]
- *   2d. SigLIP zero-shot + OCR over frames                     [inference.client -> sidecar]
- *   3. Text commercial classification of the transcript        [inference.client -> sidecar]
- *   4. Merge into the profile JSON.
- *   5. Deterministic classification.                           [classifier.service]
+ * Stages (audio metrics + whisper + CLAP run concurrently):
+ *   1. Resolve input + extract window (frames for mosaic + 48 kHz WAV + 16 kHz WAV)  [media.service]
+ *   2a. Local audio metrics (rms / dynamic range / silence / music)                   [audio.service]
+ *   2b. whisper.cpp transcription (English + Hebrew + Spanish, observability only)    [whisper.service]
+ *   2c. CLAP zero-shot audio classification, chunked at AUDIO_CHUNK_SECONDS           [inference.client]
+ *   3. Merge into the profile JSON.
+ *   4. Deterministic classification (last chunk drives the verdict).                  [classifier.service]
+ *
+ * NOTE: Frames are captured only to render the debug mosaic. The classifier no longer looks at
+ * any pixel-derived signal (no SigLIP, no OCR, no motion / blackscreen — those were removed
+ * with the switch to a pure audio-channel profile).
  */
 
 import { config } from "../config.js";
 import { extractWindow } from "./media.service.js";
-import { computeFrameMetrics } from "./frames.service.js";
 import { computeAudioMetrics } from "./audio.service.js";
 import { transcribe } from "./whisper.service.js";
-import { inferVision, inferText } from "./inference.client.js";
+import { inferAudio } from "./inference.client.js";
 import { classify } from "./classifier.service.js";
 import { buildMosaic } from "./preview.service.js";
 import { logger } from "../utils/logger.js";
-
-function pickString(v, def) {
-  return typeof v === "string" && v.length ? v : def;
-}
 
 /**
  * @param {string} videoUrl
@@ -35,78 +31,74 @@ export async function analyzeVideo(videoUrl, workDir) {
   const t0 = Date.now();
 
   const window = await extractWindow(videoUrl, workDir);
-  const { framePaths, audioPath, durationSec, isLive, inputMeta } = window;
+  const { framePaths, audioClapPath, audioWhisperPath, durationSec, isLive, inputMeta } = window;
 
   // Build the mosaic preview from the captured frames (before the workDir is cleaned up).
-  // One file per channel (sanitized video name), overwritten on each analysis.
+  // One file per channel (sanitized video name), overwritten on each analysis. This is the ONLY
+  // consumer of the extracted frames — the classifier itself never touches pixel data.
   const previewFile = await buildMosaic(framePaths, videoUrl).catch(() => null);
 
-  // Concurrent stage: local metrics + whisper + vision sidecar.
-  const [frameMetrics, audioMetrics, whisperOut, vision] = await Promise.all([
-    computeFrameMetrics(framePaths).catch((e) => {
-      logger.warn("frame metrics failed", { error: String(e?.message || e) });
-      return null;
-    }),
-    computeAudioMetrics(audioPath, durationSec).catch((e) => {
+  // Concurrent stage: local audio metrics + whisper + CLAP sidecar.
+  const [audioMetrics, whisperOut, clap] = await Promise.all([
+    computeAudioMetrics(audioWhisperPath, durationSec).catch((e) => {
       logger.warn("audio metrics failed", { error: String(e?.message || e) });
       return null;
     }),
-    transcribe(audioPath, workDir, durationSec).catch((e) => {
+    transcribe(audioWhisperPath, workDir, durationSec).catch((e) => {
       logger.warn("whisper failed", { error: String(e?.message || e) });
       return { transcript: "", speechRatio: null, ok: false };
     }),
-    inferVision(framePaths).catch(() => null),
+    inferAudio(audioClapPath, config.audio.chunkSeconds).catch(() => null),
   ]);
 
-  // Text stage depends on the transcript.
-  const textResult = await inferText(whisperOut?.transcript || "").catch(() => null);
-
   // ---- Assemble profile ------------------------------------------------------
-  const fm = frameMetrics || {};
   const am = audioMetrics || {};
-  const vis = vision || {};
-  const ocr = vis.ocr || {};
 
   // Prefer whisper-derived speech ratio when available.
   const speechRatio =
     whisperOut?.speechRatio != null ? whisperOut.speechRatio : am.speech_ratio ?? 0;
 
+  const clapAvg = clap?.avg || {};
+  const clapLast = clap?.last || null;
+  const clapChunks = Array.isArray(clap?.chunks) ? clap.chunks : [];
+
   const profile = {
     duration: round1(durationSec),
 
-    energy_avg: fm.energy_avg ?? 0,
-    scene_change_rate: fm.scene_change_rate ?? 0,
-    motion_avg: fm.motion_avg ?? 0,
-    blackscreen_ratio: fm.blackscreen_ratio ?? 0,
-
-    audio_category: pickString(textResult?.category, "unknown"),
-    audio_category_score: numOr(textResult?.score, 0),
+    // ---- Local audio metrics (ffmpeg astats + silencedetect) ----------------
     audio_rms: am.audio_rms ?? 0,
     audio_dynamic_range: am.audio_dynamic_range ?? 0,
     speech_ratio: round2(speechRatio),
     music_probability: am.music_probability ?? 0,
     silence_ratio: am.silence_ratio ?? 0,
 
-    video_category_avg: pickString(vis.video_category_avg, "unknown"),
-    video_category_score_avg: numOr(vis.video_category_score_avg, 0),
-
-    ocr_brand: Boolean(ocr.ocr_brand),
-    ocr_price: Boolean(ocr.ocr_price),
-    ocr_cta: Boolean(ocr.ocr_cta),
-    ocr_legal: Boolean(ocr.ocr_legal),
-    ocr_phone: Boolean(ocr.ocr_phone),
-    ocr_news: Boolean(ocr.ocr_news),
-    ocr_sports: Boolean(ocr.ocr_sports),
-    ocr_credits: Boolean(ocr.ocr_credits),
-
-    ocr_text_density: numOr(ocr.ocr_text_density, 0),
-    ocr_word_count: Math.round(numOr(ocr.ocr_word_count, 0)),
-
-    channel_logo_present: vis.channel_logo_present ?? null,
-    ticker_present: Boolean(vis.ticker_present),
-    lower_third_present: Boolean(vis.lower_third_present),
-
-    dominant_color_change: fm.dominant_color_change ?? 0,
+    // ---- CLAP zero-shot audio classification (primary AD signal) ------------
+    // Window-average category + score.
+    audio_clap_category_avg: typeof clapAvg.category === "string" ? clapAvg.category : "unknown",
+    audio_clap_score_avg: numOr(clapAvg.score, 0),
+    // Per-category probabilities averaged across the whole window (full distribution).
+    audio_clap_per_category:
+      clapAvg && typeof clapAvg.per_category === "object" && clapAvg.per_category !== null
+        ? clapAvg.per_category
+        : {},
+    // The LAST chunk in the window = the live edge. The classifier trusts this the most.
+    audio_clap_last: clapLast
+      ? {
+          startSec: numOr(clapLast.startSec, 0),
+          endSec: numOr(clapLast.endSec, 0),
+          category: typeof clapLast.category === "string" ? clapLast.category : "unknown",
+          score: numOr(clapLast.score, 0),
+        }
+      : null,
+    // Per-chunk timeline. Consumers can find the exact chunk where a program → ad transition
+    // occurred inside the window (5 s resolution by default → 4 chunks in a 20 s window).
+    audio_clap_chunks: clapChunks.map((c) => ({
+      startSec: numOr(c.startSec, 0),
+      endSec: numOr(c.endSec, 0),
+      category: typeof c.category === "string" ? c.category : "unknown",
+      score: numOr(c.score, 0),
+    })),
+    audio_clap_chunk_seconds: numOr(clap?.chunkSeconds, config.audio.chunkSeconds),
   };
 
   const verdict = classify(profile);
@@ -114,7 +106,6 @@ export async function analyzeVideo(videoUrl, workDir) {
 
   const elapsedMs = Date.now() - t0;
   const transcript = whisperOut?.transcript || "";
-  const ocrText = typeof ocr.ocr_text === "string" ? ocr.ocr_text : "";
 
   return {
     detection: verdict.detection,
@@ -123,21 +114,24 @@ export async function analyzeVideo(videoUrl, workDir) {
     confidence: verdict.confidence,
     timestamp: Math.floor(Date.now() / 1000),
     transcript,
-    ocr_text: ocrText,
+    // Kept in the response shape for backwards compatibility with existing consumers, but always
+    // empty now (OCR was removed).
+    ocr_text: "",
     previewFile,
     profile,
     meta: {
       elapsedMs,
       isLive,
       frames: framePaths.length,
-      hasAudio: Boolean(audioPath),
-      transcript: whisperOut?.transcript || "",
-      visionAvailable: Boolean(vision),
-      textAvailable: Boolean(textResult),
+      hasAudio: Boolean(audioClapPath),
+      transcript,
+      audioClapAvailable: Boolean(clap),
+      chunks: clapChunks.length,
+      chunkSeconds: profile.audio_clap_chunk_seconds,
       reasons: verdict.reasons,
       classScores: verdict.scores,
       input: inputMeta,
-      categories: config.visionCategories,
+      categories: config.audioCategories,
     },
   };
 }

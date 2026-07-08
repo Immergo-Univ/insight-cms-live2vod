@@ -1,6 +1,8 @@
 /**
  * HTTP client for the Python ML sidecar. Returns null on any failure so the orchestrator can
  * degrade gracefully to local-only signals.
+ *
+ * The sidecar hosts a CLAP (audio zero-shot) classifier — no vision/OCR/text stages anymore.
  */
 
 import { config } from "../config.js";
@@ -30,19 +32,29 @@ async function postJson(pathname, payload, timeoutMs) {
 }
 
 /**
- * Run SigLIP zero-shot classification + OCR over the frames.
- * @param {string[]} framePaths absolute paths readable by the sidecar (shared filesystem)
+ * Score the audio channel against the CLAP category prompts, chunked at `chunkSeconds` intervals.
+ *
+ * @param {string} audioPath absolute path to a mono 48 kHz PCM WAV readable by the sidecar
+ *   (shared workDir volume with the Node process).
+ * @param {number} [chunkSeconds]
+ * @returns {Promise<null | {
+ *   chunks: Array<{
+ *     startSec: number, endSec: number, category: string, score: number,
+ *     scores: Record<string, number>
+ *   }>,
+ *   avg: { category: string, score: number, per_category: Record<string, number> },
+ *   last: null | { startSec: number, endSec: number, category: string, score: number },
+ *   durationSec: number,
+ *   chunkSeconds: number
+ * }>}
  */
-export function inferVision(framePaths) {
-  return postJson("/vision", { frames: framePaths }, config.limits.visionTimeoutMs);
+export function inferAudio(audioPath, chunkSeconds = config.audio.chunkSeconds) {
+  if (!audioPath) return Promise.resolve(null);
+  return postJson(
+    "/audio",
+    { path: audioPath, chunkSeconds },
+    config.limits.audioTimeoutMs,
+  );
 }
 
-/**
- * Classify the transcript as commercial vs program (the "BERT" text stage).
- * @param {string} transcript
- */
-export function inferText(transcript) {
-  return postJson("/text", { text: transcript || "" }, Math.min(config.limits.requestTimeoutMs, 8000));
-}
-
-export default { inferVision, inferText };
+export default { inferAudio };

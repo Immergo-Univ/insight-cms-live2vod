@@ -1,9 +1,9 @@
 # insight-ad-recognition — single self-contained image.
-# Node.js API + Python ML sidecar (SigLIP + zero-shot text classifier + Tesseract OCR eng+heb+spa) +
-# whisper.cpp (multilingual ggml-base) + ffmpeg. No docker-compose, no external services.
+# Node.js API + Python ML sidecar (CLAP audio zero-shot classifier) + whisper.cpp (multilingual
+# ggml-base) + ffmpeg. No docker-compose, no external services.
 #
-# Notes on image size: the heavy weight comes from the ML stack (torch CPU, transformers,
-# onnxruntime) which is inherent to the requirement of bundling SigLIP + Whisper in-container.
+# Notes on image size: the heavy weight comes from the ML stack (torch CPU + transformers +
+# CLAP checkpoint) which is inherent to the requirement of bundling audio ML in-container.
 # We keep it as small as practical: slim base, CPU-only torch wheel, no pip cache, build tools
 # for whisper.cpp are removed after compilation, and models are prefetched at build time.
 
@@ -19,7 +19,8 @@ ENV DEBIAN_FRONTEND=noninteractive \
 WORKDIR /app
 
 # ---- System dependencies ---------------------------------------------------------------------
-# Runtime: ffmpeg, python3, libgl/glib, Tesseract OCR + English/Hebrew/Spanish traineddata.
+# Runtime: ffmpeg (frame + audio extraction), python3, libgl/glib (torch / transformers image
+# preprocessing utilities pull them in transitively).
 # Build-only: git, cmake, build-essential (whisper.cpp) + curl — removed afterwards.
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ffmpeg \
@@ -28,10 +29,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       python3-venv \
       libgl1 \
       libglib2.0-0 \
-      tesseract-ocr \
-      tesseract-ocr-eng \
-      tesseract-ocr-heb \
-      tesseract-ocr-spa \
       ca-certificates \
       curl \
       git \
@@ -41,6 +38,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # ---- whisper.cpp (compile + multilingual ggml-base model) ------------------------------------
 # ggml-base (multilingual) is used instead of *.en so Hebrew/Spanish/English are all supported.
+# Whisper is kept only for observability (transcript + speech_ratio); the AD/program verdict is
+# derived exclusively from the CLAP audio classifier.
 RUN git clone --depth 1 https://github.com/ggerganov/whisper.cpp /tmp/whisper.cpp \
     && cmake -S /tmp/whisper.cpp -B /tmp/whisper.cpp/build -DCMAKE_BUILD_TYPE=Release \
     && cmake --build /tmp/whisper.cpp/build --config Release -j "$(nproc)" \
@@ -69,9 +68,8 @@ RUN npm ci --omit=dev || npm install --omit=dev
 COPY src /app/src
 COPY ml /app/ml
 
-# ---- Prefetch ML models into the image (fully offline at runtime) ----------------------------
-ENV SIGLIP_MODEL=google/siglip-base-patch16-224 \
-    TEXT_MODEL=MoritzLaurer/mDeBERTa-v3-base-mnli-xnli
+# ---- Prefetch the CLAP checkpoint into the image (fully offline at runtime) ------------------
+ENV CLAP_MODEL=laion/clap-htsat-unfused
 RUN python3 /app/ml/prefetch.py
 
 # ---- Runtime config --------------------------------------------------------------------------
@@ -80,8 +78,8 @@ ENV PORT=8081 \
     WHISPER_BIN=whisper-cli \
     WHISPER_MODEL=/app/models/ggml-base.bin \
     WHISPER_LANGUAGE=auto \
-    OCR_LANGUAGES=eng+heb+spa \
     SEGMENT_SECONDS=20 \
+    AUDIO_CHUNK_SECONDS=5 \
     PREVIEW_PUBLIC_BASE_URL=https://insight-cms-live2vod-id2z9.ondigitalocean.app/insight-cms-live2vod-insight-ad \
     ML_SIDECAR_AUTOSTART=true \
     ML_SIDECAR_HOST=127.0.0.1 \

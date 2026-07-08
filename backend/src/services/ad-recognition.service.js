@@ -4,12 +4,12 @@
  * Every `config.adRecognition.intervalMs` (default 30s) this service probes ALL archive-enabled
  * channels IN PARALLEL by calling the external `insight-ad-recognition` service:
  *
- *   GET {baseUrl}/detect?video=<channel HLS>&secret=<secret>  ->  { detection: "ad"|"program"|"black", ... }
+ *   GET {baseUrl}/detect?video=<channel HLS>&secret=<secret>  ->  { detection: "ad"|"program"|"silence", ... }
  *
  * A hysteresis window turns the per-probe verdicts into live ad segments:
  *   - An ad window OPENS after {@link AD_CONFIRM_SAMPLES} consecutive "ad" detections.
  *   - The window CLOSES after {@link PROGRAM_CONFIRM_SAMPLES} consecutive "program" detections.
- *   - Any other verdict ("black"/unknown) breaks the current streak (neither opens nor closes).
+ *   - Any other verdict ("silence"/unknown) breaks the current streak (neither opens nor closes).
  *
  * Segments are merged into the per-channel snapshot (`liveStreamAdSegments`), so the existing
  * ads timeline (`ads-precalc.service.js`) keeps working unchanged. This replaces the former
@@ -179,7 +179,7 @@ async function getOrInitState(channelId, meta) {
 /**
  * Apply one detection verdict to the hysteresis state, mutating it in place.
  * @param {object} st channel state
- * @param {"ad"|"program"|"black"|string} detection
+ * @param {"ad"|"program"|"silence"|string} detection
  * @param {number} epoch unix seconds for this sample (from the detect response `timestamp`)
  */
 export function applyDetection(st, detection, epoch) {
@@ -205,7 +205,7 @@ export function applyDetection(st, detection, epoch) {
       st.pendingProgramEpoch = null;
     }
   } else {
-    // "black" / unknown: breaks consecutiveness for both entry and exit.
+    // "silence" / unknown: breaks consecutiveness for both entry and exit.
     st.adStreak = 0;
     st.programStreak = 0;
   }
