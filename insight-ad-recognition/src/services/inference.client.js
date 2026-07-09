@@ -1,8 +1,9 @@
 /**
  * HTTP client for the Python ML sidecar. Returns null on any failure so the orchestrator can
- * degrade gracefully to local-only signals.
+ * degrade gracefully to whatever local signals are available.
  *
- * The sidecar hosts a CLAP (audio zero-shot) classifier — no vision/OCR/text stages anymore.
+ * The sidecar hosts the CPU model battery: SigLIP (vision) + Tesseract OCR + OpenCV overlays on
+ * `/vision`, mDeBERTa zero-shot on `/text`, and CLAP on `/audio`.
  */
 
 import { config } from "../config.js";
@@ -32,29 +33,32 @@ async function postJson(pathname, payload, timeoutMs) {
 }
 
 /**
+ * Run SigLIP zero-shot classification + OCR + overlay detection over the (heavy-sampled) frames.
+ * @param {string[]} framePaths absolute paths readable by the sidecar (shared workDir)
+ */
+export function inferVision(framePaths) {
+  if (!Array.isArray(framePaths) || framePaths.length === 0) return Promise.resolve(null);
+  return postJson("/vision", { frames: framePaths }, config.limits.visionTimeoutMs);
+}
+
+/**
+ * Classify the OCR text into ad-intent semantic labels (CTA/price/brand/legal/contact/program).
+ * @param {string} text aggregated OCR text
+ */
+export function inferText(text) {
+  const trimmed = typeof text === "string" ? text.trim() : "";
+  if (!trimmed) return Promise.resolve(null);
+  return postJson("/text", { text: trimmed }, config.limits.textTimeoutMs);
+}
+
+/**
  * Score the audio channel against the CLAP category prompts, chunked at `chunkSeconds` intervals.
- *
  * @param {string} audioPath absolute path to a mono 48 kHz PCM WAV readable by the sidecar
- *   (shared workDir volume with the Node process).
  * @param {number} [chunkSeconds]
- * @returns {Promise<null | {
- *   chunks: Array<{
- *     startSec: number, endSec: number, category: string, score: number,
- *     scores: Record<string, number>
- *   }>,
- *   avg: { category: string, score: number, per_category: Record<string, number> },
- *   last: null | { startSec: number, endSec: number, category: string, score: number },
- *   durationSec: number,
- *   chunkSeconds: number
- * }>}
  */
 export function inferAudio(audioPath, chunkSeconds = config.audio.chunkSeconds) {
   if (!audioPath) return Promise.resolve(null);
-  return postJson(
-    "/audio",
-    { path: audioPath, chunkSeconds },
-    config.limits.audioTimeoutMs,
-  );
+  return postJson("/audio", { path: audioPath, chunkSeconds }, config.limits.audioTimeoutMs);
 }
 
-export default { inferAudio };
+export default { inferVision, inferText, inferAudio };

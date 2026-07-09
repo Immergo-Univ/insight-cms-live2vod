@@ -72,6 +72,11 @@ detectRouter.get("/detect", requireSecret, async (req, res) => {
       // Raw extracted content.
       transcript: result.transcript ?? "",
       ocr_text: result.ocr_text ?? "",
+      // High-value multimodal signals surfaced at the top level (CMS persists them as columns).
+      visual_category: result.visual_category ?? null,
+      audio_category: result.audio_category ?? null,
+      ocr_ad_cue_count: result.ocr_ad_cue_count ?? 0,
+      overlay_present: result.overlay_present ?? false,
       // Mosaic preview of the captured frames (one file per channel, expires after TTL).
       url_image: previewUrl(result.previewFile, req),
       // Full internal profile as described in docs/insight-ad-recognition.md.

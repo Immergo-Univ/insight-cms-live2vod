@@ -2,11 +2,14 @@
 # torch (CPU) is installed separately in the Dockerfile from the CPU wheel index to keep size down.
 fastapi==0.115.6
 uvicorn==0.34.0
-# CLAP (Contrastive Language-Audio Pretraining) — audio-only zero-shot classifier that replaces
-# the previous SigLIP + OCR + text-classifier stack. Ships with the standard `transformers` release.
+# transformers hosts SigLIP (vision), mDeBERTa (text zero-shot) and CLAP (audio zero-shot).
 transformers==4.46.3
-# CLAP tokenizer requires sentencepiece / protobuf like most HF text encoders.
+# SentencePiece / protobuf are required by the SigLIP + mDeBERTa tokenizers.
 sentencepiece==0.2.0
 protobuf==5.28.3
-# WAV loading + audio math (mono downmix, integer→float conversion, simple linear resampler).
+pillow==11.0.0
 numpy==1.26.4
+# OCR via Tesseract (system binary + heb/eng/spa traineddata installed in the Dockerfile).
+pytesseract==0.3.13
+# Commercial-overlay detection (edge density, contours). Headless build = no GUI/X deps.
+opencv-python-headless==4.10.0.84

@@ -377,6 +377,11 @@ async function probeChannel(channel) {
     scores: result?.scores ?? null,
     transcript: typeof result?.transcript === "string" ? result.transcript : null,
     ocrText: typeof result?.ocr_text === "string" ? result.ocr_text : null,
+    // Multimodal signals surfaced at the top level by the microservice (queryable columns).
+    visualCategory: typeof result?.visual_category === "string" ? result.visual_category : null,
+    audioCategory: typeof result?.audio_category === "string" ? result.audio_category : null,
+    ocrAdCueCount: typeof result?.ocr_ad_cue_count === "number" ? result.ocr_ad_cue_count : null,
+    overlayPresent: typeof result?.overlay_present === "boolean" ? result.overlay_present : null,
     profile: result?.profile ?? null,
     error: null,
     probeEpoch: epoch,

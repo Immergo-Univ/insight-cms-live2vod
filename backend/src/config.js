@@ -97,7 +97,7 @@ export const config = {
     /** Shared secret expected by the detect service (?secret=). */
     secret: (process.env.AD_RECOGNITION_SECRET || "change-me").trim(),
     /** Milliseconds between probe cycles (all channels probed in parallel each cycle). */
-    intervalMs: parseInt(process.env.AD_RECOGNITION_INTERVAL_MS || "30000", 10),
+    intervalMs: parseInt(process.env.AD_RECOGNITION_INTERVAL_MS || "10000", 10),
     /**
      * Per-request timeout for the detect call. On CPU an audio-only probe (ffmpeg extraction +
      * CLAP over ~4 chunks + whisper for observability) can take up to ~1 min, so this budget is
@@ -106,11 +106,12 @@ export const config = {
     requestTimeoutMs: parseInt(process.env.AD_RECOGNITION_TIMEOUT_MS || "180000", 10),
     /**
      * Length (seconds) of the DVR/archive window we probe for archive-style playlists (i.e. the
-     * ones that only return media when given `startTime`/`endTime`). The insight-ad-recognition
-     * service samples the live edge of this window.
+     * ones that only return media when given `startTime`/`endTime`). Aligned with the
+     * microservice's SEGMENT_SECONDS (10s) so each probe analyzes exactly one window; the
+     * microservice does intra-window multimodal fusion over these seconds.
      * Env: AD_RECOGNITION_PROBE_WINDOW_SEC.
      */
-    probeWindowSec: parseInt(process.env.AD_RECOGNITION_PROBE_WINDOW_SEC || "120", 10),
+    probeWindowSec: parseInt(process.env.AD_RECOGNITION_PROBE_WINDOW_SEC || "10", 10),
     /**
      * Safety margin (seconds) subtracted from `endTime` when building the archive-window URL.
      * DVR/archive origins (Akamai, `fillgaps` proxy) have a small packaging delay: if `endTime`

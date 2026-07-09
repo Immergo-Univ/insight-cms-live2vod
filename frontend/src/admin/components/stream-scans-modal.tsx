@@ -1,13 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { App, Button, Descriptions, Modal, Progress, Table, Tag, Typography } from "antd";
+import { App, Button, Descriptions, Modal, Progress, Space, Table, Tag, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useTranslation } from "react-i18next";
 import { getAdminClient } from "@/admin/admin-api";
 
-/**
- * Shape of a single CLAP chunk inside `profile.audio_clap_chunks`. Kept loose because the field
- * is stored as JSONB and may include future keys we haven't declared here yet.
- */
+/** Shape of a single CLAP chunk inside `profile.audio_clap_chunks`. */
 type ClapChunk = {
   startSec?: number;
   endSec?: number;
@@ -16,27 +13,59 @@ type ClapChunk = {
 };
 
 /**
- * Audio-only profile shape produced by insight-ad-recognition. We only declare the fields the
- * modal renders; anything else the raw JSON viewer at the bottom still shows verbatim.
+ * Multimodal profile produced by insight-ad-recognition. We only declare the fields the modal
+ * renders; anything else the raw JSON viewer at the bottom still shows verbatim.
  */
-type AudioProfile = {
-  audio_clap_category_avg?: string;
-  audio_clap_score_avg?: number;
-  audio_clap_per_category?: Record<string, number>;
-  audio_clap_last?: {
-    startSec?: number;
-    endSec?: number;
-    category?: string;
-    score?: number;
-  } | null;
-  audio_clap_chunks?: ClapChunk[];
-  audio_clap_chunk_seconds?: number;
+type MultimodalProfile = {
+  // Local video metrics.
+  blackscreen_ratio?: number;
+  motion_avg?: number;
+  scene_change_rate?: number;
 
+  // Local audio metrics.
   audio_rms?: number;
   audio_dynamic_range?: number;
   speech_ratio?: number;
   music_probability?: number;
   silence_ratio?: number;
+
+  // Visual (SigLIP).
+  video_category_avg?: string;
+  video_category_score_avg?: number;
+  video_per_category?: Record<string, number>;
+
+  // OCR text + cues.
+  ocr_text?: string;
+  ocr_word_count?: number;
+  ocr_short_code?: boolean;
+  ocr_phone?: boolean;
+  ocr_price?: boolean;
+  ocr_percent?: boolean;
+  ocr_url?: boolean;
+  ocr_installments?: boolean;
+  ocr_cta?: boolean;
+  ocr_legal?: boolean;
+  ocr_ad_cue_count?: number;
+
+  // Overlay detection.
+  overlay_present?: boolean;
+  lower_third_present?: boolean;
+  banner_present?: boolean;
+  logo_region_present?: boolean;
+  overlay_score?: number;
+  overlay_frame_ratio?: number;
+
+  // BERT semantic labels.
+  text_category?: string;
+  text_labels?: Record<string, number>;
+
+  // Audio (CLAP).
+  audio_clap_category_avg?: string;
+  audio_clap_score_avg?: number;
+  audio_clap_per_category?: Record<string, number>;
+  audio_clap_last?: { startSec?: number; endSec?: number; category?: string; score?: number } | null;
+  audio_clap_chunks?: ClapChunk[];
+  audio_clap_chunk_seconds?: number;
 
   duration?: number;
   confidence?: number;
@@ -54,12 +83,12 @@ export type AdRecognitionScan = {
   confidence: number | null;
   scores: Record<string, number> | null;
   transcript: string | null;
-  /**
-   * Preserved for backwards-compat with pre-CLAP scans. The audio-only pipeline always writes
-   * an empty string, so the modal no longer renders it as a dedicated field.
-   */
   ocrText: string | null;
-  profile: AudioProfile | null;
+  visualCategory: string | null;
+  audioCategory: string | null;
+  ocrAdCueCount: number | null;
+  overlayPresent: boolean | null;
+  profile: MultimodalProfile | null;
   error: string | null;
   probeEpoch: number | null;
   scannedAt: string;
@@ -85,8 +114,7 @@ function detectionColor(detection: string): string {
       return "green";
     case "program":
       return "gold";
-    // The audio-only pipeline emits "silence" instead of the legacy "black" verdict; keep both
-    // handled so historical rows still render with a sensible color.
+    // The pipeline emits "silence"; keep legacy "black" handled so historical rows still render.
     case "silence":
     case "black":
       return "default";
@@ -115,22 +143,10 @@ function fmtPct(n: number | null | undefined): string {
   return typeof n === "number" && Number.isFinite(n) ? `${Math.round(n * 100)}%` : "—";
 }
 
-/**
- * The category that the classifier ultimately trusted most: the last chunk (live edge) when we
- * have it, falling back to the window-average category from CLAP.
- */
-function audioCategory(scan: AdRecognitionScan): string {
-  const p = scan.profile;
-  if (!p) return "—";
-  const last = p.audio_clap_last?.category;
-  if (typeof last === "string" && last) return last;
-  const avg = p.audio_clap_category_avg;
-  return typeof avg === "string" && avg ? avg : "—";
-}
-
-/** True when the classifier flagged this category name as ad content. */
-function isAdCategory(cat: string | undefined | null): boolean {
-  if (!cat) return false;
+/** SigLIP visual categories treated as ad-like. */
+const VISUAL_AD = new Set(["publicidad", "placa", "institucional"]);
+/** CLAP audio categories treated as ad-like. */
+function isAudioAdCategory(cat: string | undefined | null): boolean {
   return cat === "Television commercial" || cat === "Advertisement";
 }
 
@@ -163,57 +179,59 @@ export function StreamScansModal({ open, onClose, tenantId, channelId, channelTi
 
   const columns: ColumnsType<AdRecognitionScan> = useMemo(
     () => [
-      {
-        title: t("streams.scanColTime"),
-        key: "time",
-        width: 200,
-        render: (_, r) => humanTime(r),
-      },
-      {
-        title: t("streams.scanColEpoch"),
-        dataIndex: "probeEpoch",
-        key: "probeEpoch",
-        width: 130,
-        render: (v: number | null) => (v != null ? String(v) : "—"),
-      },
+      { title: t("streams.scanColTime"), key: "time", width: 190, render: (_, r) => humanTime(r) },
       {
         title: t("streams.scanColDetection"),
         dataIndex: "detection",
         key: "detection",
-        width: 120,
+        width: 110,
         render: (v: string) => <Tag color={detectionColor(v)}>{v}</Tag>,
       },
       {
         title: t("streams.scanColScore"),
         dataIndex: "score",
         key: "score",
-        width: 90,
-        render: (v: number | null) => fmtNum(v),
+        width: 80,
+        render: (v: number | null) => fmtNum(v, 2),
       },
       {
-        title: t("streams.scanColConfidence"),
-        dataIndex: "confidence",
-        key: "confidence",
-        width: 110,
-        render: (v: number | null) => fmtNum(v),
+        title: t("streams.scanColVisualCategory"),
+        dataIndex: "visualCategory",
+        key: "visualCategory",
+        width: 130,
+        render: (v: string | null) =>
+          v ? <Tag color={VISUAL_AD.has(v) ? "volcano" : "blue"}>{v}</Tag> : "—",
       },
       {
         title: t("streams.scanColAudioCategory"),
+        dataIndex: "audioCategory",
         key: "audioCategory",
-        width: 200,
-        render: (_, r) => {
-          const cat = audioCategory(r);
-          if (cat === "—") return cat;
-          return <Tag color={isAdCategory(cat) ? "volcano" : "blue"}>{cat}</Tag>;
-        },
+        width: 170,
+        render: (v: string | null) =>
+          v ? <Tag color={isAudioAdCategory(v) ? "volcano" : "blue"}>{v}</Tag> : "—",
+      },
+      {
+        title: t("streams.scanColOcrCues"),
+        dataIndex: "ocrAdCueCount",
+        key: "ocrAdCueCount",
+        width: 90,
+        render: (v: number | null) =>
+          typeof v === "number" && v > 0 ? <Tag color="volcano">{v}</Tag> : <Tag>0</Tag>,
+      },
+      {
+        title: t("streams.scanColOverlay"),
+        dataIndex: "overlayPresent",
+        key: "overlayPresent",
+        width: 90,
+        render: (v: boolean | null) =>
+          v ? <Tag color="volcano">✓</Tag> : <Tag>—</Tag>,
       },
       {
         title: t("streams.scanColError"),
         dataIndex: "error",
         key: "error",
         ellipsis: true,
-        render: (v: string | null) =>
-          v ? <Typography.Text type="danger">{v}</Typography.Text> : "—",
+        render: (v: string | null) => (v ? <Typography.Text type="danger">{v}</Typography.Text> : "—"),
       },
     ],
     [t],
@@ -223,21 +241,35 @@ export function StreamScansModal({ open, onClose, tenantId, channelId, channelTi
     const profile = scan.profile;
     const last = profile?.audio_clap_last || null;
     const chunks = Array.isArray(profile?.audio_clap_chunks) ? profile!.audio_clap_chunks! : [];
-    const perCategory = profile?.audio_clap_per_category || {};
+    const visualPer = profile?.video_per_category || {};
+    const clapPer = profile?.audio_clap_per_category || {};
+    const textLabels = profile?.text_labels || {};
     const chunkSeconds = profile?.audio_clap_chunk_seconds;
 
-    // Sort per-category distribution descending so the strongest signals surface first.
-    const sortedCategories = Object.entries(perCategory)
-      .filter(([, v]) => typeof v === "number" && Number.isFinite(v))
-      .sort((a, b) => (b[1] as number) - (a[1] as number));
+    const sortDesc = (obj: Record<string, number>) =>
+      Object.entries(obj)
+        .filter(([, v]) => typeof v === "number" && Number.isFinite(v))
+        .sort((a, b) => (b[1] as number) - (a[1] as number));
+
+    // OCR cue chips (only the ones that fired).
+    const cueChips: string[] = [];
+    if (profile?.ocr_short_code) cueChips.push("short-code");
+    if (profile?.ocr_phone) cueChips.push("phone");
+    if (profile?.ocr_price) cueChips.push("price");
+    if (profile?.ocr_percent) cueChips.push("%");
+    if (profile?.ocr_url) cueChips.push("url");
+    if (profile?.ocr_installments) cueChips.push("installments");
+    if (profile?.ocr_cta) cueChips.push("cta");
+    if (profile?.ocr_legal) cueChips.push("legal");
+
+    // Overlay flag chips.
+    const overlayChips: string[] = [];
+    if (profile?.lower_third_present) overlayChips.push("lower-third");
+    if (profile?.banner_present) overlayChips.push("banner");
+    if (profile?.logo_region_present) overlayChips.push("logo");
 
     return (
-      <Descriptions
-        column={1}
-        size="small"
-        bordered
-        styles={{ label: { width: 220, fontWeight: 600 } }}
-      >
+      <Descriptions column={1} size="small" bordered styles={{ label: { width: 220, fontWeight: 600 } }}>
         <Descriptions.Item label={t("streams.scanColTime")}>{humanTime(scan)}</Descriptions.Item>
 
         <Descriptions.Item label="m3u8">
@@ -246,13 +278,97 @@ export function StreamScansModal({ open, onClose, tenantId, channelId, channelTi
           </Typography.Text>
         </Descriptions.Item>
 
+        {/* ---- Visual (SigLIP) ---- */}
+        <Descriptions.Item label={t("streams.scanColVisualDistribution")}>
+          {sortDesc(visualPer).length ? (
+            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              {sortDesc(visualPer).map(([cat, val]) => (
+                <div key={cat} style={{ display: "grid", gridTemplateColumns: "160px 1fr", gap: 8, alignItems: "center" }}>
+                  <Typography.Text style={{ fontSize: 12 }}>
+                    {VISUAL_AD.has(cat) ? <Tag color="volcano">{cat}</Tag> : cat}
+                  </Typography.Text>
+                  <Progress
+                    percent={Math.round((val as number) * 100)}
+                    size="small"
+                    showInfo
+                    format={() => fmtPct(val as number)}
+                    strokeColor={VISUAL_AD.has(cat) ? "#d4380d" : undefined}
+                  />
+                </div>
+              ))}
+            </div>
+          ) : (
+            "—"
+          )}
+        </Descriptions.Item>
+
+        {/* ---- OCR text + cues (Hebrew-aware, RTL) ---- */}
+        <Descriptions.Item label={t("streams.scanColOcrCues")}>
+          {cueChips.length ? (
+            <Space wrap size={[4, 4]}>
+              {cueChips.map((c) => (
+                <Tag key={c} color="volcano">
+                  {c}
+                </Tag>
+              ))}
+            </Space>
+          ) : (
+            <Typography.Text type="secondary">{t("streams.scanNoCues")}</Typography.Text>
+          )}
+        </Descriptions.Item>
+
+        <Descriptions.Item label={t("streams.scanColOcrText")}>
+          <pre
+            dir="auto"
+            style={{ margin: 0, whiteSpace: "pre-wrap", fontSize: 12, maxHeight: 140, overflow: "auto" }}
+          >
+            {scan.ocrText || profile?.ocr_text || "—"}
+          </pre>
+        </Descriptions.Item>
+
+        {/* ---- BERT semantic labels ---- */}
+        <Descriptions.Item label={t("streams.scanColTextLabels")}>
+          {sortDesc(textLabels).length ? (
+            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              {sortDesc(textLabels).map(([label, val]) => (
+                <div key={label} style={{ display: "grid", gridTemplateColumns: "120px 1fr", gap: 8, alignItems: "center" }}>
+                  <Typography.Text style={{ fontSize: 12 }}>{label}</Typography.Text>
+                  <Progress
+                    percent={Math.round((val as number) * 100)}
+                    size="small"
+                    showInfo
+                    format={() => fmtPct(val as number)}
+                    strokeColor={label !== "program" ? "#d4380d" : undefined}
+                  />
+                </div>
+              ))}
+            </div>
+          ) : (
+            "—"
+          )}
+        </Descriptions.Item>
+
+        {/* ---- Overlay detection ---- */}
+        <Descriptions.Item label={t("streams.scanColOverlay")}>
+          <Space wrap size={[4, 4]}>
+            <Tag color={profile?.overlay_present ? "volcano" : "default"}>
+              {profile?.overlay_present ? t("streams.scanOverlayPresent") : t("streams.scanOverlayAbsent")}
+            </Tag>
+            {overlayChips.map((c) => (
+              <Tag key={c}>{c}</Tag>
+            ))}
+            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+              score {fmtNum(profile?.overlay_score, 2)} · {fmtPct(profile?.overlay_frame_ratio)}
+            </Typography.Text>
+          </Space>
+        </Descriptions.Item>
+
+        {/* ---- Audio (CLAP) ---- */}
         <Descriptions.Item label={t("streams.scanColClapLast")}>
           {last ? (
             <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
               <div>
-                <Tag color={isAdCategory(last.category) ? "volcano" : "blue"}>
-                  {last.category || "—"}
-                </Tag>
+                <Tag color={isAudioAdCategory(last.category) ? "volcano" : "blue"}>{last.category || "—"}</Tag>
                 <Typography.Text type="secondary" style={{ marginLeft: 8 }}>
                   {fmtSec(last.startSec)} → {fmtSec(last.endSec)}
                 </Typography.Text>
@@ -294,11 +410,7 @@ export function StreamScansModal({ open, onClose, tenantId, channelId, channelTi
                     dataIndex: "category",
                     key: "category",
                     render: (v: string | undefined) =>
-                      v ? (
-                        <Tag color={isAdCategory(v) ? "volcano" : "blue"}>{v}</Tag>
-                      ) : (
-                        "—"
-                      ),
+                      v ? <Tag color={isAudioAdCategory(v) ? "volcano" : "blue"}>{v}</Tag> : "—",
                   },
                   {
                     title: t("streams.scanClapChunkScore"),
@@ -323,22 +435,19 @@ export function StreamScansModal({ open, onClose, tenantId, channelId, channelTi
         </Descriptions.Item>
 
         <Descriptions.Item label={t("streams.scanColClapDistribution")}>
-          {sortedCategories.length ? (
+          {sortDesc(clapPer).length ? (
             <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-              {sortedCategories.map(([cat, val]) => (
-                <div
-                  key={cat}
-                  style={{ display: "grid", gridTemplateColumns: "220px 1fr", gap: 8, alignItems: "center" }}
-                >
+              {sortDesc(clapPer).map(([cat, val]) => (
+                <div key={cat} style={{ display: "grid", gridTemplateColumns: "220px 1fr", gap: 8, alignItems: "center" }}>
                   <Typography.Text style={{ fontSize: 12 }}>
-                    {isAdCategory(cat) ? <Tag color="volcano">{cat}</Tag> : cat}
+                    {isAudioAdCategory(cat) ? <Tag color="volcano">{cat}</Tag> : cat}
                   </Typography.Text>
                   <Progress
                     percent={Math.round((val as number) * 100)}
                     size="small"
                     showInfo
                     format={() => fmtPct(val as number)}
-                    strokeColor={isAdCategory(cat) ? "#d4380d" : undefined}
+                    strokeColor={isAudioAdCategory(cat) ? "#d4380d" : undefined}
                   />
                 </div>
               ))}
@@ -348,6 +457,7 @@ export function StreamScansModal({ open, onClose, tenantId, channelId, channelTi
           )}
         </Descriptions.Item>
 
+        {/* ---- Audio + video metrics ---- */}
         <Descriptions.Item label={t("streams.scanColAudioMetrics")}>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: 4, fontSize: 12 }}>
             <div>
@@ -355,9 +465,7 @@ export function StreamScansModal({ open, onClose, tenantId, channelId, channelTi
               {fmtNum(profile?.audio_rms, 2)}
             </div>
             <div>
-              <Typography.Text type="secondary">
-                {t("streams.scanAudioDynamicRange")}:{" "}
-              </Typography.Text>
+              <Typography.Text type="secondary">{t("streams.scanAudioDynamicRange")}: </Typography.Text>
               {fmtNum(profile?.audio_dynamic_range, 2)}
             </div>
             <div>
@@ -372,17 +480,25 @@ export function StreamScansModal({ open, onClose, tenantId, channelId, channelTi
               <Typography.Text type="secondary">{t("streams.scanAudioSilenceRatio")}: </Typography.Text>
               {fmtPct(profile?.silence_ratio)}
             </div>
+            <div>
+              <Typography.Text type="secondary">{t("streams.scanVideoSceneChange")}: </Typography.Text>
+              {fmtPct(profile?.scene_change_rate)}
+            </div>
+            <div>
+              <Typography.Text type="secondary">{t("streams.scanVideoBlackscreen")}: </Typography.Text>
+              {fmtPct(profile?.blackscreen_ratio)}
+            </div>
           </div>
         </Descriptions.Item>
 
         <Descriptions.Item label={t("streams.scanColScores")}>
-          <pre style={{ margin: 0, whiteSpace: "pre-wrap", fontSize: 12, maxHeight: 160, overflow: "auto" }}>
+          <pre style={{ margin: 0, whiteSpace: "pre-wrap", fontSize: 12, maxHeight: 120, overflow: "auto" }}>
             {scan.scores ? JSON.stringify(scan.scores, null, 2) : "—"}
           </pre>
         </Descriptions.Item>
 
         <Descriptions.Item label={t("streams.scanColTranscript")}>
-          <pre style={{ margin: 0, whiteSpace: "pre-wrap", fontSize: 12, maxHeight: 160, overflow: "auto" }}>
+          <pre dir="auto" style={{ margin: 0, whiteSpace: "pre-wrap", fontSize: 12, maxHeight: 140, overflow: "auto" }}>
             {scan.transcript || "—"}
           </pre>
         </Descriptions.Item>
@@ -408,9 +524,7 @@ export function StreamScansModal({ open, onClose, tenantId, channelId, channelTi
       destroyOnClose
     >
       <div style={{ marginBottom: 12, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <Typography.Text type="secondary">
-          {t("streams.scansCount", { count: scans.length })}
-        </Typography.Text>
+        <Typography.Text type="secondary">{t("streams.scansCount", { count: scans.length })}</Typography.Text>
         <Button onClick={() => void load()} loading={loading} size="small">
           {t("streams.reload")}
         </Button>

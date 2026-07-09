@@ -2,9 +2,10 @@
  * insight-ad-recognition — HTTP entrypoint.
  *
  * Express API (CORS enabled) that classifies what a live channel is currently showing
- * (ad / program / silence) by profiling a short window of the stream with ffmpeg and an
- * in-container ML sidecar hosting a CLAP zero-shot audio classifier. Whisper.cpp is kept for
- * observability only — the AD/program verdict is derived purely from the audio channel.
+ * (ad / program / silence) by profiling a short archive window of the stream with ffmpeg and an
+ * in-container ML sidecar hosting a multimodal battery: SigLIP (visual) + Tesseract OCR
+ * (heb/eng/spa) + OpenCV overlay detection + mDeBERTa (semantic text) + CLAP (audio). Whisper.cpp
+ * is kept for observability. The verdict comes from the deterministic multimodal fusion layer.
  */
 
 import express from "express";
