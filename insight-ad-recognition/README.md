@@ -105,7 +105,9 @@ docker build -t insight-ad-recognition .
 docker run --rm -p 8081:8081 -e API_SECRET=mi-secreto insight-ad-recognition
 ```
 
-Los checkpoints (SigLIP + mDeBERTa + CLAP) quedan prefetch en la imagen; Tesseract `heb/eng/spa` se instala como paquete de sistema. El primer arranque no baja nada en runtime.
+Tesseract `heb/eng/spa` se instala como paquete de sistema. Los checkpoints (SigLIP + mDeBERTa + CLAP, ~1.5GB) se **descargan en el primer arranque** del contenedor (dentro de `HF_HOME`), no se hornean en la imagen — así el build no se queda sin memoria al snapshotar (el builder de DO App Platform tiene RAM limitada). Requiere internet en el primer boot y `/health` reporta el sidecar como no-listo hasta terminar la carga (el scheduler del CMS degrada con gracia mientras tanto).
+
+> Para una imagen **offline** (sin descarga en runtime), buildeá en una máquina/CI con recursos y corré `python3 ml/prefetch.py` en build (o desplegá esa imagen prebuildeada desde un registry). Ver el comentario en el `Dockerfile`.
 
 ---
 

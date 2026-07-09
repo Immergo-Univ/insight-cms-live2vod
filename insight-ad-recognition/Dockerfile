@@ -85,15 +85,21 @@ RUN if [ -f package-lock.json ]; then \
 COPY src /app/src
 COPY ml /app/ml
 
-# ---- Prefetch the ML checkpoints into the image (fully offline at runtime) -------------------
-# One RUN per model so each download lands in its own (smaller) layer. A single combined ~1.5 GB
-# layer was OOM-ing the DigitalOcean build machine during kaniko's "Taking snapshot of files...".
+# ---- ML checkpoints: downloaded at RUNTIME, not baked into the image -------------------------
+# Baking SigLIP + mDeBERTa + CLAP (~1.5 GB of HF blobs) into the image made kaniko OOM on the
+# DigitalOcean builder during "Taking snapshot of files..." (Build Error: Out of Memory). Instead
+# the sidecar downloads them into $HF_HOME on first startup (from_pretrained pulls from the HF hub
+# when the model isn't cached). This keeps the built image small enough to snapshot.
+#
+# Trade-off: the container needs outbound internet on first boot and re-downloads after a redeploy
+# unless $HF_HOME is backed by a persistent volume. `/health` reports the sidecar as not-ready
+# until the download+load finishes (the CMS scheduler degrades gracefully meanwhile).
+#
+# To go back to an offline image (e.g. when deploying a prebuilt image from a registry that was
+# built on a bigger machine), run `python3 /app/ml/prefetch.py` at build time again.
 ENV SIGLIP_MODEL=google/siglip-base-patch16-224 \
     TEXT_MODEL=MoritzLaurer/mDeBERTa-v3-base-mnli-xnli \
     CLAP_MODEL=laion/clap-htsat-unfused
-RUN python3 /app/ml/prefetch.py siglip
-RUN python3 /app/ml/prefetch.py text
-RUN python3 /app/ml/prefetch.py clap
 
 # ---- Runtime config --------------------------------------------------------------------------
 ENV PORT=8081 \
@@ -108,7 +114,9 @@ ENV PORT=8081 \
     PREVIEW_PUBLIC_BASE_URL=https://insight-cms-live2vod-id2z9.ondigitalocean.app/insight-cms-live2vod-insight-ad \
     ML_SIDECAR_AUTOSTART=true \
     ML_SIDECAR_HOST=127.0.0.1 \
-    ML_SIDECAR_PORT=8100
+    ML_SIDECAR_PORT=8100 \
+    HF_HUB_ENABLE_HF_TRANSFER=0 \
+    ML_SIDECAR_START_TIMEOUT_MS=600000
 
 # Drop build toolchain to slim the final image (keep ffmpeg/python/libs).
 RUN apt-get purge -y git cmake build-essential curl \
