@@ -97,7 +97,7 @@ export const config = {
     /** Shared secret expected by the detect service (?secret=). */
     secret: (process.env.AD_RECOGNITION_SECRET || "change-me").trim(),
     /** Milliseconds between probe cycles (all channels probed in parallel each cycle). */
-    intervalMs: parseInt(process.env.AD_RECOGNITION_INTERVAL_MS || "10000", 10),
+    intervalMs: parseInt(process.env.AD_RECOGNITION_INTERVAL_MS || "2000", 10),
     /**
      * Per-request timeout for the detect call. The microservice grabs the last frame + runs OCR /
      * pHash / NLLB translation (NLLB is slow to warm up on first boot), so this budget is generous.

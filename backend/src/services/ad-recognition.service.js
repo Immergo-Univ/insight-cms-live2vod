@@ -476,7 +476,7 @@ async function runCycle() {
 }
 
 async function schedulerLoop() {
-  const interval = Math.max(5000, config.adRecognition.intervalMs);
+  const interval = Math.max(2000, config.adRecognition.intervalMs);
   while (serviceRunning) {
     const t0 = Date.now();
     try {
