@@ -99,11 +99,36 @@ export const config = {
     /** Milliseconds between probe cycles (all channels probed in parallel each cycle). */
     intervalMs: parseInt(process.env.AD_RECOGNITION_INTERVAL_MS || "30000", 10),
     /**
-     * Per-request timeout for the detect call. With 20s analysis windows on CPU (ffmpeg extraction
-     * + whisper + SigLIP/OCR over ~20 frames) a probe can take well over a minute, so this budget
-     * is generous. Env: AD_RECOGNITION_TIMEOUT_MS.
+     * Per-request timeout for the detect call. On CPU an audio-only probe (ffmpeg extraction +
+     * CLAP over ~4 chunks + whisper for observability) can take up to ~1 min, so this budget is
+     * generous. Env: AD_RECOGNITION_TIMEOUT_MS.
      */
     requestTimeoutMs: parseInt(process.env.AD_RECOGNITION_TIMEOUT_MS || "180000", 10),
+    /**
+     * Length (seconds) of the DVR/archive window we probe for archive-style playlists (i.e. the
+     * ones that only return media when given `startTime`/`endTime`). The insight-ad-recognition
+     * service samples the live edge of this window.
+     * Env: AD_RECOGNITION_PROBE_WINDOW_SEC.
+     */
+    probeWindowSec: parseInt(process.env.AD_RECOGNITION_PROBE_WINDOW_SEC || "120", 10),
+    /**
+     * Safety margin (seconds) subtracted from `endTime` when building the archive-window URL.
+     * DVR/archive origins (Akamai, `fillgaps` proxy) have a small packaging delay: if `endTime`
+     * lands inside that delay, the origin returns HTTP 400 ("no segments for that window") or
+     * the proxy returns 5xx. A ~30 s margin keeps us safely on the packaged side of the stream.
+     * Env: AD_RECOGNITION_ARCHIVE_MARGIN_SEC.
+     */
+    archiveMarginSec: parseInt(process.env.AD_RECOGNITION_ARCHIVE_MARGIN_SEC || "30", 10),
+    /**
+     * On the first probe attempt failing with an upstream-looking error (HTTP 4xx/5xx from the
+     * origin, ffmpeg "Server returned" errors), retry ONCE with a further-back window using this
+     * extended margin. Helps ride out occasional packaging spikes without cascading errors.
+     * Env: AD_RECOGNITION_ARCHIVE_RETRY_MARGIN_SEC.
+     */
+    archiveRetryMarginSec: parseInt(
+      process.env.AD_RECOGNITION_ARCHIVE_RETRY_MARGIN_SEC || "120",
+      10,
+    ),
     /**
      * Optional restriction: when set, only these tenant IDs are probed (intersected with the tenants
      * that have `adRecognitionEnabled === true`). When empty, ALL enabled tenants are probed.

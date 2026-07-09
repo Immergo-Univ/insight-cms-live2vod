@@ -44,9 +44,11 @@ export const PROGRAM_CONFIRM_SAMPLES = 3;
  * Some channel HLS URLs are DVR/archive playlists (e.g. `streamPlaylist-archive.m3u8` or the
  * `fillgaps` proxy) that only serve content when given a bounded window via startTime/endTime.
  * For those we request the last N seconds on every probe so the origin returns a small playlist
- * (the detect service then samples the live edge of that window). Change here if needed.
+ * (the detect service then samples the live edge of that window).
+ *
+ * Configured via env in `config.adRecognition.probeWindowSec` (default 120 s).
  */
-export const PROBE_WINDOW_SECONDS = 120;
+export const PROBE_WINDOW_SECONDS = () => Math.max(30, config.adRecognition.probeWindowSec);
 
 /**
  * Heuristic: DVR/archive playlists that only return media when given a startTime/endTime window.
@@ -58,19 +60,42 @@ function needsArchiveWindow(url) {
 }
 
 /**
- * Build the URL to probe. For archive/DVR playlists without an explicit window, append
- * `startTime`/`endTime` for the last {@link PROBE_WINDOW_SECONDS} seconds. Live playlists are
- * left untouched.
- * @param {string} hls
+ * Detect upstream-origin failures in the microservice's error message. These typically resolve on
+ * a second try with a further-back window (the origin's packager caught up), so `probeChannel`
+ * treats them as retriable. Anything else (network error to the microservice itself, timeout,
+ * detector bug) is NOT retried to avoid amplifying real outages.
+ * @param {string} msg
  */
-export function buildProbeUrl(hls) {
+function isRetriableUpstreamError(msg) {
+  if (!msg) return false;
+  // Bubbled up from the microservice as `Analysis failed: HTTP 4xx fetching <origin url>` or
+  // `Analysis failed: ffmpeg produced no frames (code=1): <url>: Server returned 5XX Server Error`.
+  return /HTTP\s+(4\d\d|5\d\d)\s+fetching/i.test(msg) || /Server returned\s+\dXX/i.test(msg);
+}
+
+/**
+ * Build the URL to probe. For archive/DVR playlists without an explicit window, append
+ * `startTime`/`endTime` covering the last {@link PROBE_WINDOW_SECONDS} seconds, with a small
+ * safety margin subtracted from `endTime` so we don't land inside the origin's packaging delay
+ * (which yields HTTP 400 on Akamai / 5xx through the `fillgaps` proxy).
+ * Live playlists are left untouched.
+ * @param {string} hls
+ * @param {number} [marginSec] override the default safety margin (used by the retry path).
+ */
+export function buildProbeUrl(hls, marginSec) {
   try {
     const u = new URL(hls);
     const alreadyWindowed = u.searchParams.has("startTime") || u.searchParams.has("endTime");
     if (!alreadyWindowed && needsArchiveWindow(hls)) {
       const now = Math.floor(Date.now() / 1000);
-      u.searchParams.set("startTime", String(now - PROBE_WINDOW_SECONDS));
-      u.searchParams.set("endTime", String(now));
+      const margin = Math.max(
+        0,
+        Number.isFinite(marginSec) ? Number(marginSec) : config.adRecognition.archiveMarginSec,
+      );
+      const endTime = now - margin;
+      const startTime = endTime - PROBE_WINDOW_SECONDS();
+      u.searchParams.set("startTime", String(startTime));
+      u.searchParams.set("endTime", String(endTime));
     }
     return u.toString();
   } catch {
@@ -268,15 +293,39 @@ async function probeChannel(channel) {
   st.lastProbeAt = new Date().toISOString();
   const scannedAt = new Date();
 
-  // Archive/DVR playlists need a bounded window (last PROBE_WINDOW_SECONDS); live playlists pass as-is.
-  const probeUrl = buildProbeUrl(hls);
+  // Archive/DVR playlists need a bounded window (last PROBE_WINDOW_SECONDS + a safety margin so
+  // we don't land inside the origin's packaging delay); live playlists pass as-is.
+  let probeUrl = buildProbeUrl(hls);
 
   let result;
+  let lastError = null;
   try {
     result = await callDetect(probeUrl);
   } catch (e) {
-    const msg = e && typeof e.message === "string" ? e.message : String(e);
-    st.lastError = msg;
+    lastError = e && typeof e.message === "string" ? e.message : String(e);
+    // Upstream origin hiccup? Retry ONCE with a further-back window before giving up. The
+    // extended margin trades a bit of freshness for a much higher chance of hitting segments
+    // that the origin has already packaged.
+    if (isRetriableUpstreamError(lastError)) {
+      const retryUrl = buildProbeUrl(hls, config.adRecognition.archiveRetryMarginSec);
+      if (retryUrl !== probeUrl) {
+        try {
+          console.warn(
+            `[ad-recognition] upstream error, retrying with extended margin ` +
+              `(${config.adRecognition.archiveRetryMarginSec}s) channel=${channelId}: ${lastError}`,
+          );
+          result = await callDetect(retryUrl);
+          probeUrl = retryUrl;
+          lastError = null;
+        } catch (e2) {
+          lastError = e2 && typeof e2.message === "string" ? e2.message : String(e2);
+        }
+      }
+    }
+  }
+
+  if (!result) {
+    st.lastError = lastError;
     await persistChannel(channelId, st);
     await persistScanToDb({
       tenantId,
@@ -290,7 +339,7 @@ async function probeChannel(channel) {
       transcript: null,
       ocrText: null,
       profile: null,
-      error: msg,
+      error: lastError,
       probeEpoch: Math.floor(Date.now() / 1000),
       scannedAt,
     });

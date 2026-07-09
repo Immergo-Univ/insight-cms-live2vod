@@ -2,7 +2,7 @@
  * GET /detect?video=<mp4|m3u8 url>[&verbose=1]
  *
  * Returns the compact verdict by default:
- *   { detection: "ad"|"program"|"black", score, timestamp }
+ *   { detection: "ad"|"program"|"silence", score, timestamp }
  *
  * With `verbose=1` (or `full=1`) the full profile JSON + pipeline metadata are included.
  */
@@ -23,6 +23,26 @@ const jobs = new Semaphore(config.limits.maxConcurrentJobs);
 function isValidVideoArg(v) {
   if (typeof v !== "string" || v.length === 0) return false;
   return /^https?:\/\//i.test(v) || v.startsWith("/") || /\.(mp4|m3u8)$/i.test(v);
+}
+
+/**
+ * Classify an analysis failure so we don't scream ERROR for transient upstream hiccups (Akamai
+ * archive origins returning HTTP 400 while segments are still packaging, `fillgaps` proxies
+ * returning 5xx, ffmpeg getting "Server returned 5XX" while pulling media segments, etc.).
+ *
+ * These aren't bugs — they resolve on the next probe (or via the CMS scheduler's retry with an
+ * extended window) — so surface them as WARN. Real detector faults still log as ERROR.
+ * @param {string} msg
+ */
+function isUpstreamFetchError(msg) {
+  if (!msg) return false;
+  return (
+    /HTTP\s+(4\d\d|5\d\d)\s+fetching/i.test(msg) ||
+    /Server returned\s+\dXX/i.test(msg) ||
+    /Master playlist has no renditions/i.test(msg) ||
+    /Media playlist has no segments/i.test(msg) ||
+    /ffmpeg produced no frames/i.test(msg)
+  );
 }
 
 detectRouter.get("/detect", requireSecret, async (req, res) => {
@@ -63,7 +83,13 @@ detectRouter.get("/detect", requireSecret, async (req, res) => {
     }
     return res.json(payload);
   } catch (e) {
-    logger.error("detect failed", { error: String(e?.message || e), video: String(video).slice(0, 120) });
+    const msg = String(e?.message || e);
+    const meta = { error: msg, video: String(video).slice(0, 120) };
+    if (isUpstreamFetchError(msg)) {
+      logger.warn("detect failed (upstream)", meta);
+    } else {
+      logger.error("detect failed", meta);
+    }
     return res.status(502).json({ error: `Analysis failed: ${e?.message || String(e)}` });
   } finally {
     await removeWorkDir(workDir);
