@@ -179,12 +179,20 @@ export const config = {
     ocrStrongPer: floatEnv("FUSION_OCR_STRONG_PER", 0.12),
     ocrStrongCap: floatEnv("FUSION_OCR_STRONG_CAP", 0.4),
     ocrContactBonus: floatEnv("FUSION_OCR_CONTACT_BONUS", 0.2),
+    // A visible URL (e.g. soferavi.co.il) is a strong direct-response ad signal — extra bump on
+    // top of the generic strong-cue weight.
+    ocrUrlBonus: floatEnv("FUSION_OCR_URL_BONUS", 0.08),
     // Weak cues (CTA wording / legal): small, capped — never enough on their own.
     ocrWeak: floatEnv("FUSION_OCR_WEAK", 0.04),
     ocrWeakCap: floatEnv("FUSION_OCR_WEAK_CAP", 0.06),
     bertLabelThreshold: floatEnv("FUSION_BERT_LABEL_THRESHOLD", 0.5),
     bertTriad: floatEnv("FUSION_BERT_TRIAD", 0.4),
     bertPair: floatEnv("FUSION_BERT_PAIR", 0.15),
+    // Graded contribution from the single strongest ad-intent label (brand/cta/price/contact).
+    // Captures on-screen brand/product names that don't reach the full triad. Thresholded so
+    // ordinary news wording (brand ~0.14) contributes nothing.
+    bertSingle: floatEnv("FUSION_BERT_SINGLE", 0.28),
+    bertSingleThreshold: floatEnv("FUSION_BERT_SINGLE_THRESHOLD", 0.35),
     audioAdLast: floatEnv("FUSION_AUDIO_AD_LAST", 0.3),
     audioAdAvg: floatEnv("FUSION_AUDIO_AD_AVG", 0.15),
     musicBed: floatEnv("FUSION_MUSIC_BED", 0.08),

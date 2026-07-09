@@ -87,6 +87,11 @@ export function classify(p) {
     adScore += w.ocrContactBonus;
     reasons.push(p.ocr_short_code ? "ocr:short_code" : "ocr:phone");
   }
+  // A product URL (soferavi.co.il, "search us on Google", etc.) is a strong ad signal.
+  if (p.ocr_url) {
+    adScore += w.ocrUrlBonus;
+    reasons.push("ocr:url");
+  }
   // OCR weak cues (CTA wording / legal fine print): noisy — small, capped contribution only.
   const weak = numOr(p.weak_cue_count, 0);
   if (weak > 0) {
@@ -94,11 +99,19 @@ export function classify(p) {
     reasons.push(`ocr:weak=${weak}`);
   }
 
-  // BERT semantic combo: contact + CTA + (brand OR price) is the classic ad triad.
+  // BERT semantic intent. Two paths:
+  //  - graded single-label: the strongest ad-intent label (brand/cta/price/contact) captures
+  //    on-screen brand/product names that don't reach the full triad (e.g. a furniture brand ad);
+  //  - combo bonus: the classic contact + CTA + (brand|price) triad adds extra on top.
   const contact = numOr(bert.contact, 0);
   const cta = numOr(bert.cta, 0);
   const brand = numOr(bert.brand, 0);
   const price = numOr(bert.price, 0);
+  const bertAd = Math.max(contact, cta, brand, price);
+  if (bertAd >= w.bertSingleThreshold) {
+    adScore += w.bertSingle * bertAd;
+    reasons.push(`bert:ad=${bertAd.toFixed(2)}`);
+  }
   const th = w.bertLabelThreshold;
   const triad = [contact >= th, cta >= th, brand >= th || price >= th].filter(Boolean).length;
   if (triad >= 3) {
