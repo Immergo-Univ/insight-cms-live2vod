@@ -3,7 +3,7 @@
  * degrade gracefully to whatever local signals are available.
  *
  * The sidecar hosts the CPU model battery: SigLIP (vision) + Tesseract OCR + OpenCV overlays on
- * `/vision`, mDeBERTa zero-shot on `/text`, and CLAP on `/audio`.
+ * `/vision`, and mDeBERTa zero-shot on `/text`.
  */
 
 import { config } from "../config.js";
@@ -51,14 +51,4 @@ export function inferText(text) {
   return postJson("/text", { text: trimmed }, config.limits.textTimeoutMs);
 }
 
-/**
- * Score the audio channel against the CLAP category prompts, chunked at `chunkSeconds` intervals.
- * @param {string} audioPath absolute path to a mono 48 kHz PCM WAV readable by the sidecar
- * @param {number} [chunkSeconds]
- */
-export function inferAudio(audioPath, chunkSeconds = config.audio.chunkSeconds) {
-  if (!audioPath) return Promise.resolve(null);
-  return postJson("/audio", { path: audioPath, chunkSeconds }, config.limits.audioTimeoutMs);
-}
-
-export default { inferVision, inferText, inferAudio };
+export default { inferVision, inferText };

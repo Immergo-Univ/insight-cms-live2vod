@@ -4,8 +4,8 @@
  *
  * Multimodal pipeline: a short archive window of the stream is extracted with ffmpeg and analyzed
  * with a CPU model battery — SigLIP (visual), Tesseract OCR (heb/eng/spa) + regex cues + mDeBERTa
- * (semantic text), OpenCV overlay detection, and CLAP (audio) — fused into an ad/program/silence
- * verdict with intra-window temporal consistency.
+ * (semantic text) and OpenCV overlay detection — plus local ffmpeg audio metrics (RMS / silence /
+ * music), fused into an ad/program/silence verdict with intra-window temporal consistency.
  */
 
 import os from "node:os";
@@ -50,10 +50,6 @@ export const config = {
   },
 
   audio: {
-    /** Length (seconds) of each CLAP inference chunk within the analysis window. */
-    chunkSeconds: Math.max(1, floatEnv("AUDIO_CHUNK_SECONDS", 5)),
-    /** Sample rate for the CLAP-facing WAV (CLAP is trained at 48 kHz). */
-    clapSampleRate: 48000,
     /** Sample rate for the whisper-facing WAV (whisper.cpp expects 16 kHz mono PCM). */
     whisperSampleRate: 16000,
   },
@@ -84,8 +80,6 @@ export const config = {
     siglip: process.env.SIGLIP_MODEL || "google/siglip-base-patch16-224",
     // Multilingual XNLI zero-shot model for the semantic OCR-text stage (Hebrew/Spanish/English).
     text: process.env.TEXT_MODEL || "MoritzLaurer/mDeBERTa-v3-base-mnli-xnli",
-    // Audio zero-shot classifier.
-    clap: process.env.CLAP_MODEL || "laion/clap-htsat-unfused",
     hfHome: process.env.HF_HOME || path.join(appRoot, "ml", "models_cache"),
   },
 
@@ -96,8 +90,10 @@ export const config = {
     visionTimeoutMs: intEnv("VISION_TIMEOUT_MS", 90000),
     /** `/text` sidecar call (mDeBERTa zero-shot). */
     textTimeoutMs: intEnv("TEXT_TIMEOUT_MS", 15000),
-    /** `/audio` sidecar call (CLAP over N chunks). */
-    audioTimeoutMs: intEnv("AUDIO_TIMEOUT_MS", 90000),
+    /** `/logo` sidecar call (OpenCV ROI detect / template match). */
+    logoTimeoutMs: intEnv("LOGO_TIMEOUT_MS", 20000),
+    /** Per-template HTTP fetch budget (public S3 URLs) on the Node side. */
+    logoTemplateFetchTimeoutMs: intEnv("LOGO_TEMPLATE_FETCH_TIMEOUT_MS", 8000),
     /** whisper.cpp transcription budget. */
     whisperTimeoutMs: intEnv("WHISPER_TIMEOUT_MS", 60000),
     maxConcurrentJobs: Math.max(1, intEnv("MAX_CONCURRENT_JOBS", 4)),
@@ -118,47 +114,51 @@ export const config = {
   },
 
   /**
-   * SigLIP visual categories (Spanish key -> English prompt). Passed to the sidecar as
-   * VISUAL_CATEGORY_PROMPTS so both sides agree. `publicidad`/`placa`/`institucional` count as ad
-   * evidence in the fusion layer; `programa`/`noticia`/`deporte` as program.
+   * SigLIP visual categories (Spanish key -> English prompt ENSEMBLE). Passed to the sidecar as
+   * VISUAL_CATEGORY_PROMPTS so both sides agree. Multiple prompts per category improve zero-shot
+   * separation; the sidecar ensemble-averages them. `publicidad`/`placa`/`institucional` count as
+   * ad evidence in the fusion layer; `programa`/`noticia`/`deporte` as program.
    */
   visualCategories: {
-    programa: "a television program",
-    publicidad: "a television commercial or advertisement",
-    placa: "a full-screen graphic title card or promo slate",
-    noticia: "a television news broadcast",
-    deporte: "a live sports broadcast",
-    institucional: "a channel ident, logo bumper or institutional promo",
+    programa: [
+      "a television program",
+      "a tv studio show with a host",
+      "a talk show set with people talking",
+      "an entertainment television show",
+    ],
+    publicidad: [
+      "a television commercial",
+      "an advertisement for a product",
+      "a product close-up with a price on screen",
+      "an infomercial demonstrating a product",
+      "a retail store sale advertisement",
+      "a car or furniture commercial",
+    ],
+    placa: [
+      "a full-screen graphic title card",
+      "a full screen promo slate with big text",
+      "a sponsor graphic card",
+      "a text-only promotional screen",
+    ],
+    noticia: [
+      "a television news broadcast",
+      "a news anchor at a desk",
+      "a breaking news screen with a lower-third ticker",
+      "a news report from the field",
+    ],
+    deporte: [
+      "a live sports broadcast",
+      "athletes playing on a field or court",
+      "a sports match with a scoreboard",
+      "a stadium full of spectators",
+    ],
+    institucional: [
+      "a tv channel logo bumper",
+      "a television station ident",
+      "an institutional or public-service promo",
+      "a channel branding animation",
+    ],
   },
-
-  /** CLAP zero-shot audio content categories (kept in sync with ml/server.py). */
-  audioCategories: [
-    "Television commercial",
-    "Advertisement",
-    "News broadcast",
-    "Sports broadcast",
-    "Movie",
-    "TV series",
-    "Talk show",
-    "Interview",
-    "Music performance",
-    "Weather forecast",
-    "Children's program",
-  ],
-
-  /** CLAP audio categories treated as ad content (JSON array override via AD_CATEGORIES). */
-  adCategories: (() => {
-    const raw = process.env.AD_CATEGORIES;
-    if (raw) {
-      try {
-        const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed) && parsed.length) return parsed.map(String);
-      } catch {
-        /* fall through */
-      }
-    }
-    return ["Television commercial", "Advertisement"];
-  })(),
 
   /** OCR (Tesseract) configuration passed to the sidecar. */
   ocr: {
@@ -166,13 +166,24 @@ export const config = {
     minConfidence: floatEnv("OCR_MIN_CONFIDENCE", 40),
   },
 
+  /** Channel-logo stage (ROI auto-detection + template matching for logo present/absent). */
+  logo: {
+    // Max template crops passed to the matcher per probe (more = slower, diminishing returns).
+    maxTemplates: Math.max(1, intEnv("LOGO_MAX_TEMPLATES", 8)),
+    // present_ratio below which the window is considered "logo gone" (ad-side evidence).
+    absentRatio: floatEnv("LOGO_ABSENT_RATIO", 0.34),
+    // present_ratio above which the logo is clearly present (program-side evidence).
+    presentRatio: floatEnv("LOGO_PRESENT_RATIO", 0.66),
+  },
+
   /**
    * Multimodal fusion weights. Each contributing signal is bounded and combined into the ad/program
    * scores. All tunable via env for field calibration.
    */
   fusion: {
-    // Advertisement evidence weights.
-    visualAd: floatEnv("FUSION_VISUAL_AD", 0.35),
+    // Advertisement evidence weights. Visual now carries a real softmax score (0..1) thanks to the
+    // SigLIP prompt-ensemble + softmax normalization, so it's weighted as a first-class signal.
+    visualAd: floatEnv("FUSION_VISUAL_AD", 0.4),
     // Overlays appear in ~all broadcast content (news tickers, sports L3, logos), so this is only
     // a minor reinforcement — kept low on purpose to avoid false positives on newscasts.
     overlay: floatEnv("FUSION_OVERLAY", 0.08),
@@ -193,19 +204,21 @@ export const config = {
     // ordinary news wording (brand ~0.14) contributes nothing.
     bertSingle: floatEnv("FUSION_BERT_SINGLE", 0.28),
     bertSingleThreshold: floatEnv("FUSION_BERT_SINGLE_THRESHOLD", 0.35),
-    audioAdLast: floatEnv("FUSION_AUDIO_AD_LAST", 0.3),
-    audioAdAvg: floatEnv("FUSION_AUDIO_AD_AVG", 0.15),
+    // Music-bed heavy with little speech (jingle-like) leans commercial. Uses the local ffmpeg
+    // audio metrics (music_probability / speech_ratio), not a model.
     musicBed: floatEnv("FUSION_MUSIC_BED", 0.08),
     fastCut: floatEnv("FUSION_FAST_CUT", 0.1),
+    // Channel-logo evidence. Logo GONE (after we have templates) is a strong ad signal on channels
+    // that keep a persistent logo bug during programming; logo PRESENT is strong program evidence.
+    logoAbsent: floatEnv("FUSION_LOGO_ABSENT", 0.4),
+    logoPresent: floatEnv("FUSION_LOGO_PRESENT", 0.3),
     // Program evidence weights.
     visualProgram: floatEnv("FUSION_VISUAL_PROGRAM", 0.45),
     programSpeech: floatEnv("FUSION_PROGRAM_SPEECH", 0.1),
-    audioProgramAvg: floatEnv("FUSION_AUDIO_PROGRAM_AVG", 0.2),
     bertProgram: floatEnv("FUSION_BERT_PROGRAM", 0.1),
-    // Sustained-signal gate thresholds (prevent a single noisy frame from flipping to "ad").
-    sustainedOverlayRatio: floatEnv("FUSION_SUSTAINED_OVERLAY_RATIO", 0.4),
-    sustainedVisualScore: floatEnv("FUSION_SUSTAINED_VISUAL_SCORE", 0.45),
-    sustainedAudioScore: floatEnv("FUSION_SUSTAINED_AUDIO_SCORE", 0.5),
+    // Discriminative-gate threshold: the dominant SigLIP ad category (softmax) must clear this to
+    // qualify "ad" on visual grounds alone. With 6 categories, chance is ~0.17, so 0.4 = confident.
+    sustainedVisualScore: floatEnv("FUSION_SUSTAINED_VISUAL_SCORE", 0.4),
   },
 
   thresholds: {

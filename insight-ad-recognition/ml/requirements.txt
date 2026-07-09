@@ -2,7 +2,7 @@
 # torch (CPU) is installed separately in the Dockerfile from the CPU wheel index to keep size down.
 fastapi==0.115.6
 uvicorn==0.34.0
-# transformers hosts SigLIP (vision), mDeBERTa (text zero-shot) and CLAP (audio zero-shot).
+# transformers hosts SigLIP (vision) and mDeBERTa (text zero-shot).
 transformers==4.46.3
 # SentencePiece / protobuf are required by the SigLIP + mDeBERTa tokenizers.
 sentencepiece==0.2.0

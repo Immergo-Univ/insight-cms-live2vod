@@ -34,13 +34,11 @@ export function registerAdRecognitionScanModel(sequelize) {
       ocrText: { type: DataTypes.TEXT, allowNull: true },
       /** Dominant SigLIP visual category (programa/publicidad/placa/noticia/deporte/institucional). */
       visualCategory: { type: DataTypes.STRING(64), allowNull: true },
-      /** Dominant CLAP audio category. */
-      audioCategory: { type: DataTypes.STRING(64), allowNull: true },
       /** Number of advertising OCR cues detected (short-code/price/phone/CTA/URL/%/installments/legal). */
       ocrAdCueCount: { type: DataTypes.INTEGER, allowNull: true },
       /** Whether a sustained commercial overlay (banner/lower-third/logo-badge) was detected. */
       overlayPresent: { type: DataTypes.BOOLEAN, allowNull: true },
-      /** Full analysis profile (video/audio/vision/ocr/overlay/text/clap signals). */
+      /** Full analysis profile (video/audio/vision/ocr/overlay/text signals). */
       profile: { type: DataTypes.JSONB, allowNull: true },
       /** Populated only when the probe failed (detect/ffmpeg error). */
       error: { type: DataTypes.TEXT, allowNull: true },

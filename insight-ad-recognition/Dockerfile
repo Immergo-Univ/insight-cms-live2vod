@@ -1,12 +1,12 @@
 # insight-ad-recognition — single self-contained image.
 # Node.js API + Python ML sidecar (SigLIP vision + Tesseract OCR heb/eng/spa + OpenCV overlays +
-# mDeBERTa text + CLAP audio) + whisper.cpp (multilingual ggml-base) + ffmpeg. No docker-compose,
-# no external services.
+# mDeBERTa text) + whisper.cpp (multilingual ggml-base) + ffmpeg. No docker-compose, no external
+# services.
 #
 # Notes on image size: the heavy weight comes from the ML stack (torch CPU + transformers +
-# SigLIP/mDeBERTa/CLAP checkpoints) which is inherent to bundling the multimodal battery
-# in-container. We keep it as small as practical: slim base, CPU-only torch wheel, no pip cache,
-# build tools for whisper.cpp are removed after compilation, and models are prefetched at build.
+# SigLIP/mDeBERTa checkpoints) which is inherent to bundling the multimodal battery in-container.
+# We keep it as small as practical: slim base, CPU-only torch wheel, no pip cache, build tools for
+# whisper.cpp are removed after compilation, and models are downloaded at first boot.
 
 FROM node:20-bookworm-slim
 
@@ -44,7 +44,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # ---- whisper.cpp (compile + multilingual ggml-base model) ------------------------------------
 # ggml-base (multilingual) is used instead of *.en so Hebrew/Spanish/English are all supported.
 # Whisper is kept only for observability (transcript + speech_ratio); the AD/program verdict is
-# derived from the multimodal fusion (SigLIP + OCR + overlays + mDeBERTa + CLAP).
+# derived from the multimodal fusion (SigLIP + OCR + overlays + mDeBERTa + local audio metrics).
 # We only need the `whisper-cli` binary, so build just that target (skips server/tests/parakeet:
 # faster build + far less log noise). `-w` silences the benign ggml AVX512 `-Wmaybe-uninitialized`
 # compiler warnings that otherwise flood the build output.
@@ -86,10 +86,10 @@ COPY src /app/src
 COPY ml /app/ml
 
 # ---- ML checkpoints: downloaded at RUNTIME, not baked into the image -------------------------
-# Baking SigLIP + mDeBERTa + CLAP (~1.5 GB of HF blobs) into the image made kaniko OOM on the
-# DigitalOcean builder during "Taking snapshot of files..." (Build Error: Out of Memory). Instead
-# the sidecar downloads them into $HF_HOME on first startup (from_pretrained pulls from the HF hub
-# when the model isn't cached). This keeps the built image small enough to snapshot.
+# Baking SigLIP + mDeBERTa (~900 MB of HF blobs) into the image made kaniko OOM on the DigitalOcean
+# builder during "Taking snapshot of files..." (Build Error: Out of Memory). Instead the sidecar
+# downloads them into $HF_HOME on first startup (from_pretrained pulls from the HF hub when the
+# model isn't cached). This keeps the built image small enough to snapshot.
 #
 # Trade-off: the container needs outbound internet on first boot and re-downloads after a redeploy
 # unless $HF_HOME is backed by a persistent volume. `/health` reports the sidecar as not-ready
@@ -98,8 +98,7 @@ COPY ml /app/ml
 # To go back to an offline image (e.g. when deploying a prebuilt image from a registry that was
 # built on a bigger machine), run `python3 /app/ml/prefetch.py` at build time again.
 ENV SIGLIP_MODEL=google/siglip-base-patch16-224 \
-    TEXT_MODEL=MoritzLaurer/mDeBERTa-v3-base-mnli-xnli \
-    CLAP_MODEL=laion/clap-htsat-unfused
+    TEXT_MODEL=MoritzLaurer/mDeBERTa-v3-base-mnli-xnli
 
 # ---- Runtime config --------------------------------------------------------------------------
 ENV PORT=8081 \
@@ -109,7 +108,6 @@ ENV PORT=8081 \
     WHISPER_LANGUAGE=auto \
     OCR_LANGUAGES=heb+eng+spa \
     SEGMENT_SECONDS=10 \
-    AUDIO_CHUNK_SECONDS=5 \
     HEAVY_MAX_FRAMES=5 \
     PREVIEW_PUBLIC_BASE_URL=https://insight-cms-live2vod-id2z9.ondigitalocean.app/insight-cms-live2vod-insight-ad \
     ML_SIDECAR_AUTOSTART=true \

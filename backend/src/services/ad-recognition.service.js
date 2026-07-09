@@ -27,6 +27,12 @@ import {
   readChannelSnapshotById,
   resolveHlsBaseUrl,
 } from "./channel-ads-disk.service.js";
+import {
+  logoSamplesTarget,
+  countChannelLogoSamples,
+  storeChannelLogoSample,
+  loadChannelLogoTemplates,
+} from "./channel-logo.service.js";
 
 /**
  * Consecutive "ad" detections required to OPEN an ad window.
@@ -242,11 +248,27 @@ function trimOldSegments(segments) {
   return segments.filter((s) => s.endEpoch > cutoff);
 }
 
-async function callDetect(hlsUrl) {
-  const url =
+/**
+ * Call the microservice /detect.
+ * @param {string} hlsUrl
+ * @param {{ collectLogo?: boolean, logoRoi?: object, logoTemplates?: string[] }} [logo]
+ */
+async function callDetect(hlsUrl, logo = {}) {
+  let url =
     `${config.adRecognition.baseUrl}/detect` +
     `?video=${encodeURIComponent(hlsUrl)}` +
     `&secret=${encodeURIComponent(config.adRecognition.secret)}`;
+
+  // Logo stage params: either ask the microservice to collect a sample, or hand it the ROI +
+  // template URLs so it can match logo present/absent.
+  if (logo?.collectLogo) {
+    url += "&collectLogo=1";
+  }
+  if (logo?.logoRoi && Array.isArray(logo?.logoTemplates) && logo.logoTemplates.length) {
+    const r = logo.logoRoi;
+    url += `&logoRoi=${encodeURIComponent([r.x0, r.y0, r.x1, r.y1].join(","))}`;
+    url += `&logoTemplates=${encodeURIComponent(logo.logoTemplates.join(","))}`;
+  }
 
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), config.adRecognition.requestTimeoutMs);
@@ -256,6 +278,17 @@ async function callDetect(hlsUrl) {
     return await res.json();
   } finally {
     clearTimeout(t);
+  }
+}
+
+/** Extract the `endTime` (unix seconds) query param from a probe URL, or null. */
+function probeEndTime(probeUrl) {
+  try {
+    const v = new URL(probeUrl).searchParams.get("endTime");
+    const n = v != null ? parseInt(v, 10) : NaN;
+    return Number.isFinite(n) ? n : null;
+  } catch {
+    return null;
   }
 }
 
@@ -293,6 +326,16 @@ async function probeChannel(channel) {
   st.lastProbeAt = new Date().toISOString();
   const scannedAt = new Date();
 
+  // ---- Logo stage params: collect samples until we hit the target, then switch to matching. ----
+  const logoCount = await countChannelLogoSamples(channelId);
+  let logoParams = {};
+  if (logoCount < logoSamplesTarget()) {
+    logoParams = { collectLogo: true };
+  } else {
+    const tpl = await loadChannelLogoTemplates(channelId).catch(() => null);
+    if (tpl) logoParams = { logoRoi: tpl.roi, logoTemplates: tpl.templates };
+  }
+
   // Archive/DVR playlists need a bounded window (last PROBE_WINDOW_SECONDS + a safety margin so
   // we don't land inside the origin's packaging delay); live playlists pass as-is.
   let probeUrl = buildProbeUrl(hls);
@@ -300,7 +343,7 @@ async function probeChannel(channel) {
   let result;
   let lastError = null;
   try {
-    result = await callDetect(probeUrl);
+    result = await callDetect(probeUrl, logoParams);
   } catch (e) {
     lastError = e && typeof e.message === "string" ? e.message : String(e);
     // Upstream origin hiccup? Retry ONCE with a further-back window before giving up. The
@@ -314,7 +357,7 @@ async function probeChannel(channel) {
             `[ad-recognition] upstream error, retrying with extended margin ` +
               `(${config.adRecognition.archiveRetryMarginSec}s) channel=${channelId}: ${lastError}`,
           );
-          result = await callDetect(retryUrl);
+          result = await callDetect(retryUrl, logoParams);
           probeUrl = retryUrl;
           lastError = null;
         } catch (e2) {
@@ -348,8 +391,23 @@ async function probeChannel(channel) {
 
   const detection = typeof result?.detection === "string" ? result.detection : "unknown";
   const score = typeof result?.score === "number" ? result.score : null;
-  const epoch =
+  let epoch =
     typeof result?.timestamp === "number" ? result.timestamp : Math.floor(Date.now() / 1000);
+
+  // ---- Logo stage post-processing ----
+  const logo = result?.logo && typeof result.logo === "object" ? result.logo : null;
+
+  // Pixel-perfect(ish) boundary: when the logo matcher found a present->absent transition inside
+  // the window, use that instant as the "ad" epoch so the opened segment starts exactly where the
+  // logo disappeared (temporal resolution = 1 frame ≈ 1 s), instead of the coarse probe timestamp.
+  if (logo && detection === "ad" && typeof logo.transition_offset_sec === "number") {
+    const endTime = probeEndTime(probeUrl);
+    const duration = typeof result?.profile?.duration === "number" ? result.profile.duration : null;
+    if (endTime != null && duration != null) {
+      const transitionEpoch = Math.round(endTime - duration + logo.transition_offset_sec);
+      if (Number.isFinite(transitionEpoch) && transitionEpoch > 0) epoch = transitionEpoch;
+    }
+  }
 
   st.lastError = null;
   st.lastDetection = detection;
@@ -357,6 +415,21 @@ async function probeChannel(channel) {
 
   applyDetection(st, detection, epoch);
   st.segments = trimOldSegments(st.segments);
+
+  // Collect a logo sample (upload to S3 + DB) while we still need them and the microservice
+  // returned a crop from a confident-program window. Stops automatically once the target is hit.
+  if (logo && logo.mode === "collect" && logo.sample_base64 && logoCount < logoSamplesTarget()) {
+    await storeChannelLogoSample({
+      tenantId,
+      channelId,
+      base64: logo.sample_base64,
+      roi: logo.roi || null,
+      confidence: typeof logo.confidence === "number" ? logo.confidence : null,
+      hlsUrl: probeUrl,
+    }).catch((e) =>
+      console.warn("[ad-recognition] logo sample store failed:", e && e.message ? e.message : e),
+    );
+  }
 
   // Positive recognition log: full detect JSON alongside the requested m3u8 (channel title + probed URL).
   console.log(
@@ -379,7 +452,6 @@ async function probeChannel(channel) {
     ocrText: typeof result?.ocr_text === "string" ? result.ocr_text : null,
     // Multimodal signals surfaced at the top level by the microservice (queryable columns).
     visualCategory: typeof result?.visual_category === "string" ? result.visual_category : null,
-    audioCategory: typeof result?.audio_category === "string" ? result.audio_category : null,
     ocrAdCueCount: typeof result?.ocr_ad_cue_count === "number" ? result.ocr_ad_cue_count : null,
     overlayPresent: typeof result?.overlay_present === "boolean" ? result.overlay_present : null,
     profile: result?.profile ?? null,

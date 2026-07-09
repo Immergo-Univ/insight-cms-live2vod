@@ -1,6 +1,6 @@
 /**
- * Manages the in-container Python ML sidecar (CLAP zero-shot audio classifier).
- * The sidecar is a long-lived process that preloads CLAP once so per-request inference is fast
+ * Manages the in-container Python ML sidecar (SigLIP vision + Tesseract OCR + OpenCV overlays +
+ * mDeBERTa text). The sidecar is a long-lived process that preloads the models once so inference
  * and safe for concurrent calls. Node talks to it over localhost HTTP.
  */
 
@@ -60,9 +60,7 @@ export async function ensureSidecar() {
           ML_SIDECAR_HOST: config.sidecar.host,
           SIGLIP_MODEL: config.models.siglip,
           TEXT_MODEL: config.models.text,
-          CLAP_MODEL: config.models.clap,
           HF_HOME: config.models.hfHome,
-          AUDIO_CATEGORIES: JSON.stringify(config.audioCategories),
           VISUAL_CATEGORY_PROMPTS: JSON.stringify(config.visualCategories),
           OCR_LANGUAGES: config.ocr.languages,
           OCR_MIN_CONFIDENCE: String(config.ocr.minConfidence),

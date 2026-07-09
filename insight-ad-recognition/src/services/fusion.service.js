@@ -2,16 +2,16 @@
  * Multimodal fusion + deterministic decision layer.
  *
  * Consumes the assembled profile JSON (visual SigLIP + OCR cues + overlays + BERT semantic labels
- * + CLAP audio + local video/audio metrics) and produces the final verdict:
+ * + local video/audio metrics) and produces the final verdict:
  *   { detection: "ad" | "program" | "silence", score, confidence, scores, reasons }
  *
  * Scoring is fully transparent (weighted evidence, no learned meta-model) so behavior is
  * predictable and tunable via `config.fusion`. Temporal consistency is handled two ways:
  *   - Heavy signals are already averaged across the sampled frames of the 10s window (SigLIP avg,
- *     overlay frame-ratio, OCR text joined over frames, CLAP window avg) — i.e. the window itself
+ *     overlay frame-ratio, OCR text joined over frames) — i.e. the window itself
  *     is the smoothing.
- *   - The final "ad" verdict additionally requires a SUSTAINED signal (overlay across frames, or a
- *     strong visual/audio average, or a hard OCR cue), so a single noisy frame can't flip it.
+ *   - The final "ad" verdict additionally requires a DISCRIMINATIVE signal (SigLIP publicidad/placa
+ *     with confidence, or a hard OCR cue), so a single noisy frame can't flip it.
  */
 
 import { config } from "../config.js";
@@ -27,10 +27,6 @@ function round(x) {
 const VISUAL_AD = new Set(["publicidad", "placa", "institucional"]);
 const VISUAL_PROGRAM = new Set(["programa", "noticia", "deporte"]);
 
-function isAudioAdCategory(name) {
-  return typeof name === "string" && config.adCategories.includes(name);
-}
-
 /**
  * @param {object} p assembled profile (multimodal shape from profile.service.js)
  * @returns {{ detection: string, score: number, confidence: number, scores: object, reasons: string[] }}
@@ -44,9 +40,6 @@ export function classify(p) {
   const overlayScore = numOr(p.overlay_score, 0);
   const overlayRatio = numOr(p.overlay_frame_ratio, 0);
   const bert = p.text_labels || {};
-  const clapLast = p.audio_clap_last || null;
-  const clapAvg = numOr(p.audio_clap_score_avg, 0);
-  const clapAvgCat = p.audio_clap_category_avg || "unknown";
 
   // ---- Silence / dead-air --------------------------------------------------
   let silenceScore = 0;
@@ -122,19 +115,22 @@ export function classify(p) {
     reasons.push("bert:pair");
   }
 
-  // Audio (CLAP): commercial-like categories in the last chunk (live edge) + window avg.
-  if (clapLast && isAudioAdCategory(clapLast.category)) {
-    adScore += w.audioAdLast * numOr(clapLast.score, 0);
-    reasons.push(`clap:last=${clapLast.category}@${numOr(clapLast.score, 0).toFixed(2)}`);
-  }
-  if (isAudioAdCategory(clapAvgCat)) {
-    adScore += w.audioAdAvg * clapAvg;
-    reasons.push(`clap:avg=${clapAvgCat}@${clapAvg.toFixed(2)}`);
-  }
-  // Music-bed heavy with little speech (jingle-like).
+  // Audio (local ffmpeg metrics): music-bed heavy with little speech (jingle-like) leans commercial.
   if (numOr(p.music_probability, 0) > 0.6 && numOr(p.speech_ratio, 0) < 0.3) {
     adScore += w.musicBed;
     reasons.push("audio:musicbed");
+  }
+
+  // Channel logo: once we have templates, a GONE logo (present_ratio low) is strong ad evidence on
+  // channels that keep a persistent logo bug during programming.
+  const logoTemplatesUsed = numOr(p.logo_templates_used, 0);
+  const logoAbsent =
+    logoTemplatesUsed > 0 &&
+    p.logo_present_ratio != null &&
+    numOr(p.logo_present_ratio, 1) <= config.logo.absentRatio;
+  if (logoAbsent) {
+    adScore += w.logoAbsent;
+    reasons.push(`logo:absent@${numOr(p.logo_present_ratio, 0).toFixed(2)}`);
   }
   // Commercials are typically fast-cut / busy.
   adScore += w.fastCut * clamp01(numOr(p.scene_change_rate, 0) * 0.7 + numOr(p.motion_avg, 0) * 0.3);
@@ -148,11 +144,17 @@ export function classify(p) {
     reasons.push(`visual:${visualCat}@${visualScore.toFixed(2)}`);
   }
   if (numOr(p.speech_ratio, 0) > 0.4) programScore += w.programSpeech;
-  if (!isAudioAdCategory(clapAvgCat) && clapAvgCat !== "unknown") {
-    programScore += w.audioProgramAvg * clapAvg;
-  }
   // A dominant program-intent from the BERT text also supports program.
   if (numOr(bert.program, 0) >= 0.6) programScore += w.bertProgram;
+  // Channel logo clearly present -> strong program evidence.
+  const logoPresent =
+    logoTemplatesUsed > 0 &&
+    p.logo_present_ratio != null &&
+    numOr(p.logo_present_ratio, 0) >= config.logo.presentRatio;
+  if (logoPresent) {
+    programScore += w.logoPresent;
+    reasons.push(`logo:present@${numOr(p.logo_present_ratio, 0).toFixed(2)}`);
+  }
   programScore = clamp01(programScore);
 
   // ---- Discriminative-signal gate for "ad" ---------------------------------
@@ -160,7 +162,6 @@ export function classify(p) {
   // programming. Overlays and generic CTA wording are NOT enough (news/sports have overlays too,
   // and "now/ahora/עכשיו" show up everywhere). The discriminative signals are:
   //   - SigLIP says publicidad/placa/institucional with real confidence, OR
-  //   - CLAP says a commercial-like category with real confidence, OR
   //   - a HARD OCR cue (short-code / phone / price / % / URL / installments).
   const hardOcrCue = Boolean(
     p.ocr_short_code ||
@@ -168,13 +169,11 @@ export function classify(p) {
       p.ocr_price ||
       p.ocr_percent ||
       p.ocr_url ||
-      p.ocr_installments,
+      p.ocr_installments ||
+      p.ocr_promo,
   );
   const sustained =
-    (VISUAL_AD.has(visualCat) && visualScore >= w.sustainedVisualScore) ||
-    (isAudioAdCategory(clapAvgCat) && clapAvg >= w.sustainedAudioScore) ||
-    (clapLast && isAudioAdCategory(clapLast.category) && numOr(clapLast.score, 0) >= w.sustainedAudioScore) ||
-    hardOcrCue;
+    (VISUAL_AD.has(visualCat) && visualScore >= w.sustainedVisualScore) || hardOcrCue || logoAbsent;
 
   // ---- Decision ------------------------------------------------------------
   const scores = { ad: round(adScore), program: round(programScore), silence: round(silenceScore) };

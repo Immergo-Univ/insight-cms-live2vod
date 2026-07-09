@@ -106,7 +106,6 @@ export async function adminListChannelScans(_tenantId, channelId, opts = {}) {
       transcript: p.transcript,
       ocrText: p.ocrText,
       visualCategory: p.visualCategory,
-      audioCategory: p.audioCategory,
       ocrAdCueCount: p.ocrAdCueCount != null ? Number(p.ocrAdCueCount) : null,
       overlayPresent: p.overlayPresent,
       profile: p.profile,

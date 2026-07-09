@@ -1,22 +1,17 @@
-"""Build-time model prefetch so the runtime image is fully self-contained (no network at boot).
+"""Build-time / first-boot model prefetch so inference doesn't pay the download cost mid-request.
 
 Downloads and caches (into $HF_HOME):
   - SigLIP model + processor (visual zero-shot classifier)
   - mDeBERTa zero-shot text classifier (semantic OCR-text intent)
-  - CLAP model + processor (audio zero-shot classifier)
 
 Usage:
-  python prefetch.py            # fetch all three
+  python prefetch.py            # fetch both
   python prefetch.py siglip     # fetch only SigLIP
   python prefetch.py text       # fetch only the text classifier
-  python prefetch.py clap       # fetch only CLAP
 
-The Dockerfile calls this once per model so each download lands in its OWN image layer. That keeps
-each kaniko snapshot small enough to fit the constrained build machine (one ~1.5 GB combined layer
-was OOM-ing the DigitalOcean builder during "Taking snapshot of files...").
-
-OCR uses Tesseract (system package) and overlay detection is pure OpenCV, so neither needs a
-prefetch here.
+The Dockerfile can call this once per model so each download lands in its own image layer (keeps
+kaniko snapshots small). OCR uses Tesseract (system package) and overlay detection is pure OpenCV,
+so neither needs a prefetch here. The CLAP audio classifier was removed from the stack.
 """
 
 import os
@@ -40,16 +35,7 @@ def fetch_text():
     pipeline("zero-shot-classification", model=text_id, device=-1)
 
 
-def fetch_clap():
-    clap_id = os.environ.get("CLAP_MODEL", "laion/clap-htsat-unfused")
-    print(f"[prefetch] CLAP: {clap_id}", flush=True)
-    from transformers import ClapModel, ClapProcessor
-
-    ClapProcessor.from_pretrained(clap_id)
-    ClapModel.from_pretrained(clap_id)
-
-
-_TARGETS = {"siglip": fetch_siglip, "text": fetch_text, "clap": fetch_clap}
+_TARGETS = {"siglip": fetch_siglip, "text": fetch_text}
 
 
 def main():
@@ -57,11 +43,10 @@ def main():
     if which == "all":
         fetch_siglip()
         fetch_text()
-        fetch_clap()
     elif which in _TARGETS:
         _TARGETS[which]()
     else:
-        print(f"[prefetch] unknown target '{which}' (use: siglip|text|clap|all)", flush=True)
+        print(f"[prefetch] unknown target '{which}' (use: siglip|text|all)", flush=True)
         sys.exit(2)
     print("[prefetch] done", flush=True)
 

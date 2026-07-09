@@ -6,6 +6,7 @@ import { registerTenantModel } from "../models/tenant.model.js";
 import { registerTenantSyndicationAccountModel } from "../models/tenant-syndication-account.model.js";
 import { registerAppSettingModel } from "../models/app-setting.model.js";
 import { registerAdRecognitionScanModel } from "../models/ad-recognition-scan.model.js";
+import { registerChannelLogoSampleModel } from "../models/channel-logo-sample.model.js";
 import { seedAdminIfNeeded } from "../services/admin-seed.service.js";
 import { runPendingMigrations } from "./migration-runner.js";
 
@@ -46,6 +47,7 @@ export function registerAllModels(sq) {
   registerTenantSyndicationAccountModel(sq);
   registerAppSettingModel(sq);
   registerAdRecognitionScanModel(sq);
+  registerChannelLogoSampleModel(sq);
 }
 
 export function getSequelize() {

@@ -99,9 +99,9 @@ export const config = {
     /** Milliseconds between probe cycles (all channels probed in parallel each cycle). */
     intervalMs: parseInt(process.env.AD_RECOGNITION_INTERVAL_MS || "10000", 10),
     /**
-     * Per-request timeout for the detect call. On CPU an audio-only probe (ffmpeg extraction +
-     * CLAP over ~4 chunks + whisper for observability) can take up to ~1 min, so this budget is
-     * generous. Env: AD_RECOGNITION_TIMEOUT_MS.
+     * Per-request timeout for the detect call. On CPU a multimodal probe (ffmpeg extraction +
+     * SigLIP/OCR/overlays over the heavy frames + mDeBERTa + whisper) can take up to ~1 min, so
+     * this budget is generous. Env: AD_RECOGNITION_TIMEOUT_MS.
      */
     requestTimeoutMs: parseInt(process.env.AD_RECOGNITION_TIMEOUT_MS || "180000", 10),
     /**
@@ -130,6 +130,16 @@ export const config = {
       process.env.AD_RECOGNITION_ARCHIVE_RETRY_MARGIN_SEC || "120",
       10,
     ),
+    /**
+     * Channel-logo stage: how many auto-collected logo ROI samples to keep per channel before we
+     * stop collecting (they then become the matching templates). Env: AD_RECOGNITION_LOGO_SAMPLES_TARGET.
+     */
+    logoSamplesTarget: parseInt(process.env.AD_RECOGNITION_LOGO_SAMPLES_TARGET || "30", 10),
+    /**
+     * How many template URLs to hand the microservice for logo matching each probe (subset of the
+     * stored samples). Env: AD_RECOGNITION_LOGO_TEMPLATES.
+     */
+    logoTemplatesToSend: parseInt(process.env.AD_RECOGNITION_LOGO_TEMPLATES || "8", 10),
     /**
      * Optional restriction: when set, only these tenant IDs are probed (intersected with the tenants
      * that have `adRecognitionEnabled === true`). When empty, ALL enabled tenants are probed.

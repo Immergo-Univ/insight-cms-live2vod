@@ -2,7 +2,12 @@
  * Tenant-scoped VOD MP4 objects (separate folder per tenant under the shared S3 prefix).
  */
 
-import { S3Client, PutObjectCommand, ListObjectsV2Command } from "@aws-sdk/client-s3";
+import {
+  S3Client,
+  PutObjectCommand,
+  ListObjectsV2Command,
+  DeleteObjectCommand,
+} from "@aws-sdk/client-s3";
 import { config } from "../config.js";
 
 /** @type {S3Client | null} */
@@ -99,6 +104,60 @@ export async function putEditorWidgetImagePublic(opts) {
     }),
   );
   return { key, publicUrl: publicUrlForVodKey(key) };
+}
+
+/**
+ * Channel-logo sample crop object key (public; under a dedicated prefix, one folder per channel).
+ * @param {string} channelId
+ * @param {string} sampleId
+ */
+export function channelLogoSampleObjectKey(channelId, sampleId) {
+  const prefix = (process.env.S3_LOGO_SAMPLES_PREFIX || "channel-logo-samples").replace(
+    /^\/+|\/+$/g,
+    "",
+  );
+  const seg = sanitizeTenantSegment(channelId);
+  const safeId = String(sampleId).replace(/[^a-zA-Z0-9_-]/g, "_");
+  return `${prefix}/${seg}/${safeId}.jpg`;
+}
+
+/**
+ * Upload a channel-logo sample crop (JPEG) with public-read ACL, returning key + public URL.
+ * The microservice fetches these public URLs as logo templates.
+ * @param {string} channelId
+ * @param {string} sampleId
+ * @param {Buffer} buffer
+ */
+export async function putChannelLogoSamplePublic(channelId, sampleId, buffer) {
+  const c = getClient();
+  if (!c) throw new Error("S3 not configured (need S3_* credentials, bucket, endpoint)");
+  const key = channelLogoSampleObjectKey(channelId, sampleId);
+  await c.send(
+    new PutObjectCommand({
+      Bucket: config.s3Logos.bucket,
+      Key: key,
+      Body: buffer,
+      ContentType: "image/jpeg",
+      ACL: "public-read",
+      CacheControl: "public, max-age=86400",
+    }),
+  );
+  return { key, publicUrl: publicUrlForVodKey(key) };
+}
+
+/**
+ * Delete an S3 object by key (best-effort). Used when an operator removes a logo sample.
+ * @param {string} key
+ */
+export async function deleteS3ObjectByKey(key) {
+  const c = getClient();
+  if (!c || !key) return false;
+  try {
+    await c.send(new DeleteObjectCommand({ Bucket: config.s3Logos.bucket, Key: key }));
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /**

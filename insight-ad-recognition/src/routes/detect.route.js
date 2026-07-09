@@ -25,6 +25,28 @@ function isValidVideoArg(v) {
   return /^https?:\/\//i.test(v) || v.startsWith("/") || /\.(mp4|m3u8)$/i.test(v);
 }
 
+/** Parse "x0,y0,x1,y1" (normalized fractions) into an ROI object, or null. */
+function parseRoi(v) {
+  if (typeof v !== "string") return null;
+  const parts = v.split(",").map((s) => parseFloat(s.trim()));
+  if (parts.length !== 4 || parts.some((n) => !Number.isFinite(n))) return null;
+  const [x0, y0, x1, y1] = parts;
+  if (x1 <= x0 || y1 <= y0) return null;
+  return { x0, y0, x1, y1 };
+}
+
+/** Build the logo-stage options from the query params the CMS scheduler passes. */
+function parseLogoOpts(query) {
+  const collect = query.collectLogo === "1" || query.collectLogo === "true";
+  const roi = parseRoi(query.logoRoi);
+  const templates =
+    typeof query.logoTemplates === "string" && query.logoTemplates.length
+      ? query.logoTemplates.split(",").map((s) => s.trim()).filter(Boolean)
+      : [];
+  if (!collect && !(roi && templates.length)) return null;
+  return { collect, roi, templates };
+}
+
 /**
  * Classify an analysis failure so we don't scream ERROR for transient upstream hiccups (Akamai
  * archive origins returning HTTP 400 while segments are still packaging, `fillgaps` proxies
@@ -54,9 +76,10 @@ detectRouter.get("/detect", requireSecret, async (req, res) => {
   }
 
   const startedAt = Date.now();
+  const logoOpts = parseLogoOpts(req.query);
   const workDir = await createWorkDir();
   try {
-    const result = await jobs.run(() => analyzeVideo(String(video), workDir));
+    const result = await jobs.run(() => analyzeVideo(String(video), workDir, { logo: logoOpts }));
 
     const payload = {
       // The selected class is the final verdict. `selected` restates `detection` explicitly so
@@ -74,9 +97,10 @@ detectRouter.get("/detect", requireSecret, async (req, res) => {
       ocr_text: result.ocr_text ?? "",
       // High-value multimodal signals surfaced at the top level (CMS persists them as columns).
       visual_category: result.visual_category ?? null,
-      audio_category: result.audio_category ?? null,
       ocr_ad_cue_count: result.ocr_ad_cue_count ?? 0,
       overlay_present: result.overlay_present ?? false,
+      // Channel-logo stage: ROI + sample crop (collection) and/or presence + transition (matching).
+      logo: result.logo ?? null,
       // Mosaic preview of the captured frames (one file per channel, expires after TTL).
       url_image: previewUrl(result.previewFile, req),
       // Full internal profile as described in docs/insight-ad-recognition.md.

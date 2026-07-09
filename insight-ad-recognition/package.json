@@ -1,7 +1,7 @@
 {
   "name": "insight-ad-recognition",
   "version": "1.0.0",
-  "description": "Live channel AD recognition API (Node.js orchestrator + in-container multimodal battery: SigLIP + Tesseract OCR + OpenCV overlays + mDeBERTa + CLAP + Whisper).",
+  "description": "Live channel AD recognition API (Node.js orchestrator + in-container multimodal battery: SigLIP + Tesseract OCR + OpenCV overlays + mDeBERTa + Whisper).",
   "type": "module",
   "private": true,
   "engines": {

@@ -10,6 +10,7 @@ import * as clips from "../services/admin-clip.service.js";
 import * as adminTenants from "../services/admin-tenant.service.js";
 import * as adminStreams from "../services/admin-stream.service.js";
 import * as appSettings from "../services/admin-settings.service.js";
+import * as channelLogos from "../services/channel-logo.service.js";
 import { isSequelizeReady } from "../db/sequelize.js";
 
 export const adminRouter = Router();
@@ -348,6 +349,37 @@ adminSecured.get(
         { limit },
       );
       res.json({ scans });
+    } catch (e) {
+      res.status(500).json({ error: e instanceof Error ? e.message : String(e) });
+    }
+  },
+);
+
+// ---- Channel logo samples (AD-recognition logo stage) --------------------------------------
+adminSecured.get(
+  "/tenants/:tenantId/streams/:channelId/logo-samples",
+  requireAdminPermission("tenants", "view"),
+  async (req, res) => {
+    try {
+      const samples = await channelLogos.listChannelLogoSamples(req.params.channelId);
+      res.json({ samples, target: channelLogos.logoSamplesTarget() });
+    } catch (e) {
+      res.status(500).json({ error: e instanceof Error ? e.message : String(e) });
+    }
+  },
+);
+
+adminSecured.delete(
+  "/tenants/:tenantId/streams/:channelId/logo-samples/:sampleId",
+  requireAdminPermission("tenants", "edit"),
+  async (req, res) => {
+    try {
+      const ok = await channelLogos.deleteChannelLogoSample(
+        req.params.channelId,
+        req.params.sampleId,
+      );
+      if (!ok) return res.status(404).json({ error: "Not found" });
+      res.json({ ok: true });
     } catch (e) {
       res.status(500).json({ error: e instanceof Error ? e.message : String(e) });
     }
