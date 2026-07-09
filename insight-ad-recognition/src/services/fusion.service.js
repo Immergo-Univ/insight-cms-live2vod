@@ -67,13 +67,16 @@ export function classify(p) {
     reasons.push(`visual:${visualCat}@${visualScore.toFixed(2)}`);
   }
 
-  // Overlay (sustained banners / lower-thirds / logo-badges).
+  // Overlay (banners / lower-thirds / logo-badges). NOTE: overlays appear in almost ALL broadcast
+  // content (news tickers, sports lower-thirds, channel logos), so this is only a MINOR
+  // reinforcement — never enough on its own to call an ad (see the sustained gate below).
   if (p.overlay_present) {
     adScore += w.overlay * Math.max(overlayScore, overlayRatio);
     reasons.push(`overlay@${overlayScore.toFixed(2)}x${overlayRatio.toFixed(2)}`);
   }
 
-  // OCR strong cues (short-code / price / phone / CTA / URL / %, installments).
+  // OCR strong cues: short-code / phone / price / % / URL / installments. These rarely appear
+  // outside ads, so they carry real weight.
   const strong = numOr(p.strong_cue_count, 0);
   if (strong > 0) {
     adScore += Math.min(w.ocrStrongCap, strong * w.ocrStrongPer);
@@ -84,9 +87,11 @@ export function classify(p) {
     adScore += w.ocrContactBonus;
     reasons.push(p.ocr_short_code ? "ocr:short_code" : "ocr:phone");
   }
-  if (p.ocr_legal) {
-    adScore += w.ocrWeak;
-    reasons.push("ocr:legal");
+  // OCR weak cues (CTA wording / legal fine print): noisy — small, capped contribution only.
+  const weak = numOr(p.weak_cue_count, 0);
+  if (weak > 0) {
+    adScore += Math.min(w.ocrWeakCap, weak * w.ocrWeak);
+    reasons.push(`ocr:weak=${weak}`);
   }
 
   // BERT semantic combo: contact + CTA + (brand OR price) is the classic ad triad.
@@ -137,16 +142,26 @@ export function classify(p) {
   if (numOr(bert.program, 0) >= 0.6) programScore += w.bertProgram;
   programScore = clamp01(programScore);
 
-  // ---- Sustained-signal gate for "ad" --------------------------------------
-  // Require the ad evidence to be backed by at least one sustained/hard signal so a single noisy
-  // frame (e.g. one OCR false positive) can't flip a program window to "ad".
+  // ---- Discriminative-signal gate for "ad" ---------------------------------
+  // The ad verdict REQUIRES at least one signal that actually distinguishes ads from regular
+  // programming. Overlays and generic CTA wording are NOT enough (news/sports have overlays too,
+  // and "now/ahora/עכשיו" show up everywhere). The discriminative signals are:
+  //   - SigLIP says publicidad/placa/institucional with real confidence, OR
+  //   - CLAP says a commercial-like category with real confidence, OR
+  //   - a HARD OCR cue (short-code / phone / price / % / URL / installments).
+  const hardOcrCue = Boolean(
+    p.ocr_short_code ||
+      p.ocr_phone ||
+      p.ocr_price ||
+      p.ocr_percent ||
+      p.ocr_url ||
+      p.ocr_installments,
+  );
   const sustained =
-    overlayRatio >= w.sustainedOverlayRatio ||
     (VISUAL_AD.has(visualCat) && visualScore >= w.sustainedVisualScore) ||
     (isAudioAdCategory(clapAvgCat) && clapAvg >= w.sustainedAudioScore) ||
-    p.ocr_short_code ||
-    p.ocr_phone ||
-    strong >= 2;
+    (clapLast && isAudioAdCategory(clapLast.category) && numOr(clapLast.score, 0) >= w.sustainedAudioScore) ||
+    hardOcrCue;
 
   // ---- Decision ------------------------------------------------------------
   const scores = { ad: round(adScore), program: round(programScore), silence: round(silenceScore) };

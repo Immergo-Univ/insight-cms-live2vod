@@ -22,40 +22,36 @@ const INSTALLMENTS_RE =
   /\b(?:cuotas?|sin inter[eé]s|installments?|payments?)\b|תשלומים|בתשלומים|ללא ריבית/i;
 
 // Promo / CTA keywords. Hebrew included for Channel 14 / i24 content.
+//
+// IMPORTANT: only ad-specific action phrases / promo wording. We deliberately EXCLUDE ubiquitous
+// time adverbs like "ahora" / "now" / "עכשיו" — they appear constantly in news ("now at 7:30...")
+// and "עכשיו 14" is literally a channel brand name, so they produced false CTA hits on newscasts.
 const CTA_KEYWORDS = [
   // Spanish
   "promo",
   "oferta",
   "descuento",
   "gratis",
-  "llama",
-  "llamá",
-  "ahora",
-  "compra",
+  "llama ya",
+  "llamá ya",
+  "comprá",
   "aprovecha",
-  "exclusivo",
   "ultimas unidades",
   "envío gratis",
   // English
   "sale",
   "discount",
-  "free",
   "call now",
   "buy now",
   "order now",
-  "limited",
-  "offer",
-  "deal",
   "shop now",
+  "limited offer",
   // Hebrew
   "מבצע", // sale/promo
-  "עכשיו", // now
   "חינם", // free
-  "הזמינו", // order
-  "התקשרו", // call
+  "הזמינו", // order now
+  "התקשרו", // call (imperative)
   "הנחה", // discount
-  "מוגבל", // limited
-  "בלעדי", // exclusive
 ];
 
 // Weak cues: brand-like ALL-CAPS tokens and legal fine print (prone to OCR noise).
@@ -102,7 +98,9 @@ export function extractOcrCues(rawText) {
   const ocr_cta = cta_hits > 0;
   const ocr_legal = LEGAL_RE.test(text);
 
-  // Strong cues rarely appear outside ads; weak cues are noisier.
+  // Strong cues rarely appear outside ads (short-code / phone / price / % / URL / installments).
+  // Weak cues (CTA wording, legal fine print) are noisier — they also show up in news/promos, so
+  // they must NOT be enough on their own to declare an ad.
   const strong_cue_count = [
     ocr_short_code,
     ocr_phone,
@@ -110,9 +108,8 @@ export function extractOcrCues(rawText) {
     ocr_percent,
     ocr_url,
     ocr_installments,
-    ocr_cta,
   ].filter(Boolean).length;
-  const weak_cue_count = [ocr_legal].filter(Boolean).length;
+  const weak_cue_count = [ocr_cta, ocr_legal].filter(Boolean).length;
 
   return {
     ocr_short_code,

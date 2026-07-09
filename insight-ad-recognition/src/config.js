@@ -173,11 +173,15 @@ export const config = {
   fusion: {
     // Advertisement evidence weights.
     visualAd: floatEnv("FUSION_VISUAL_AD", 0.35),
-    overlay: floatEnv("FUSION_OVERLAY", 0.25),
+    // Overlays appear in ~all broadcast content (news tickers, sports L3, logos), so this is only
+    // a minor reinforcement — kept low on purpose to avoid false positives on newscasts.
+    overlay: floatEnv("FUSION_OVERLAY", 0.08),
     ocrStrongPer: floatEnv("FUSION_OCR_STRONG_PER", 0.12),
     ocrStrongCap: floatEnv("FUSION_OCR_STRONG_CAP", 0.4),
     ocrContactBonus: floatEnv("FUSION_OCR_CONTACT_BONUS", 0.2),
-    ocrWeak: floatEnv("FUSION_OCR_WEAK", 0.05),
+    // Weak cues (CTA wording / legal): small, capped — never enough on their own.
+    ocrWeak: floatEnv("FUSION_OCR_WEAK", 0.04),
+    ocrWeakCap: floatEnv("FUSION_OCR_WEAK_CAP", 0.06),
     bertLabelThreshold: floatEnv("FUSION_BERT_LABEL_THRESHOLD", 0.5),
     bertTriad: floatEnv("FUSION_BERT_TRIAD", 0.4),
     bertPair: floatEnv("FUSION_BERT_PAIR", 0.15),
