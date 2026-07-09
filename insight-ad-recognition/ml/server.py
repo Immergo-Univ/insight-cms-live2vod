@@ -1,19 +1,14 @@
-"""In-container ML sidecar for insight-ad-recognition (multimodal, audio classifier removed).
+"""In-container ML sidecar for insight-ad-recognition (rule engine).
 
 FastAPI server that preloads the CPU model battery and exposes:
-  GET  /health          -> { ready, error, models }
-  POST /vision {frames}  -> SigLIP category avg + OCR text/cues geometry + overlay flags
-  POST /text   {text}    -> semantic ad-intent labels (mDeBERTa zero-shot)
+  GET  /health                         -> { ready, error, models }
+  POST /analyze { frame, rois, ... }   -> per-ROI pHash + OCR (+ EN translation) + full-screen OCR
+  POST /sample  { frame }              -> template pHash + OCR (+ EN translation) for an upload
 
-The CLAP audio classifier was removed (it misclassified ads/newscasts as "Sports broadcast" too
-often to be useful); ad/program is now decided from visual + OCR + overlays + BERT text, plus the
-local ffmpeg audio metrics (RMS / silence / music) computed on the Node side.
-
-The Node process starts this as a child and talks to it over localhost. Models load once so
-per-request inference is fast; each model call is guarded by its own lock for concurrent safety.
+The heavy lifting is: Tesseract OCR (heb/eng/spa), perceptual hashing (imagehash) and NLLB-200
+translation to English. The Node process starts this as a child and talks to it over localhost.
 """
 
-import json
 import os
 
 from fastapi import FastAPI
@@ -21,51 +16,42 @@ from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
 
 
-def _visual_category_prompts() -> dict | None:
-    """Optional override for the SigLIP category->prompt map (JSON object). Falls back to the
-    module default (programa/publicidad/placa/noticia/deporte/institucional)."""
-    raw = os.environ.get("VISUAL_CATEGORY_PROMPTS")
-    if raw:
-        try:
-            parsed = json.loads(raw)
-            if isinstance(parsed, dict) and parsed:
-                return {str(k): str(v) for k, v in parsed.items()}
-        except Exception:
-            pass
-    return None
-
-
 app = FastAPI(title="insight-ad-recognition ML sidecar")
 
 STATE = {
     "ready": False,
-    "siglip": None,
     "ocr": None,
-    "overlay": None,
-    "text": None,
+    "translator": None,
     "error": None,
 }
 
 
-class VisionRequest(BaseModel):
-    frames: list[str]
+class RoiSpec(BaseModel):
+    id: str
+    x: float = 0.0
+    y: float = 0.0
+    w: float = 1.0
+    h: float = 1.0
+    ocr: bool = False
+    translate: bool = False
 
 
-class TextRequest(BaseModel):
-    text: str = ""
+class AnalyzeRequest(BaseModel):
+    frame: str
+    fullOcr: bool = True
+    translateFull: bool = True
+    rois: list[RoiSpec] = []
+    phashSize: int = 8
 
 
-class LogoRequest(BaseModel):
-    frames: list[str]
-    # mode "detect": auto-locate ROI + return a sample crop. mode "match": match ROI vs templates.
-    mode: str = "detect"
-    roi: dict | None = None
-    templates: list[str] | None = None  # base64-encoded template crops (for mode="match")
+class SampleRequest(BaseModel):
+    frame: str
+    phashSize: int = 8
 
 
 def _warmup():
-    """Run one dummy inference per model so the FIRST real request doesn't pay the lazy graph-init
-    cost. Never blocks readiness — if warmup fails, the sidecar still serves."""
+    """Run one dummy OCR/pHash so the first real request doesn't pay the lazy init cost. Never
+    blocks readiness — if warmup fails, the sidecar still serves."""
     import tempfile
 
     from PIL import Image
@@ -75,15 +61,12 @@ def _warmup():
         with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tf:
             img_path = tf.name
         Image.new("RGB", (224, 224), (16, 16, 16)).save(img_path, "JPEG")
-        if STATE["siglip"]:
-            STATE["siglip"].classify_frames([img_path])
         if STATE["ocr"]:
-            STATE["ocr"].analyze_frames([img_path])
-        if STATE["overlay"]:
-            STATE["overlay"].analyze_frames([img_path], [[]])
-        if STATE["text"]:
-            STATE["text"].classify("warmup")
-        print("[ml] warmup inference done", flush=True)
+            STATE["ocr"].full_text(img_path)
+        import phash
+
+        phash.phash_image(img_path)
+        print("[ml] warmup done", flush=True)
     except Exception as e:  # noqa: BLE001 - warmup must never prevent the sidecar from serving
         print(f"[ml] warmup skipped: {e}", flush=True)
     finally:
@@ -97,21 +80,21 @@ def _warmup():
 @app.on_event("startup")
 def _load_models():
     try:
-        from vision_siglip import SiglipClassifier
         from ocr_engine import OcrEngine
-        from overlay_detect import OverlayDetector
-        from text_classifier import TextCommercialClassifier
+        from translate import Translator
 
-        siglip_id = os.environ.get("SIGLIP_MODEL", "google/siglip-base-patch16-224")
-        text_id = os.environ.get("TEXT_MODEL", "MoritzLaurer/mDeBERTa-v3-base-mnli-xnli")
-
-        STATE["siglip"] = SiglipClassifier(siglip_id, _visual_category_prompts())
         STATE["ocr"] = OcrEngine()
-        STATE["overlay"] = OverlayDetector()
-        STATE["text"] = TextCommercialClassifier(text_id)
+        translator = Translator()
+        # Preload NLLB so the first translation isn't slow (best-effort — large download on first
+        # boot; readiness is still reported so OCR/pHash work while the model downloads).
+        try:
+            translator.load()
+        except Exception as e:  # noqa: BLE001
+            print(f"[ml] translator preload deferred: {e}", flush=True)
+        STATE["translator"] = translator
         _warmup()
         STATE["ready"] = True
-        print("[ml] all models loaded, sidecar ready", flush=True)
+        print("[ml] models loaded, sidecar ready", flush=True)
     except Exception as e:  # noqa: BLE001 - report and stay up in a not-ready state
         STATE["error"] = str(e)
         print(f"[ml] model load failed: {e}", flush=True)
@@ -123,57 +106,71 @@ def health():
         "ready": bool(STATE["ready"]),
         "error": STATE["error"],
         "models": {
-            "siglip": STATE["siglip"] is not None,
             "ocr": STATE["ocr"] is not None,
-            "overlay": STATE["overlay"] is not None,
-            "text": STATE["text"] is not None,
+            "translator": STATE["translator"] is not None,
         },
     }
 
 
-@app.post("/vision")
-async def vision(req: VisionRequest):
-    if not STATE["ready"]:
-        return {"error": "models not ready"}
+def _translate(text: str) -> str:
+    tr = STATE["translator"]
+    if not tr or not text:
+        return ""
+    try:
+        return tr.translate(text)
+    except Exception as e:  # noqa: BLE001
+        print(f"[ml] translate failed: {e}", flush=True)
+        return ""
 
-    frames = req.frames or []
+
+@app.post("/analyze")
+async def analyze(req: AnalyzeRequest):
+    if not STATE["ready"]:
+        return {"error": "models not ready", "fullOcr": {"text": "", "textEn": ""}, "rois": []}
 
     def _work():
-        vis = STATE["siglip"].classify_frames(frames)
-        ocr_out = STATE["ocr"].analyze_frames(frames)
-        overlay = STATE["overlay"].analyze_frames(frames, ocr_out.get("boxes_per_frame"))
-        return {
-            "video_category_avg": vis["video_category_avg"],
-            "video_category_score_avg": vis["video_category_score_avg"],
-            "per_category": vis["per_category"],
-            "ocr_text": ocr_out["text"],
-            "ocr_text_density": ocr_out["text_density"],
-            "ocr_word_count": ocr_out["word_count"],
-            "overlay": overlay,
-        }
+        import phash
+
+        ocr = STATE["ocr"]
+        hash_size = max(4, int(req.phashSize or 8))
+
+        full_text = ocr.full_text(req.frame) if req.fullOcr else ""
+        full_text_en = _translate(full_text) if (req.translateFull and full_text) else ""
+
+        roi_out = []
+        for roi in req.rois:
+            roi_dict = {"x": roi.x, "y": roi.y, "w": roi.w, "h": roi.h}
+            entry = {"id": roi.id, "phash": phash.phash_crop(req.frame, roi_dict, hash_size)}
+            if roi.ocr:
+                roi_text = ocr.crop_text(req.frame, roi_dict)
+                entry["ocrText"] = roi_text
+                entry["ocrTextEn"] = _translate(roi_text) if (roi.translate and roi_text) else ""
+            else:
+                entry["ocrText"] = ""
+                entry["ocrTextEn"] = ""
+            roi_out.append(entry)
+
+        return {"fullOcr": {"text": full_text, "textEn": full_text_en}, "rois": roi_out}
 
     return await run_in_threadpool(_work)
 
 
-@app.post("/text")
-async def text(req: TextRequest):
+@app.post("/sample")
+async def sample(req: SampleRequest):
     if not STATE["ready"]:
-        return {"category": "unknown", "score": 0.0, "labels": {}}
-    return await run_in_threadpool(STATE["text"].classify, req.text)
-
-
-@app.post("/logo")
-async def logo(req: LogoRequest):
-    # Logo ROI detection/matching is pure OpenCV — no preloaded model needed, so it works even if
-    # the transformer models aren't ready yet.
-    import logo_roi
-
-    frames = req.frames or []
+        return {"error": "models not ready", "phash": "", "ocrText": "", "ocrTextEn": ""}
 
     def _work():
-        if req.mode == "match":
-            return logo_roi.match(frames, req.roi or {}, req.templates or [])
-        return logo_roi.detect_roi(frames)
+        import phash
+
+        ocr = STATE["ocr"]
+        hash_size = max(4, int(req.phashSize or 8))
+        text = ocr.full_text(req.frame)
+        return {
+            "phash": phash.phash_image(req.frame, hash_size),
+            "ocrText": text,
+            "ocrTextEn": _translate(text) if text else "",
+        }
 
     return await run_in_threadpool(_work)
 

@@ -2,14 +2,16 @@
 # torch (CPU) is installed separately in the Dockerfile from the CPU wheel index to keep size down.
 fastapi==0.115.6
 uvicorn==0.34.0
-# transformers hosts SigLIP (vision) and mDeBERTa (text zero-shot).
+# transformers hosts NLLB-200 (OCR text -> English translation).
 transformers==4.46.3
-# SentencePiece / protobuf are required by the SigLIP + mDeBERTa tokenizers.
+# SentencePiece / protobuf are required by the NLLB tokenizer.
 sentencepiece==0.2.0
 protobuf==5.28.3
 pillow==11.0.0
 numpy==1.26.4
+# scipy provides the DCT used by imagehash.phash.
+scipy==1.11.4
 # OCR via Tesseract (system binary + heb/eng/spa traineddata installed in the Dockerfile).
 pytesseract==0.3.13
-# Commercial-overlay detection (edge density, contours). Headless build = no GUI/X deps.
-opencv-python-headless==4.10.0.84
+# Perceptual hashing (pHash) for logo appearance/disappearance matching.
+ImageHash==4.3.1

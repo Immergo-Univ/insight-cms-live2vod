@@ -1,7 +1,7 @@
 /**
- * Manages the in-container Python ML sidecar (SigLIP vision + Tesseract OCR + OpenCV overlays +
- * mDeBERTa text). The sidecar is a long-lived process that preloads the models once so inference
- * and safe for concurrent calls. Node talks to it over localhost HTTP.
+ * Manages the in-container Python ML sidecar (Tesseract OCR + perceptual hashing + NLLB-200
+ * translation). The sidecar is a long-lived process that preloads the models once so inference is
+ * fast and safe for concurrent calls. Node talks to it over localhost HTTP.
  */
 
 import { spawn } from "node:child_process";
@@ -58,10 +58,8 @@ export async function ensureSidecar() {
           ...process.env,
           ML_SIDECAR_PORT: String(config.sidecar.port),
           ML_SIDECAR_HOST: config.sidecar.host,
-          SIGLIP_MODEL: config.models.siglip,
-          TEXT_MODEL: config.models.text,
+          NLLB_MODEL: config.models.nllb,
           HF_HOME: config.models.hfHome,
-          VISUAL_CATEGORY_PROMPTS: JSON.stringify(config.visualCategories),
           OCR_LANGUAGES: config.ocr.languages,
           OCR_MIN_CONFIDENCE: String(config.ocr.minConfidence),
         },

@@ -1,52 +1,38 @@
 """Build-time / first-boot model prefetch so inference doesn't pay the download cost mid-request.
 
 Downloads and caches (into $HF_HOME):
-  - SigLIP model + processor (visual zero-shot classifier)
-  - mDeBERTa zero-shot text classifier (semantic OCR-text intent)
+  - NLLB-200 translation model (OCR text -> English)
 
 Usage:
-  python prefetch.py            # fetch both
-  python prefetch.py siglip     # fetch only SigLIP
-  python prefetch.py text       # fetch only the text classifier
+  python prefetch.py            # fetch NLLB
+  python prefetch.py nllb       # same
 
-The Dockerfile can call this once per model so each download lands in its own image layer (keeps
-kaniko snapshots small). OCR uses Tesseract (system package) and overlay detection is pure OpenCV,
-so neither needs a prefetch here. The CLAP audio classifier was removed from the stack.
+OCR uses Tesseract (system package) and perceptual hashing is pure Pillow/imagehash, so neither
+needs a prefetch here.
 """
 
 import os
 import sys
 
 
-def fetch_siglip():
-    siglip_id = os.environ.get("SIGLIP_MODEL", "google/siglip-base-patch16-224")
-    print(f"[prefetch] SigLIP: {siglip_id}", flush=True)
-    from transformers import AutoModel, AutoProcessor
+def fetch_nllb():
+    model_id = os.environ.get("NLLB_MODEL", "facebook/nllb-200-distilled-600M")
+    print(f"[prefetch] NLLB: {model_id}", flush=True)
+    from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
 
-    AutoProcessor.from_pretrained(siglip_id)
-    AutoModel.from_pretrained(siglip_id)
-
-
-def fetch_text():
-    text_id = os.environ.get("TEXT_MODEL", "MoritzLaurer/mDeBERTa-v3-base-mnli-xnli")
-    print(f"[prefetch] text classifier: {text_id}", flush=True)
-    from transformers import pipeline
-
-    pipeline("zero-shot-classification", model=text_id, device=-1)
+    AutoTokenizer.from_pretrained(model_id)
+    AutoModelForSeq2SeqLM.from_pretrained(model_id)
 
 
-_TARGETS = {"siglip": fetch_siglip, "text": fetch_text}
+_TARGETS = {"nllb": fetch_nllb}
 
 
 def main():
     which = sys.argv[1].lower() if len(sys.argv) > 1 else "all"
-    if which == "all":
-        fetch_siglip()
-        fetch_text()
-    elif which in _TARGETS:
-        _TARGETS[which]()
+    if which in ("all", "nllb"):
+        fetch_nllb()
     else:
-        print(f"[prefetch] unknown target '{which}' (use: siglip|text|all)", flush=True)
+        print(f"[prefetch] unknown target '{which}' (use: nllb|all)", flush=True)
         sys.exit(2)
     print("[prefetch] done", flush=True)
 

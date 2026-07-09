@@ -3,60 +3,9 @@ import { App, Button, Descriptions, Modal, Progress, Space, Table, Tabs, Tag, Ty
 import type { ColumnsType } from "antd/es/table";
 import { useTranslation } from "react-i18next";
 import { getAdminClient } from "@/admin/admin-api";
-import { ChannelLogoTab } from "./channel-logo-tab";
+import { AdRecognitionSetupTab } from "./ad-recognition-setup-tab";
 
-/**
- * Multimodal profile produced by insight-ad-recognition. We only declare the fields the modal
- * renders; anything else the raw JSON viewer at the bottom still shows verbatim.
- */
-type MultimodalProfile = {
-  // Local video metrics.
-  blackscreen_ratio?: number;
-  motion_avg?: number;
-  scene_change_rate?: number;
-
-  // Local audio metrics.
-  audio_rms?: number;
-  audio_dynamic_range?: number;
-  speech_ratio?: number;
-  music_probability?: number;
-  silence_ratio?: number;
-
-  // Visual (SigLIP).
-  video_category_avg?: string;
-  video_category_score_avg?: number;
-  video_per_category?: Record<string, number>;
-
-  // OCR text + cues.
-  ocr_text?: string;
-  ocr_word_count?: number;
-  ocr_short_code?: boolean;
-  ocr_phone?: boolean;
-  ocr_price?: boolean;
-  ocr_percent?: boolean;
-  ocr_url?: boolean;
-  ocr_installments?: boolean;
-  ocr_cta?: boolean;
-  ocr_legal?: boolean;
-  ocr_ad_cue_count?: number;
-
-  // Overlay detection.
-  overlay_present?: boolean;
-  lower_third_present?: boolean;
-  banner_present?: boolean;
-  logo_region_present?: boolean;
-  overlay_score?: number;
-  overlay_frame_ratio?: number;
-
-  // BERT semantic labels.
-  text_category?: string;
-  text_labels?: Record<string, number>;
-
-  duration?: number;
-  confidence?: number;
-};
-
-/** One AD-recognition scan row as returned by the admin API. */
+/** One AD-recognition scan row as returned by the admin API (rule engine). */
 export type AdRecognitionScan = {
   id: string;
   tenantId: string;
@@ -65,14 +14,14 @@ export type AdRecognitionScan = {
   hlsUrl: string | null;
   detection: string;
   score: number | null;
-  confidence: number | null;
+  /** Ad/program threshold applied for this scan (stored in the `confidence` column). */
+  threshold: number | null;
+  /** Per-strategy scores: { logoAppearance, logoDisappearance, ocrRules }. */
   scores: Record<string, number> | null;
-  transcript: string | null;
   ocrText: string | null;
-  visualCategory: string | null;
-  ocrAdCueCount: number | null;
-  overlayPresent: boolean | null;
-  profile: MultimodalProfile | null;
+  ocrTextTranslated: string | null;
+  elapsedMs: number | null;
+  strategyResults: Record<string, unknown> | null;
   error: string | null;
   probeEpoch: number | null;
   scannedAt: string;
@@ -98,10 +47,6 @@ function detectionColor(detection: string): string {
       return "green";
     case "program":
       return "gold";
-    // The pipeline emits "silence"; keep legacy "black" handled so historical rows still render.
-    case "silence":
-    case "black":
-      return "default";
     case "error":
       return "red";
     default:
@@ -119,12 +64,8 @@ function fmtNum(n: number | null | undefined, digits = 3): string {
   return typeof n === "number" && Number.isFinite(n) ? n.toFixed(digits) : "—";
 }
 
-function fmtPct(n: number | null | undefined): string {
-  return typeof n === "number" && Number.isFinite(n) ? `${Math.round(n * 100)}%` : "—";
-}
-
-/** SigLIP visual categories treated as ad-like. */
-const VISUAL_AD = new Set(["publicidad", "placa", "institucional"]);
+/** Friendly labels for the per-strategy score keys. */
+const STRATEGY_KEYS = ["logoAppearance", "logoDisappearance", "ocrRules"] as const;
 
 export function StreamScansModal({ open, onClose, tenantId, channelId, channelTitle }: Props) {
   const { t } = useTranslation("admin");
@@ -160,7 +101,7 @@ export function StreamScansModal({ open, onClose, tenantId, channelId, channelTi
         title: t("streams.scanColDetection"),
         dataIndex: "detection",
         key: "detection",
-        width: 110,
+        width: 100,
         render: (v: string) => <Tag color={detectionColor(v)}>{v}</Tag>,
       },
       {
@@ -171,28 +112,37 @@ export function StreamScansModal({ open, onClose, tenantId, channelId, channelTi
         render: (v: number | null) => fmtNum(v, 2),
       },
       {
-        title: t("streams.scanColVisualCategory"),
-        dataIndex: "visualCategory",
-        key: "visualCategory",
-        width: 130,
-        render: (v: string | null) =>
-          v ? <Tag color={VISUAL_AD.has(v) ? "volcano" : "blue"}>{v}</Tag> : "—",
+        title: t("streams.scanColThreshold"),
+        dataIndex: "threshold",
+        key: "threshold",
+        width: 90,
+        render: (v: number | null) => fmtNum(v, 2),
       },
       {
-        title: t("streams.scanColOcrCues"),
-        dataIndex: "ocrAdCueCount",
-        key: "ocrAdCueCount",
-        width: 90,
-        render: (v: number | null) =>
-          typeof v === "number" && v > 0 ? <Tag color="volcano">{v}</Tag> : <Tag>0</Tag>,
+        title: t("streams.scanColStrategyScores"),
+        key: "scores",
+        width: 260,
+        render: (_, r) => {
+          const s = r.scores || {};
+          const present = STRATEGY_KEYS.filter((k) => typeof s[k] === "number");
+          if (present.length === 0) return "—";
+          return (
+            <Space wrap size={[4, 4]}>
+              {present.map((k) => (
+                <Tag key={k} color={(s[k] as number) >= (r.threshold ?? 0.5) ? "volcano" : "blue"}>
+                  {t(`adSetup.${k}`)}: {fmtNum(s[k], 2)}
+                </Tag>
+              ))}
+            </Space>
+          );
+        },
       },
       {
-        title: t("streams.scanColOverlay"),
-        dataIndex: "overlayPresent",
-        key: "overlayPresent",
-        width: 90,
-        render: (v: boolean | null) =>
-          v ? <Tag color="volcano">✓</Tag> : <Tag>—</Tag>,
+        title: t("streams.scanColDuration"),
+        dataIndex: "elapsedMs",
+        key: "elapsedMs",
+        width: 100,
+        render: (v: number | null) => (typeof v === "number" ? `${v} ms` : "—"),
       },
       {
         title: t("streams.scanColError"),
@@ -206,31 +156,8 @@ export function StreamScansModal({ open, onClose, tenantId, channelId, channelTi
   );
 
   const renderExpanded = (scan: AdRecognitionScan) => {
-    const profile = scan.profile;
-    const visualPer = profile?.video_per_category || {};
-    const textLabels = profile?.text_labels || {};
-
-    const sortDesc = (obj: Record<string, number>) =>
-      Object.entries(obj)
-        .filter(([, v]) => typeof v === "number" && Number.isFinite(v))
-        .sort((a, b) => (b[1] as number) - (a[1] as number));
-
-    // OCR cue chips (only the ones that fired).
-    const cueChips: string[] = [];
-    if (profile?.ocr_short_code) cueChips.push("short-code");
-    if (profile?.ocr_phone) cueChips.push("phone");
-    if (profile?.ocr_price) cueChips.push("price");
-    if (profile?.ocr_percent) cueChips.push("%");
-    if (profile?.ocr_url) cueChips.push("url");
-    if (profile?.ocr_installments) cueChips.push("installments");
-    if (profile?.ocr_cta) cueChips.push("cta");
-    if (profile?.ocr_legal) cueChips.push("legal");
-
-    // Overlay flag chips.
-    const overlayChips: string[] = [];
-    if (profile?.lower_third_present) overlayChips.push("lower-third");
-    if (profile?.banner_present) overlayChips.push("banner");
-    if (profile?.logo_region_present) overlayChips.push("logo");
+    const scores = scan.scores || {};
+    const present = STRATEGY_KEYS.filter((k) => typeof scores[k] === "number");
 
     return (
       <Descriptions column={1} size="small" bordered styles={{ label: { width: 220, fontWeight: 600 } }}>
@@ -242,140 +169,46 @@ export function StreamScansModal({ open, onClose, tenantId, channelId, channelTi
           </Typography.Text>
         </Descriptions.Item>
 
-        {/* ---- Visual (SigLIP) ---- */}
-        <Descriptions.Item label={t("streams.scanColVisualDistribution")}>
-          {sortDesc(visualPer).length ? (
+        <Descriptions.Item label={t("streams.scanColStrategyScores")}>
+          {present.length ? (
             <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-              {sortDesc(visualPer).map(([cat, val]) => (
-                <div key={cat} style={{ display: "grid", gridTemplateColumns: "160px 1fr", gap: 8, alignItems: "center" }}>
-                  <Typography.Text style={{ fontSize: 12 }}>
-                    {VISUAL_AD.has(cat) ? <Tag color="volcano">{cat}</Tag> : cat}
-                  </Typography.Text>
+              {present.map((k) => (
+                <div key={k} style={{ display: "grid", gridTemplateColumns: "180px 1fr", gap: 8, alignItems: "center" }}>
+                  <Typography.Text style={{ fontSize: 12 }}>{t(`adSetup.${k}`)}</Typography.Text>
                   <Progress
-                    percent={Math.round((val as number) * 100)}
+                    percent={Math.round((scores[k] as number) * 100)}
                     size="small"
                     showInfo
-                    format={() => fmtPct(val as number)}
-                    strokeColor={VISUAL_AD.has(cat) ? "#d4380d" : undefined}
+                    format={() => fmtNum(scores[k], 2)}
+                    strokeColor={(scores[k] as number) >= (scan.threshold ?? 0.5) ? "#d4380d" : undefined}
                   />
                 </div>
               ))}
             </div>
           ) : (
             "—"
-          )}
-        </Descriptions.Item>
-
-        {/* ---- OCR text + cues (Hebrew-aware, RTL) ---- */}
-        <Descriptions.Item label={t("streams.scanColOcrCues")}>
-          {cueChips.length ? (
-            <Space wrap size={[4, 4]}>
-              {cueChips.map((c) => (
-                <Tag key={c} color="volcano">
-                  {c}
-                </Tag>
-              ))}
-            </Space>
-          ) : (
-            <Typography.Text type="secondary">{t("streams.scanNoCues")}</Typography.Text>
           )}
         </Descriptions.Item>
 
         <Descriptions.Item label={t("streams.scanColOcrText")}>
-          <pre
-            dir="auto"
-            style={{ margin: 0, whiteSpace: "pre-wrap", fontSize: 12, maxHeight: 140, overflow: "auto" }}
-          >
-            {scan.ocrText || profile?.ocr_text || "—"}
-          </pre>
-        </Descriptions.Item>
-
-        {/* ---- BERT semantic labels ---- */}
-        <Descriptions.Item label={t("streams.scanColTextLabels")}>
-          {sortDesc(textLabels).length ? (
-            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-              {sortDesc(textLabels).map(([label, val]) => (
-                <div key={label} style={{ display: "grid", gridTemplateColumns: "120px 1fr", gap: 8, alignItems: "center" }}>
-                  <Typography.Text style={{ fontSize: 12 }}>{label}</Typography.Text>
-                  <Progress
-                    percent={Math.round((val as number) * 100)}
-                    size="small"
-                    showInfo
-                    format={() => fmtPct(val as number)}
-                    strokeColor={label !== "program" ? "#d4380d" : undefined}
-                  />
-                </div>
-              ))}
-            </div>
-          ) : (
-            "—"
-          )}
-        </Descriptions.Item>
-
-        {/* ---- Overlay detection ---- */}
-        <Descriptions.Item label={t("streams.scanColOverlay")}>
-          <Space wrap size={[4, 4]}>
-            <Tag color={profile?.overlay_present ? "volcano" : "default"}>
-              {profile?.overlay_present ? t("streams.scanOverlayPresent") : t("streams.scanOverlayAbsent")}
-            </Tag>
-            {overlayChips.map((c) => (
-              <Tag key={c}>{c}</Tag>
-            ))}
-            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-              score {fmtNum(profile?.overlay_score, 2)} · {fmtPct(profile?.overlay_frame_ratio)}
-            </Typography.Text>
-          </Space>
-        </Descriptions.Item>
-
-        {/* ---- Audio + video metrics ---- */}
-        <Descriptions.Item label={t("streams.scanColAudioMetrics")}>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: 4, fontSize: 12 }}>
-            <div>
-              <Typography.Text type="secondary">RMS: </Typography.Text>
-              {fmtNum(profile?.audio_rms, 2)}
-            </div>
-            <div>
-              <Typography.Text type="secondary">{t("streams.scanAudioDynamicRange")}: </Typography.Text>
-              {fmtNum(profile?.audio_dynamic_range, 2)}
-            </div>
-            <div>
-              <Typography.Text type="secondary">{t("streams.scanAudioSpeechRatio")}: </Typography.Text>
-              {fmtPct(profile?.speech_ratio)}
-            </div>
-            <div>
-              <Typography.Text type="secondary">{t("streams.scanAudioMusicProbability")}: </Typography.Text>
-              {fmtPct(profile?.music_probability)}
-            </div>
-            <div>
-              <Typography.Text type="secondary">{t("streams.scanAudioSilenceRatio")}: </Typography.Text>
-              {fmtPct(profile?.silence_ratio)}
-            </div>
-            <div>
-              <Typography.Text type="secondary">{t("streams.scanVideoSceneChange")}: </Typography.Text>
-              {fmtPct(profile?.scene_change_rate)}
-            </div>
-            <div>
-              <Typography.Text type="secondary">{t("streams.scanVideoBlackscreen")}: </Typography.Text>
-              {fmtPct(profile?.blackscreen_ratio)}
-            </div>
-          </div>
-        </Descriptions.Item>
-
-        <Descriptions.Item label={t("streams.scanColScores")}>
-          <pre style={{ margin: 0, whiteSpace: "pre-wrap", fontSize: 12, maxHeight: 120, overflow: "auto" }}>
-            {scan.scores ? JSON.stringify(scan.scores, null, 2) : "—"}
-          </pre>
-        </Descriptions.Item>
-
-        <Descriptions.Item label={t("streams.scanColTranscript")}>
           <pre dir="auto" style={{ margin: 0, whiteSpace: "pre-wrap", fontSize: 12, maxHeight: 140, overflow: "auto" }}>
-            {scan.transcript || "—"}
+            {scan.ocrText || "—"}
           </pre>
         </Descriptions.Item>
 
-        <Descriptions.Item label={t("streams.scanColProfile")}>
+        <Descriptions.Item label={t("streams.scanColOcrTextTranslated")}>
+          <pre dir="auto" style={{ margin: 0, whiteSpace: "pre-wrap", fontSize: 12, maxHeight: 140, overflow: "auto" }}>
+            {scan.ocrTextTranslated || "—"}
+          </pre>
+        </Descriptions.Item>
+
+        <Descriptions.Item label={t("streams.scanColDuration")}>
+          {typeof scan.elapsedMs === "number" ? `${scan.elapsedMs} ms` : "—"}
+        </Descriptions.Item>
+
+        <Descriptions.Item label={t("streams.scanColStrategyResults")}>
           <pre style={{ margin: 0, whiteSpace: "pre-wrap", fontSize: 12, maxHeight: 260, overflow: "auto" }}>
-            {profile ? JSON.stringify(profile, null, 2) : "—"}
+            {scan.strategyResults ? JSON.stringify(scan.strategyResults, null, 2) : "—"}
           </pre>
         </Descriptions.Item>
       </Descriptions>
@@ -417,14 +250,14 @@ export function StreamScansModal({ open, onClose, tenantId, channelId, channelTi
       destroyOnClose
     >
       <Tabs
-        defaultActiveKey="markers"
+        defaultActiveKey="setup"
         items={[
-          { key: "markers", label: t("streams.tabMarkers"), children: markersTab },
           {
-            key: "logo",
-            label: t("streams.tabLogoRecognition"),
-            children: open ? <ChannelLogoTab tenantId={tenantId} channelId={channelId} /> : null,
+            key: "setup",
+            label: t("streams.tabAdSetup"),
+            children: open ? <AdRecognitionSetupTab tenantId={tenantId} channelId={channelId} /> : null,
           },
+          { key: "markers", label: t("streams.tabMarkers"), children: markersTab },
         ]}
       />
     </Modal>

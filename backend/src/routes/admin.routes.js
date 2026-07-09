@@ -10,7 +10,7 @@ import * as clips from "../services/admin-clip.service.js";
 import * as adminTenants from "../services/admin-tenant.service.js";
 import * as adminStreams from "../services/admin-stream.service.js";
 import * as appSettings from "../services/admin-settings.service.js";
-import * as channelLogos from "../services/channel-logo.service.js";
+import * as adRecognitionConfig from "../services/ad-recognition-config.service.js";
 import { isSequelizeReady } from "../db/sequelize.js";
 
 export const adminRouter = Router();
@@ -355,31 +355,69 @@ adminSecured.get(
   },
 );
 
-// ---- Channel logo samples (AD-recognition logo stage) --------------------------------------
+// ---- AD-recognition per-channel config (rule engine) ---------------------------------------
 adminSecured.get(
-  "/tenants/:tenantId/streams/:channelId/logo-samples",
+  "/tenants/:tenantId/streams/:channelId/ad-config",
   requireAdminPermission("tenants", "view"),
   async (req, res) => {
     try {
-      const samples = await channelLogos.listChannelLogoSamples(req.params.channelId);
-      res.json({ samples, target: channelLogos.logoSamplesTarget() });
+      const found = await adRecognitionConfig.getChannelConfig(req.params.channelId);
+      res.json({ config: found?.config ?? adRecognitionConfig.emptyConfig() });
     } catch (e) {
       res.status(500).json({ error: e instanceof Error ? e.message : String(e) });
     }
   },
 );
 
-adminSecured.delete(
-  "/tenants/:tenantId/streams/:channelId/logo-samples/:sampleId",
+adminSecured.put(
+  "/tenants/:tenantId/streams/:channelId/ad-config",
   requireAdminPermission("tenants", "edit"),
   async (req, res) => {
     try {
-      const ok = await channelLogos.deleteChannelLogoSample(
+      const cfg = req.body?.config ?? req.body;
+      const saved = await adRecognitionConfig.upsertChannelConfig(
+        req.params.tenantId,
         req.params.channelId,
-        req.params.sampleId,
+        cfg,
       );
-      if (!ok) return res.status(404).json({ error: "Not found" });
-      res.json({ ok: true });
+      res.json({ config: saved.config });
+    } catch (e) {
+      res.status(400).json({ error: e instanceof Error ? e.message : String(e) });
+    }
+  },
+);
+
+// Upload one template sample (base64 in JSON): stored on S3 + pHash/OCR precomputed. Returns the
+// descriptor the admin UI embeds in the strategy instance's `samples` array.
+adminSecured.post(
+  "/tenants/:tenantId/streams/:channelId/ad-samples",
+  requireAdminPermission("tenants", "edit"),
+  async (req, res) => {
+    try {
+      const sample = await adRecognitionConfig.uploadSample({
+        channelId: req.params.channelId,
+        base64: req.body?.imageBase64 || req.body?.base64,
+        contentType: req.body?.contentType,
+      });
+      res.json({ sample });
+    } catch (e) {
+      res.status(400).json({ error: e instanceof Error ? e.message : String(e) });
+    }
+  },
+);
+
+// Delete a template sample's S3 object (by key or sampleId) when removed from a strategy.
+adminSecured.delete(
+  "/tenants/:tenantId/streams/:channelId/ad-samples/:sampleId",
+  requireAdminPermission("tenants", "edit"),
+  async (req, res) => {
+    try {
+      const ok = await adRecognitionConfig.deleteSample({
+        s3Key: typeof req.query.key === "string" ? req.query.key : undefined,
+        channelId: req.params.channelId,
+        sampleId: req.params.sampleId,
+      });
+      res.json({ ok });
     } catch (e) {
       res.status(500).json({ error: e instanceof Error ? e.message : String(e) });
     }

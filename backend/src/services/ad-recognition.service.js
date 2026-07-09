@@ -1,19 +1,20 @@
 /**
  * AD recognition scheduler.
  *
- * Every `config.adRecognition.intervalMs` (default 30s) this service probes ALL archive-enabled
- * channels IN PARALLEL by calling the external `insight-ad-recognition` service:
+ * Every `config.adRecognition.intervalMs` (default 10s) this service probes ALL archive-enabled
+ * channels IN PARALLEL by POSTing the trimmed VOD window + the per-channel rule-engine config to
+ * the external `insight-ad-recognition` service:
  *
- *   GET {baseUrl}/detect?video=<channel HLS>&secret=<secret>  ->  { detection: "ad"|"program"|"silence", ... }
+ *   POST {baseUrl}/detect  { video: <channel HLS + window>, config }  ->  { detection, score, ... }
  *
  * A hysteresis window turns the per-probe verdicts into live ad segments:
  *   - An ad window OPENS after {@link AD_CONFIRM_SAMPLES} consecutive "ad" detections.
  *   - The window CLOSES after {@link PROGRAM_CONFIRM_SAMPLES} consecutive "program" detections.
- *   - Any other verdict ("silence"/unknown) breaks the current streak (neither opens nor closes).
+ *   - Any other verdict (unknown/error) breaks the current streak (neither opens nor closes).
  *
  * Segments are merged into the per-channel snapshot (`liveStreamAdSegments`), so the existing
- * ads timeline (`ads-precalc.service.js`) keeps working unchanged. This replaces the former
- * OpenCV logo-detector pipeline.
+ * ads timeline (`ads-precalc.service.js`) keeps working unchanged. Channels without an active
+ * detection config are skipped.
  */
 
 import { Op } from "sequelize";
@@ -27,12 +28,7 @@ import {
   readChannelSnapshotById,
   resolveHlsBaseUrl,
 } from "./channel-ads-disk.service.js";
-import {
-  logoSamplesTarget,
-  countChannelLogoSamples,
-  storeChannelLogoSample,
-  loadChannelLogoTemplates,
-} from "./channel-logo.service.js";
+import { getChannelConfig, hasActiveStrategies } from "./ad-recognition-config.service.js";
 
 /**
  * Consecutive "ad" detections required to OPEN an ad window.
@@ -249,46 +245,28 @@ function trimOldSegments(segments) {
 }
 
 /**
- * Call the microservice /detect.
+ * Call the microservice POST /detect with the trimmed VOD window + the per-channel rule config.
  * @param {string} hlsUrl
- * @param {{ collectLogo?: boolean, logoRoi?: object, logoTemplates?: string[] }} [logo]
+ * @param {object} channelConfig per-channel rule-engine config
  */
-async function callDetect(hlsUrl, logo = {}) {
-  let url =
-    `${config.adRecognition.baseUrl}/detect` +
-    `?video=${encodeURIComponent(hlsUrl)}` +
-    `&secret=${encodeURIComponent(config.adRecognition.secret)}`;
-
-  // Logo stage params: either ask the microservice to collect a sample, or hand it the ROI +
-  // template URLs so it can match logo present/absent.
-  if (logo?.collectLogo) {
-    url += "&collectLogo=1";
-  }
-  if (logo?.logoRoi && Array.isArray(logo?.logoTemplates) && logo.logoTemplates.length) {
-    const r = logo.logoRoi;
-    url += `&logoRoi=${encodeURIComponent([r.x0, r.y0, r.x1, r.y1].join(","))}`;
-    url += `&logoTemplates=${encodeURIComponent(logo.logoTemplates.join(","))}`;
-  }
-
+async function callDetect(hlsUrl, channelConfig) {
+  const url = `${config.adRecognition.baseUrl}/detect`;
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), config.adRecognition.requestTimeoutMs);
   try {
-    const res = await fetch(url, { signal: ctrl.signal });
+    const res = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-secret": config.adRecognition.secret,
+      },
+      body: JSON.stringify({ video: hlsUrl, config: channelConfig || {} }),
+      signal: ctrl.signal,
+    });
     if (!res.ok) throw new Error(`detect HTTP ${res.status}`);
     return await res.json();
   } finally {
     clearTimeout(t);
-  }
-}
-
-/** Extract the `endTime` (unix seconds) query param from a probe URL, or null. */
-function probeEndTime(probeUrl) {
-  try {
-    const v = new URL(probeUrl).searchParams.get("endTime");
-    const n = v != null ? parseInt(v, 10) : NaN;
-    return Number.isFinite(n) ? n : null;
-  } catch {
-    return null;
   }
 }
 
@@ -322,19 +300,16 @@ async function pruneOldScansFromDb() {
 
 async function probeChannel(channel) {
   const { channelId, tenantId, hls, title } = channel;
+
+  // Skip channels that have no active detection config (no strategy enabled). This keeps the pulse
+  // free of channels the operator hasn't set up in the "Ad Recognition Setup" tab.
+  const channelConfig = await getChannelConfig(channelId).catch(() => null);
+  const cfg = channelConfig?.config || null;
+  if (!cfg || !hasActiveStrategies(cfg)) return;
+
   const st = await getOrInitState(channelId, { tenantId, hlsStream: hls });
   st.lastProbeAt = new Date().toISOString();
   const scannedAt = new Date();
-
-  // ---- Logo stage params: collect samples until we hit the target, then switch to matching. ----
-  const logoCount = await countChannelLogoSamples(channelId);
-  let logoParams = {};
-  if (logoCount < logoSamplesTarget()) {
-    logoParams = { collectLogo: true };
-  } else {
-    const tpl = await loadChannelLogoTemplates(channelId).catch(() => null);
-    if (tpl) logoParams = { logoRoi: tpl.roi, logoTemplates: tpl.templates };
-  }
 
   // Archive/DVR playlists need a bounded window (last PROBE_WINDOW_SECONDS + a safety margin so
   // we don't land inside the origin's packaging delay); live playlists pass as-is.
@@ -343,7 +318,7 @@ async function probeChannel(channel) {
   let result;
   let lastError = null;
   try {
-    result = await callDetect(probeUrl, logoParams);
+    result = await callDetect(probeUrl, cfg);
   } catch (e) {
     lastError = e && typeof e.message === "string" ? e.message : String(e);
     // Upstream origin hiccup? Retry ONCE with a further-back window before giving up. The
@@ -357,7 +332,7 @@ async function probeChannel(channel) {
             `[ad-recognition] upstream error, retrying with extended margin ` +
               `(${config.adRecognition.archiveRetryMarginSec}s) channel=${channelId}: ${lastError}`,
           );
-          result = await callDetect(retryUrl, logoParams);
+          result = await callDetect(retryUrl, cfg);
           probeUrl = retryUrl;
           lastError = null;
         } catch (e2) {
@@ -379,9 +354,10 @@ async function probeChannel(channel) {
       score: null,
       confidence: null,
       scores: null,
-      transcript: null,
       ocrText: null,
-      profile: null,
+      ocrTextTranslated: null,
+      elapsedMs: null,
+      strategyResults: null,
       error: lastError,
       probeEpoch: Math.floor(Date.now() / 1000),
       scannedAt,
@@ -391,23 +367,8 @@ async function probeChannel(channel) {
 
   const detection = typeof result?.detection === "string" ? result.detection : "unknown";
   const score = typeof result?.score === "number" ? result.score : null;
-  let epoch =
+  const epoch =
     typeof result?.timestamp === "number" ? result.timestamp : Math.floor(Date.now() / 1000);
-
-  // ---- Logo stage post-processing ----
-  const logo = result?.logo && typeof result.logo === "object" ? result.logo : null;
-
-  // Pixel-perfect(ish) boundary: when the logo matcher found a present->absent transition inside
-  // the window, use that instant as the "ad" epoch so the opened segment starts exactly where the
-  // logo disappeared (temporal resolution = 1 frame ≈ 1 s), instead of the coarse probe timestamp.
-  if (logo && detection === "ad" && typeof logo.transition_offset_sec === "number") {
-    const endTime = probeEndTime(probeUrl);
-    const duration = typeof result?.profile?.duration === "number" ? result.profile.duration : null;
-    if (endTime != null && duration != null) {
-      const transitionEpoch = Math.round(endTime - duration + logo.transition_offset_sec);
-      if (Number.isFinite(transitionEpoch) && transitionEpoch > 0) epoch = transitionEpoch;
-    }
-  }
 
   st.lastError = null;
   st.lastDetection = detection;
@@ -416,26 +377,10 @@ async function probeChannel(channel) {
   applyDetection(st, detection, epoch);
   st.segments = trimOldSegments(st.segments);
 
-  // Collect a logo sample (upload to S3 + DB) while we still need them and the microservice
-  // returned a crop from a confident-program window. Stops automatically once the target is hit.
-  if (logo && logo.mode === "collect" && logo.sample_base64 && logoCount < logoSamplesTarget()) {
-    await storeChannelLogoSample({
-      tenantId,
-      channelId,
-      base64: logo.sample_base64,
-      roi: logo.roi || null,
-      confidence: typeof logo.confidence === "number" ? logo.confidence : null,
-      hlsUrl: probeUrl,
-    }).catch((e) =>
-      console.warn("[ad-recognition] logo sample store failed:", e && e.message ? e.message : e),
-    );
-  }
-
   // Positive recognition log: full detect JSON alongside the requested m3u8 (channel title + probed URL).
   console.log(
     `[ad-recognition] detect OK title="${title || channelId}" tenant=${tenantId} ` +
-      `detection=${detection} score=${score} m3u8=${probeUrl}\n` +
-      JSON.stringify(result, null, 2),
+      `detection=${detection} score=${score} took=${result?.elapsedMs}ms m3u8=${probeUrl}`,
   );
 
   await persistChannel(channelId, st);
@@ -446,15 +391,13 @@ async function probeChannel(channel) {
     hlsUrl: probeUrl,
     detection,
     score,
-    confidence: typeof result?.confidence === "number" ? result.confidence : null,
+    // `confidence` column carries the applied ad/program threshold.
+    confidence: typeof result?.threshold === "number" ? result.threshold : null,
     scores: result?.scores ?? null,
-    transcript: typeof result?.transcript === "string" ? result.transcript : null,
-    ocrText: typeof result?.ocr_text === "string" ? result.ocr_text : null,
-    // Multimodal signals surfaced at the top level by the microservice (queryable columns).
-    visualCategory: typeof result?.visual_category === "string" ? result.visual_category : null,
-    ocrAdCueCount: typeof result?.ocr_ad_cue_count === "number" ? result.ocr_ad_cue_count : null,
-    overlayPresent: typeof result?.overlay_present === "boolean" ? result.overlay_present : null,
-    profile: result?.profile ?? null,
+    ocrText: typeof result?.ocrText === "string" ? result.ocrText : null,
+    ocrTextTranslated: typeof result?.ocrTextEn === "string" ? result.ocrTextEn : null,
+    elapsedMs: typeof result?.elapsedMs === "number" ? result.elapsedMs : null,
+    strategyResults: result?.strategyResults ?? null,
     error: null,
     probeEpoch: epoch,
     scannedAt,

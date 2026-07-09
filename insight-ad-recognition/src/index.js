@@ -1,11 +1,11 @@
 /**
  * insight-ad-recognition — HTTP entrypoint.
  *
- * Express API (CORS enabled) that classifies what a live channel is currently showing
- * (ad / program / silence) by profiling a short archive window of the stream with ffmpeg and an
- * in-container ML sidecar hosting a multimodal battery: SigLIP (visual) + Tesseract OCR
- * (heb/eng/spa) + OpenCV overlay detection + mDeBERTa (semantic text), plus local ffmpeg audio
- * metrics. Whisper.cpp is kept for observability. The verdict comes from the deterministic fusion.
+ * Express API (CORS enabled) that classifies what a live channel is currently showing (ad /
+ * program) with a per-channel rule engine. The CMS posts a trimmed VOD window (startTime/endTime
+ * embedded in the URL) plus the channel detection config; this service grabs ONLY the last frame
+ * and runs an in-container ML sidecar (Tesseract OCR heb/eng/spa + perceptual hashing + NLLB-200
+ * translation) to score the configured strategies (logo appearance / disappearance / OCR rules).
  */
 
 import express from "express";
@@ -20,7 +20,8 @@ const app = express();
 
 app.set("trust proxy", true);
 app.use(cors());
-app.use(express.json({ limit: "256kb" }));
+// Config payloads embed sample descriptors (pHash + OCR text) and /sample accepts base64 images.
+app.use(express.json({ limit: "12mb" }));
 
 // Static hosting for the frame mosaics (public; no auth). Cached briefly by clients.
 app.use(

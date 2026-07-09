@@ -146,6 +146,55 @@ export async function putChannelLogoSamplePublic(channelId, sampleId, buffer) {
 }
 
 /**
+ * AD-recognition template sample object key (public; dedicated prefix, one folder per channel).
+ * @param {string} channelId
+ * @param {string} sampleId
+ * @param {string} [extWithDot] defaults to .jpg
+ */
+export function adRecognitionSampleObjectKey(channelId, sampleId, extWithDot = ".jpg") {
+  const prefix = (process.env.S3_AD_SAMPLES_PREFIX || "ad-recognition-samples").replace(
+    /^\/+|\/+$/g,
+    "",
+  );
+  const seg = sanitizeTenantSegment(channelId);
+  const safeId = String(sampleId).replace(/[^a-zA-Z0-9_-]/g, "_");
+  const ext = extWithDot.startsWith(".") ? extWithDot : `.${extWithDot}`;
+  return `${prefix}/${seg}/${safeId}${ext}`;
+}
+
+/**
+ * Upload an AD-recognition template sample (logo/brand image) with public-read ACL. The
+ * microservice fetches these public URLs when analyzing an uploaded template (/sample).
+ * @param {string} channelId
+ * @param {string} sampleId
+ * @param {Buffer} buffer
+ * @param {string} [contentType]
+ * @param {string} [extWithDot]
+ */
+export async function putAdRecognitionSamplePublic(
+  channelId,
+  sampleId,
+  buffer,
+  contentType = "image/jpeg",
+  extWithDot = ".jpg",
+) {
+  const c = getClient();
+  if (!c) throw new Error("S3 not configured (need S3_* credentials, bucket, endpoint)");
+  const key = adRecognitionSampleObjectKey(channelId, sampleId, extWithDot);
+  await c.send(
+    new PutObjectCommand({
+      Bucket: config.s3Logos.bucket,
+      Key: key,
+      Body: buffer,
+      ContentType: contentType || "image/jpeg",
+      ACL: "public-read",
+      CacheControl: "public, max-age=86400",
+    }),
+  );
+  return { key, publicUrl: publicUrlForVodKey(key) };
+}
+
+/**
  * Delete an S3 object by key (best-effort). Used when an operator removes a logo sample.
  * @param {string} key
  */
