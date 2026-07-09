@@ -86,10 +86,14 @@ COPY src /app/src
 COPY ml /app/ml
 
 # ---- Prefetch the ML checkpoints into the image (fully offline at runtime) -------------------
+# One RUN per model so each download lands in its own (smaller) layer. A single combined ~1.5 GB
+# layer was OOM-ing the DigitalOcean build machine during kaniko's "Taking snapshot of files...".
 ENV SIGLIP_MODEL=google/siglip-base-patch16-224 \
     TEXT_MODEL=MoritzLaurer/mDeBERTa-v3-base-mnli-xnli \
     CLAP_MODEL=laion/clap-htsat-unfused
-RUN python3 /app/ml/prefetch.py
+RUN python3 /app/ml/prefetch.py siglip
+RUN python3 /app/ml/prefetch.py text
+RUN python3 /app/ml/prefetch.py clap
 
 # ---- Runtime config --------------------------------------------------------------------------
 ENV PORT=8081 \
