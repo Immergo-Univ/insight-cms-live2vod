@@ -45,9 +45,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # ggml-base (multilingual) is used instead of *.en so Hebrew/Spanish/English are all supported.
 # Whisper is kept only for observability (transcript + speech_ratio); the AD/program verdict is
 # derived from the multimodal fusion (SigLIP + OCR + overlays + mDeBERTa + CLAP).
+# We only need the `whisper-cli` binary, so build just that target (skips server/tests/parakeet:
+# faster build + far less log noise). `-w` silences the benign ggml AVX512 `-Wmaybe-uninitialized`
+# compiler warnings that otherwise flood the build output.
 RUN git clone --depth 1 https://github.com/ggerganov/whisper.cpp /tmp/whisper.cpp \
-    && cmake -S /tmp/whisper.cpp -B /tmp/whisper.cpp/build -DCMAKE_BUILD_TYPE=Release \
-    && cmake --build /tmp/whisper.cpp/build --config Release -j "$(nproc)" \
+    && cmake -S /tmp/whisper.cpp -B /tmp/whisper.cpp/build \
+       -DCMAKE_BUILD_TYPE=Release \
+       -DCMAKE_C_FLAGS=-w -DCMAKE_CXX_FLAGS=-w \
+       -DWHISPER_BUILD_TESTS=OFF -DWHISPER_BUILD_SERVER=OFF \
+    && cmake --build /tmp/whisper.cpp/build --config Release -j "$(nproc)" --target whisper-cli \
     && cp /tmp/whisper.cpp/build/bin/whisper-cli /usr/local/bin/whisper-cli \
     && mkdir -p /app/models \
     && curl -fsSL -o /app/models/ggml-base.bin \
@@ -66,8 +72,14 @@ COPY ml/requirements.txt /app/ml/requirements.txt
 RUN pip install --no-cache-dir -r /app/ml/requirements.txt
 
 # ---- Node dependencies -----------------------------------------------------------------------
+# `npm install` (not `npm ci`) because this service ships without a committed package-lock.json;
+# `npm ci` would hard-fail on the missing lockfile. --no-audit/--no-fund trims the log noise.
 COPY package.json package-lock.json* /app/
-RUN npm ci --omit=dev || npm install --omit=dev
+RUN if [ -f package-lock.json ]; then \
+      npm ci --omit=dev --no-audit --no-fund; \
+    else \
+      npm install --omit=dev --no-audit --no-fund; \
+    fi
 
 # ---- Application source ----------------------------------------------------------------------
 COPY src /app/src
