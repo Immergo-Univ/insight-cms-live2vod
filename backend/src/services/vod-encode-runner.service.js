@@ -274,6 +274,7 @@ export async function startBackgroundVodJob(opts) {
           jobId,
           tenantId,
           spec,
+          cmsCallbackBaseUrl: config.cmsCallbackBaseUrl,
           ...(editorClipId ? { editorClipId } : {}),
           ...(encoderS3 ? { s3: encoderS3 } : {}),
           ...(renditions ? { renditions } : {}),
@@ -281,6 +282,14 @@ export async function startBackgroundVodJob(opts) {
           ...(insightWebhook ? { insightWebhook } : {}),
         }),
       });
+      if (res.ok) {
+        await updateJob(jobId, {
+          status: "processing",
+          progress: 1,
+          phase: "dispatch",
+          message: "Encoder accepted job",
+        });
+      }
       if (!res.ok) {
         const t = await res.text();
         const msg = `Encoder rejected job (${res.status}): ${t.slice(0, 400)}`;

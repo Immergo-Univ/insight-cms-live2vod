@@ -121,6 +121,14 @@ export function VodProcessingProvider({ children }: PropsWithChildren) {
     [jobs],
   );
 
+  useEffect(() => {
+    if (!tenantId || activeCount === 0) return;
+    const id = window.setInterval(() => {
+      void refreshJobs();
+    }, 2000);
+    return () => window.clearInterval(id);
+  }, [tenantId, activeCount, refreshJobs]);
+
   const value = useMemo<VodProcessingContextValue>(
     () => ({
       tenantId,

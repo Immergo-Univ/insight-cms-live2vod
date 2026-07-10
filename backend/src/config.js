@@ -174,6 +174,23 @@ export const config = {
     backend: (process.env.ENCODER_BACKEND || "lite").trim().toLowerCase(),
   },
 
+  /**
+   * Public base URL of this backend for encoder progress callbacks (PATCH /api/encoder/jobs/:id).
+   * Forwarded to immergo-vod-encoder-api so notifyCmsJob can reach this BFF without a separate env on Immergo.
+   * Env: CMS_CALLBACK_BASE_URL, SELF_PUBLIC_BASE, or PUBLIC_BASE_URL.
+   */
+  cmsCallbackBaseUrl: (() => {
+    const explicit = (
+      process.env.CMS_CALLBACK_BASE_URL ||
+      process.env.SELF_PUBLIC_BASE ||
+      process.env.PUBLIC_BASE_URL ||
+      ""
+    ).trim();
+    if (explicit) return explicit.replace(/\/+$/, "");
+    const port = process.env.PORT || 3001;
+    return `http://127.0.0.1:${port}`;
+  })(),
+
   /** Thumbnail microservice for editor capture posters (same as frontend editor-constants). */
   thumbnailApiBase: (
     process.env.THUMBNAIL_API_BASE ||
