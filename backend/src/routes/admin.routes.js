@@ -387,6 +387,26 @@ adminSecured.put(
   },
 );
 
+// Recompute pHash + OCR for every template sample in the (posted) config and persist it. Used to
+// backfill samples uploaded while the sidecar wasn't ready (empty pHash).
+adminSecured.post(
+  "/tenants/:tenantId/streams/:channelId/ad-config/recalc",
+  requireAdminPermission("tenants", "edit"),
+  async (req, res) => {
+    try {
+      const cfg = req.body?.config ?? req.body;
+      const out = await adRecognitionConfig.recalcChannelConfigSamples(
+        req.params.tenantId,
+        req.params.channelId,
+        cfg,
+      );
+      res.json(out);
+    } catch (e) {
+      res.status(400).json({ error: e instanceof Error ? e.message : String(e) });
+    }
+  },
+);
+
 // Upload one template sample (base64 in JSON): stored on S3 + pHash/OCR precomputed. Returns the
 // descriptor the admin UI embeds in the strategy instance's `samples` array.
 adminSecured.post(

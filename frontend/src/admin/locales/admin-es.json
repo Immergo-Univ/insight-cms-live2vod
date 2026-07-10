@@ -182,6 +182,11 @@
   },
   "adSetup": {
     "saved": "Configuración de detección guardada",
+    "recalcPhash": "Recalcular pHash",
+    "recalcDone": "pHash recalculado ({{ok}}/{{total}})",
+    "warnTitle": "Algunas imágenes de muestra todavía no van a funcionar",
+    "warnMissingPhash": "{{count}} imagen(es) de muestra no tienen pHash (se subieron antes de que el modelo estuviera listo). No van a matchear por imagen hasta que recalcules el pHash.",
+    "warnDeadInstance": "{{count}} entrada(s) activada(s) no pueden matchear: no tienen ninguna muestra con pHash ni un matcheo por texto OCR configurado.",
     "threshold": "Umbral de AD",
     "thresholdHint": "El veredicto es \"ad\" cuando el promedio de los scores de las estrategias activadas alcanza este umbral.",
     "logoAppearance": "Aparición de Marca/Logo",

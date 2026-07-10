@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
+  Alert,
   App,
   Button,
   Card,
@@ -183,6 +184,7 @@ export function AdRecognitionSetupTab({ tenantId, channelId }: Props) {
   const { message } = App.useApp();
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [recalculating, setRecalculating] = useState(false);
   const [cfg, setCfg] = useState<AdConfig>(emptyConfig());
 
   const base = `/tenants/${encodeURIComponent(tenantId)}/streams/${encodeURIComponent(channelId)}`;
@@ -216,6 +218,45 @@ export function AdRecognitionSetupTab({ tenantId, channelId }: Props) {
       setSaving(false);
     }
   };
+
+  // Recompute the pHash/OCR of every uploaded sample (via the microservice) and persist. Backfills
+  // samples uploaded while the sidecar wasn't ready (empty pHash).
+  const recalcPhash = async () => {
+    setRecalculating(true);
+    try {
+      const { data } = await getAdminClient().post<{
+        config: AdConfig;
+        stats?: { total: number; ok: number; failed: number };
+      }>(`${base}/ad-config/recalc`, { config: cfg });
+      setCfg(hydrate(data?.config));
+      const s = data?.stats;
+      message.success(
+        s ? t("adSetup.recalcDone", { ok: s.ok, total: s.total }) : t("adSetup.saved"),
+      );
+    } catch (e: unknown) {
+      message.error(readErrorMessage(e));
+    } finally {
+      setRecalculating(false);
+    }
+  };
+
+  // Health of the uploaded samples: how many lack a pHash, and how many enabled logo entries can't
+  // match at all (no sample with pHash AND no OCR text match configured).
+  const sampleIssues = useMemo(() => {
+    let missingPhash = 0;
+    let dead = 0;
+    (["logoAppearance", "logoDisappearance"] as const).forEach((key) => {
+      const strat = cfg[key];
+      if (!strat?.enabled) return;
+      for (const inst of strat.instances) {
+        const withPhash = inst.samples.filter((s) => (s.phash || "").length > 0).length;
+        missingPhash += inst.samples.length - withPhash;
+        const ocrOk = inst.ocr.enabled && inst.ocr.matchText.trim().length > 0;
+        if (withPhash === 0 && !ocrOk) dead += 1;
+      }
+    });
+    return { missingPhash, dead };
+  }, [cfg]);
 
   // ---- mutation helpers -----------------------------------------------------------------------
 
@@ -646,6 +687,9 @@ export function AdRecognitionSetupTab({ tenantId, channelId }: Props) {
         </Space>
         <Space>
           <Button onClick={() => void load()}>{t("streams.reload")}</Button>
+          <Button loading={recalculating} onClick={() => void recalcPhash()}>
+            {t("adSetup.recalcPhash")}
+          </Button>
           <Button type="primary" loading={saving} onClick={() => void save()}>
             {t("common.save")}
           </Button>
@@ -654,6 +698,30 @@ export function AdRecognitionSetupTab({ tenantId, channelId }: Props) {
       <Typography.Paragraph type="secondary" style={{ fontSize: 12 }}>
         {t("adSetup.thresholdHint")}
       </Typography.Paragraph>
+
+      {(sampleIssues.missingPhash > 0 || sampleIssues.dead > 0) && (
+        <Alert
+          type="warning"
+          showIcon
+          style={{ marginBottom: 16 }}
+          message={t("adSetup.warnTitle")}
+          description={
+            <div>
+              {sampleIssues.missingPhash > 0 && (
+                <div>{t("adSetup.warnMissingPhash", { count: sampleIssues.missingPhash })}</div>
+              )}
+              {sampleIssues.dead > 0 && (
+                <div>{t("adSetup.warnDeadInstance", { count: sampleIssues.dead })}</div>
+              )}
+            </div>
+          }
+          action={
+            <Button size="small" loading={recalculating} onClick={() => void recalcPhash()}>
+              {t("adSetup.recalcPhash")}
+            </Button>
+          }
+        />
+      )}
 
       {renderLogoStrategy("logoAppearance")}
       {renderLogoStrategy("logoDisappearance")}

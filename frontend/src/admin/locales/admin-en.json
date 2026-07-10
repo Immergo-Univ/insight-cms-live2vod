@@ -182,6 +182,11 @@
   },
   "adSetup": {
     "saved": "Detection config saved",
+    "recalcPhash": "Recompute pHash",
+    "recalcDone": "pHash recomputed ({{ok}}/{{total}})",
+    "warnTitle": "Some sample images won't work yet",
+    "warnMissingPhash": "{{count}} sample image(s) have no pHash (they were uploaded before the model was ready). They won't match by image until you recompute the pHash.",
+    "warnDeadInstance": "{{count}} enabled entr(ies) can't match at all: no sample with pHash and no OCR text match configured.",
     "threshold": "Ad threshold",
     "thresholdHint": "The verdict is \"ad\" when the average of the enabled strategy scores reaches this threshold.",
     "logoAppearance": "Logo/Brand appearance",

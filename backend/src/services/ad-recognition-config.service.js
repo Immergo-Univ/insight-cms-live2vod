@@ -160,6 +160,55 @@ export async function uploadSample({ channelId, base64, contentType }) {
   };
 }
 
+/** Recompute pHash + OCR for every sample of a logo strategy (in place). Returns counts. */
+async function recalcSamplesInStrategy(strat) {
+  const result = { total: 0, ok: 0, failed: 0 };
+  if (!strat || !Array.isArray(strat.instances)) return result;
+  for (const inst of strat.instances) {
+    if (!inst || !Array.isArray(inst.samples)) continue;
+    for (const s of inst.samples) {
+      if (!s || !s.url) continue;
+      result.total += 1;
+      try {
+        const out = await analyzeSampleViaMicroservice(s.url);
+        if (out && typeof out === "object" && typeof out.phash === "string" && out.phash) {
+          s.phash = out.phash;
+          s.ocrText = typeof out.ocrText === "string" ? out.ocrText : "";
+          s.ocrTextEn = typeof out.ocrTextEn === "string" ? out.ocrTextEn : "";
+          result.ok += 1;
+        } else {
+          result.failed += 1;
+        }
+      } catch (e) {
+        result.failed += 1;
+        console.warn("[ad-recognition] recalc sample failed:", e && e.message ? e.message : e);
+      }
+    }
+  }
+  return result;
+}
+
+/**
+ * Recompute the perceptual hash (+ OCR text) of every template sample in a channel's config via the
+ * microservice `/sample`, then persist the updated config. Used by the admin "Recalcular pHash"
+ * button to backfill samples that were uploaded while the sidecar wasn't ready (empty pHash).
+ *
+ * @param {string} tenantId
+ * @param {string} channelId
+ * @param {object} cfg the config currently in the editor (so unsaved edits are preserved)
+ * @returns {Promise<{ config: object, stats: { total, ok, failed } }>}
+ */
+export async function recalcChannelConfigSamples(tenantId, channelId, cfg) {
+  const clean = cfg && typeof cfg === "object" ? cfg : emptyConfig();
+  const a = await recalcSamplesInStrategy(clean.logoAppearance);
+  const b = await recalcSamplesInStrategy(clean.logoDisappearance);
+  const saved = await upsertChannelConfig(tenantId, channelId, clean);
+  return {
+    config: saved.config,
+    stats: { total: a.total + b.total, ok: a.ok + b.ok, failed: a.failed + b.failed },
+  };
+}
+
 /**
  * Delete a template sample's S3 object (called when the admin removes a sample from a strategy).
  * Accepts an s3Key directly, or a (channelId, sampleId) pair to derive it.
@@ -178,5 +227,6 @@ export default {
   getChannelConfig,
   upsertChannelConfig,
   uploadSample,
+  recalcChannelConfigSamples,
   deleteSample,
 };
