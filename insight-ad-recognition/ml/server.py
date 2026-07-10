@@ -77,24 +77,34 @@ def _warmup():
                 pass
 
 
+def _load_nllb_background(translator):
+    """Load NLLB-200 off the startup path. OCR + pHash (which don't need it) serve immediately;
+    translation (ocrTextEn) turns on once this finishes. The checkpoint is large and downloads on
+    first boot, so blocking startup on it would make the whole sidecar unreachable meanwhile."""
+    try:
+        translator.load()
+        print("[ml] NLLB loaded, translation online", flush=True)
+    except Exception as e:  # noqa: BLE001
+        print(f"[ml] NLLB load failed (translation disabled): {e}", flush=True)
+
+
 @app.on_event("startup")
 def _load_models():
     try:
+        import threading
+
         from ocr_engine import OcrEngine
         from translate import Translator
 
         STATE["ocr"] = OcrEngine()
-        translator = Translator()
-        # Preload NLLB so the first translation isn't slow (best-effort — large download on first
-        # boot; readiness is still reported so OCR/pHash work while the model downloads).
-        try:
-            translator.load()
-        except Exception as e:  # noqa: BLE001
-            print(f"[ml] translator preload deferred: {e}", flush=True)
-        STATE["translator"] = translator
+        STATE["translator"] = Translator()
         _warmup()
+        # Ready as soon as OCR + pHash work; do NOT block on the NLLB download.
         STATE["ready"] = True
-        print("[ml] models loaded, sidecar ready", flush=True)
+        print("[ml] OCR+pHash ready; loading NLLB in background", flush=True)
+        threading.Thread(
+            target=_load_nllb_background, args=(STATE["translator"],), daemon=True
+        ).start()
     except Exception as e:  # noqa: BLE001 - report and stay up in a not-ready state
         STATE["error"] = str(e)
         print(f"[ml] model load failed: {e}", flush=True)
@@ -102,19 +112,24 @@ def _load_models():
 
 @app.get("/health")
 def health():
+    tr = STATE["translator"]
     return {
         "ready": bool(STATE["ready"]),
         "error": STATE["error"],
         "models": {
             "ocr": STATE["ocr"] is not None,
-            "translator": STATE["translator"] is not None,
+            # translator present as soon as constructed; `translationReady` flips once NLLB loads.
+            "translator": tr is not None,
+            "translationReady": bool(tr and tr.is_ready()),
         },
     }
 
 
 def _translate(text: str) -> str:
     tr = STATE["translator"]
-    if not tr or not text:
+    # Skip while NLLB is still loading in the background (don't block detect on the download);
+    # ocrTextEn just stays empty until translation comes online.
+    if not tr or not text or not tr.is_ready():
         return ""
     try:
         return tr.translate(text)

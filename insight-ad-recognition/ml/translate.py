@@ -27,6 +27,10 @@ class Translator:
         self._model = None
         self._tgt_id = None
 
+    def is_ready(self) -> bool:
+        """True once the model+tokenizer are loaded (translation available)."""
+        return self._model is not None
+
     def load(self):
         """Preload tokenizer + model so the first real request doesn't pay the init cost."""
         with self._lock:
