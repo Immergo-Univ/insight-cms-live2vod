@@ -101,10 +101,12 @@ export function buildProbeUrl(hls, marginSec) {
         0,
         Number.isFinite(marginSec) ? Number(marginSec) : config.adRecognition.archiveMarginSec,
       );
-      const endTime = now - margin;
-      const startTime = endTime - PROBE_WINDOW_SECONDS();
-      u.searchParams.set("startTime", String(startTime));
-      u.searchParams.set("endTime", String(endTime));
+      // Single-instant window: startTime == endTime makes the origin return exactly one segment.
+      // The detector grabs the last keyframe of it; the segment's media time == endTime, which we
+      // use as the marker epoch (aligned with the stream's PROGRAM-DATE-TIME).
+      const t = now - margin;
+      u.searchParams.set("startTime", String(t));
+      u.searchParams.set("endTime", String(t));
     }
     return u.toString();
   } catch {
@@ -323,6 +325,17 @@ async function callDetect(hlsUrl, channelConfig) {
   }
 }
 
+/** Extract the `endTime` (unix seconds) query param from a probe URL, or null. */
+function probeEndTime(probeUrl) {
+  try {
+    const v = new URL(probeUrl).searchParams.get("endTime");
+    const n = v != null ? parseInt(v, 10) : NaN;
+    return Number.isFinite(n) ? n : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Insert one scan row into the DB (best-effort; never throws to the caller).
  * @param {object} scan AdRecognitionScan attributes
@@ -420,8 +433,12 @@ async function probeChannel(channel) {
 
   const detection = typeof result?.detection === "string" ? result.detection : "unknown";
   const score = typeof result?.score === "number" ? result.score : null;
+  // Use the probe window's endTime (the media time of the analyzed frame) as the marker epoch, so
+  // segments land on the stream's real timeline (PROGRAM-DATE-TIME) instead of the wall clock — the
+  // microservice's `timestamp` is just processing time and would shift markers by ~margin seconds.
   const epoch =
-    typeof result?.timestamp === "number" ? result.timestamp : Math.floor(Date.now() / 1000);
+    probeEndTime(probeUrl) ??
+    (typeof result?.timestamp === "number" ? result.timestamp : Math.floor(Date.now() / 1000));
 
   st.lastError = null;
   st.lastDetection = detection;

@@ -47,13 +47,13 @@ export async function extractLastFrame(videoUrl, workDir) {
   const protocolArgs = isHls ? HLS_PROTOCOL_ARGS : [];
   const httpArgs = isHttp ? HTTP_ARGS : [];
 
-  // Primary strategy: seek near the end and keep the last decoded frame.
-  //  - Live HLS: start at the last segment and read the tail window.
-  //  - VOD HLS / file: seek `tail` seconds before EOF.
-  const primarySeek = isHls && isLive ? ["-live_start_index", "-1"] : ["-sseof", `-${tail}`];
-  const primaryDuration = isHls && isLive ? ["-t", String(tail)] : [];
+  // The CMS sends a single-instant window (startTime == endTime), so a VOD/archive input is a
+  // single segment (~one GOP). We decode ONLY keyframes (`-skip_frame nokey`) and keep the last one
+  // (`-update 1`) — minimal decode, mostly I/O. Live HLS still reads the tail from the live edge.
+  const seekArgs = isHls && isLive ? ["-live_start_index", "-1"] : [];
+  const durationArgs = isHls && isLive ? ["-t", String(tail)] : [];
 
-  const buildArgs = (seekArgs, durationArgs) => [
+  const buildArgs = (decodeArgs) => [
     "-nostdin",
     "-hide_banner",
     "-loglevel",
@@ -61,6 +61,7 @@ export async function extractLastFrame(videoUrl, workDir) {
     ...httpArgs,
     ...protocolArgs,
     ...seekArgs,
+    ...decodeArgs,
     "-i",
     ffmpegInput,
     ...durationArgs,
@@ -75,13 +76,14 @@ export async function extractLastFrame(videoUrl, workDir) {
     framePath,
   ];
 
-  await run(config.tools.ffmpeg, buildArgs(primarySeek, primaryDuration), {
+  // 1) Keyframe-only pass (cheapest): keep the last keyframe.
+  await run(config.tools.ffmpeg, buildArgs(["-skip_frame", "nokey"]), {
     timeoutMs: config.limits.requestTimeoutMs,
   }).catch(() => null);
 
-  // Fallback: some short/edge clips reject `-sseof`; decode from the start and keep the last frame.
-  if (!(await fileNonEmpty(framePath)) && !(isHls && isLive)) {
-    await run(config.tools.ffmpeg, buildArgs([], []), {
+  // 2) Fallback: if no keyframe was emitted, decode all frames and keep the last one.
+  if (!(await fileNonEmpty(framePath))) {
+    await run(config.tools.ffmpeg, buildArgs([]), {
       timeoutMs: config.limits.requestTimeoutMs,
     }).catch(() => null);
   }
