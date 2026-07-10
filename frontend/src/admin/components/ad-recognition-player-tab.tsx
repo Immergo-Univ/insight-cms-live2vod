@@ -206,7 +206,11 @@ export function AdRecognitionPlayerTab({ tenantId, channelId, playerUrl, streamI
       if (streamInfo?.fps) cfg.fps = streamInfo.fps;
 
       const instance = makeCropInstance({ x: r.x, y: r.y, w: r.w, h: r.h }, up.sample);
-      cfg[kind] = { enabled: true, instances: [...cfg[kind].instances, instance] };
+      cfg[kind] = {
+        enabled: true,
+        combine: cfg[kind].combine,
+        instances: [...cfg[kind].instances, instance],
+      };
 
       // 3) Persist.
       await getAdminClient().put(`${apiBase}/ad-config`, { config: cfg });
