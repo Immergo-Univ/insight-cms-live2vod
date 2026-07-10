@@ -30,10 +30,15 @@ export async function analyzeVideo(videoUrl, workDir, rawConfig) {
 
   const rois = collectRois(cfg);
 
+  // Full-screen OCR (and its NLLB translation) is expensive, so only run it when the OCR-rules
+  // strategy is enabled. Per-ROI OCR is already gated per logo instance (roi.ocr). If NOTHING uses
+  // OCR (no OCR rules and no logo instance with OCR), we skip Tesseract/NLLB entirely.
+  const needFullOcr = Boolean(cfg.ocrRules.enabled);
+
   const tSidecar = Date.now();
   const analysis = (await analyzeFrame(framePath, rois, {
-    fullOcr: true,
-    translateFull: true,
+    fullOcr: needFullOcr,
+    translateFull: needFullOcr,
   })) || { fullOcr: { text: "", textEn: "" }, rois: [] };
   const sidecarMs = Date.now() - tSidecar;
 
