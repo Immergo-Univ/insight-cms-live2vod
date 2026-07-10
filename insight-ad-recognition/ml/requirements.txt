@@ -15,3 +15,5 @@ scipy==1.11.4
 pytesseract==0.3.13
 # Perceptual hashing (pHash) for logo appearance/disappearance matching.
 ImageHash==4.3.1
+# OpenCV (headless) for the optional Template Matching detection method (cv2.matchTemplate).
+opencv-python-headless==4.10.0.84

@@ -77,6 +77,7 @@ function normSample(s) {
   const phash = typeof s.phash === "string" ? s.phash.trim().toLowerCase() : "";
   return {
     id: s.id != null ? String(s.id) : null,
+    url: typeof s.url === "string" ? s.url : "",
     phash,
     ocrText: typeof s.ocrText === "string" ? s.ocrText : "",
     ocrTextEn: typeof s.ocrTextEn === "string" ? s.ocrTextEn : "",
@@ -99,6 +100,7 @@ function normInstance(inst, idx, prefix, baseW, baseH) {
   return {
     id,
     roi: normRoi(src.roi, baseW, baseH),
+    matchMethod: src.matchMethod === "template" ? "template" : "phash",
     hashSensitivity: pct(src.hashSensitivity, 85),
     samples: Array.isArray(src.samples) ? src.samples.map(normSample).filter(Boolean) : [],
     ocr: normOcrOpt(src.ocr),
@@ -185,6 +187,7 @@ export function collectRois(cfg) {
   const push = (strat) => {
     if (!strat.enabled) return;
     for (const inst of strat.instances) {
+      const useTemplate = inst.matchMethod === "template";
       rois.push({
         id: inst.id,
         x: inst.roi.x,
@@ -193,6 +196,9 @@ export function collectRois(cfg) {
         h: inst.roi.h,
         ocr: inst.ocr.enabled,
         translate: inst.ocr.enabled && inst.ocr.textSource === "translated",
+        // Template Matching (OpenCV): hand the sidecar the sample image URLs to score the ROI.
+        templateMatch: useTemplate,
+        templates: useTemplate ? inst.samples.map((s) => s.url).filter(Boolean) : [],
       });
     }
   };
@@ -326,15 +332,24 @@ function evalCondition(cond, fullText, fullTextEn) {
 
 // ---- per-strategy scoring ---------------------------------------------------------------------
 
-/** Presence signal of a logo instance in its ROI: best pHash / OCR similarity + matched flag. */
+/**
+ * Presence signal of a logo instance in its ROI. The visual signal is either pHash similarity or
+ * OpenCV template-matching (NCC), per the instance's `matchMethod`; OR-ed with the OCR text match.
+ */
 function instancePresence(inst, roiResult) {
   const rr = roiResult || {};
+  const method = inst.matchMethod === "template" ? "template" : "phash";
+
   let phashSim = 0;
   for (const s of inst.samples) {
     if (!s.phash) continue;
     phashSim = Math.max(phashSim, phashSimilarity(rr.phash, s.phash));
   }
-  const phashMatched = inst.samples.length > 0 && phashSim * 100 >= inst.hashSensitivity;
+  const templateScore = Number(rr.templateScore);
+  const templateSim = Number.isFinite(templateScore) ? Math.min(1, Math.max(0, templateScore)) : 0;
+
+  const visualSim = method === "template" ? templateSim : phashSim;
+  const visualMatched = inst.samples.length > 0 && visualSim * 100 >= inst.hashSensitivity;
 
   let ocrSim = 0;
   let ocrMatched = false;
@@ -346,10 +361,12 @@ function instancePresence(inst, roiResult) {
 
   return {
     id: inst.id,
+    method,
     phashSim: round3(phashSim),
+    templateScore: round3(templateSim),
     ocrSim: round3(ocrSim),
-    matched: phashMatched || ocrMatched,
-    signal: Math.max(phashSim, ocrSim),
+    matched: visualMatched || ocrMatched,
+    signal: Math.max(visualSim, ocrSim),
   };
 }
 

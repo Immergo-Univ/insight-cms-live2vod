@@ -23,6 +23,7 @@ import {
 import type { UploadProps } from "antd";
 import { useTranslation } from "react-i18next";
 import { getAdminClient } from "@/admin/admin-api";
+import { RoiSelector } from "./roi-selector";
 
 // ---- Types (mirror the backend rule-engine config JSON) ---------------------------------------
 
@@ -57,9 +58,13 @@ type OcrOpt = {
   similarity: number;
 };
 
+type MatchMethod = "phash" | "template";
+
 type LogoInstance = {
   id: string;
   roi: Roi;
+  /** Visual detection method: perceptual hash or OpenCV template matching. */
+  matchMethod: MatchMethod;
   hashSensitivity: number;
   samples: Sample[];
   ocr: OcrOpt;
@@ -90,7 +95,7 @@ type OcrGroup = { id: string; conditions: OcrCondition[] };
 
 type OcrRulesStrategy = { enabled: boolean; groups: OcrGroup[] };
 
-type AdConfig = {
+export type AdConfig = {
   threshold: number;
   /** Base resolution the pixel ROIs were defined against + stream fps (for reference). */
   baseWidth: number;
@@ -100,6 +105,9 @@ type AdConfig = {
   logoDisappearance: LogoStrategy;
   ocrRules: OcrRulesStrategy;
 };
+
+/** Sample descriptor returned by the ad-samples upload endpoint. */
+export type AdSample = Sample;
 
 type Props = {
   tenantId: string;
@@ -150,8 +158,21 @@ function newLogoInstance(): LogoInstance {
     id: genId(),
     // 0/0 size = whole frame until the operator sets a pixel ROI (or picks one in the Player tab).
     roi: { x: 0, y: 0, w: 0, h: 0 },
+    matchMethod: "phash",
     hashSensitivity: 85,
     samples: [],
+    ocr: { enabled: false, matchText: "", textSource: "original", similarity: 80 },
+  };
+}
+
+/** Build a Logo strategy instance from a Player crop: pixel ROI + the uploaded sample. */
+export function makeCropInstance(roiPx: Roi, sample: AdSample): LogoInstance {
+  return {
+    id: genId(),
+    roi: { x: Math.round(roiPx.x), y: Math.round(roiPx.y), w: Math.round(roiPx.w), h: Math.round(roiPx.h) },
+    matchMethod: "phash",
+    hashSensitivity: 85,
+    samples: [sample],
     ocr: { enabled: false, matchText: "", textSource: "original", similarity: 80 },
   };
 }
@@ -169,7 +190,7 @@ function newGroup(): OcrGroup {
  * ROIs are kept in PIXELS. Legacy configs stored fractions (0..1) with no baseWidth — those are
  * converted to pixels using the current stream resolution so the UI can show real pixel values.
  */
-function hydrate(raw: unknown, streamInfo?: StreamInfo | null): AdConfig {
+export function hydrate(raw: unknown, streamInfo?: StreamInfo | null): AdConfig {
   const src = raw && typeof raw === "object" ? (raw as Partial<AdConfig>) : {};
 
   const storedW = typeof src.baseWidth === "number" ? src.baseWidth : 0;
@@ -342,10 +363,13 @@ export function AdRecognitionSetupTab({ tenantId, channelId, streamInfo, onMarke
       const strat = cfg[key];
       if (!strat?.enabled) return;
       for (const inst of strat.instances) {
+        const isTemplate = inst.matchMethod === "template";
         const withPhash = inst.samples.filter((s) => (s.phash || "").length > 0).length;
-        missingPhash += inst.samples.length - withPhash;
+        // pHash needs a computed hash; template matching only needs the sample image (url).
+        if (!isTemplate) missingPhash += inst.samples.length - withPhash;
+        const usable = isTemplate ? inst.samples.length : withPhash;
         const ocrOk = inst.ocr.enabled && inst.ocr.matchText.trim().length > 0;
-        if (withPhash === 0 && !ocrOk) dead += 1;
+        if (usable === 0 && !ocrOk) dead += 1;
       }
     });
     return { missingPhash, dead };
@@ -395,6 +419,13 @@ export function AdRecognitionSetupTab({ tenantId, channelId, streamInfo, onMarke
     () => [
       { value: "original", label: t("adSetup.textOriginal") },
       { value: "translated", label: t("adSetup.textTranslated") },
+    ],
+    [t],
+  );
+  const methodOptions = useMemo(
+    () => [
+      { value: "phash", label: t("adSetup.methodPhash") },
+      { value: "template", label: t("adSetup.methodTemplate") },
     ],
     [t],
   );
@@ -542,10 +573,29 @@ export function AdRecognitionSetupTab({ tenantId, channelId, streamInfo, onMarke
           </Col>
         </Row>
 
-        {/* ROI */}
+        {/* ROI — visual selector (drag to draw / move / resize) synced with the numeric inputs */}
         <Typography.Text strong style={{ fontSize: 12 }}>
           {t("adSetup.roi")}
         </Typography.Text>
+        {baseW > 0 && baseH > 0 ? (
+          <>
+            <div style={{ marginTop: 6 }}>
+              <RoiSelector
+                baseW={baseW}
+                baseH={baseH}
+                value={inst.roi}
+                onChange={(r) => patchInstance(key, inst.id, (i) => ({ ...i, roi: r }))}
+              />
+            </div>
+            <Typography.Text type="secondary" style={{ fontSize: 11 }}>
+              {t("adSetup.roiSelectorHint")}
+            </Typography.Text>
+          </>
+        ) : (
+          <Typography.Paragraph type="secondary" style={{ fontSize: 12, marginTop: 6, marginBottom: 6 }}>
+            {t("adSetup.resolutionUnknown")}
+          </Typography.Paragraph>
+        )}
         <Row gutter={[8, 8]} style={{ marginTop: 6, marginBottom: 12 }}>
           {roiField(t("adSetup.roiPosX"), "x")}
           {roiField(t("adSetup.roiPosY"), "y")}
@@ -553,7 +603,23 @@ export function AdRecognitionSetupTab({ tenantId, channelId, streamInfo, onMarke
           {roiField(t("adSetup.roiHeight"), "h")}
         </Row>
 
-        {/* Hash sensitivity */}
+        {/* Detection method */}
+        <div style={{ marginBottom: 8 }}>
+          <Typography.Text style={{ fontSize: 12, marginRight: 8 }}>
+            {t("adSetup.matchMethod")}:
+          </Typography.Text>
+          <Select
+            size="small"
+            value={inst.matchMethod}
+            options={methodOptions}
+            style={{ width: 240 }}
+            onChange={(v: MatchMethod) =>
+              patchInstance(key, inst.id, (i) => ({ ...i, matchMethod: v }))
+            }
+          />
+        </div>
+
+        {/* Sensitivity (threshold for the chosen visual method) */}
         <Typography.Text strong style={{ fontSize: 12 }}>
           {t("adSetup.hashSensitivity")}: {inst.hashSensitivity}
         </Typography.Text>

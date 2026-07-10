@@ -20,12 +20,14 @@ WORKDIR /app
 
 # ---- System dependencies ---------------------------------------------------------------------
 # Runtime: ffmpeg (last-frame extraction), python3, Tesseract OCR + Hebrew/English/Spanish
-# traineddata. No OpenCV/whisper anymore, so no libgl/build toolchain.
+# traineddata, and libgl/glib for OpenCV (Template Matching detection method).
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ffmpeg \
       python3 \
       python3-pip \
       python3-venv \
+      libgl1 \
+      libglib2.0-0 \
       tesseract-ocr \
       tesseract-ocr-heb \
       tesseract-ocr-eng \

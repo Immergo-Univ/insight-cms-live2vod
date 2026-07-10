@@ -1,15 +1,25 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Alert, Button, Empty, Space, Tag, Typography } from "antd";
+import { App, Alert, Button, Empty, Space, Tag, Typography } from "antd";
 import videojs from "video.js";
 import type Player from "video.js/dist/types/player";
 import "video.js/dist/video-js.css";
 import { useTranslation } from "react-i18next";
-import type { StreamInfo } from "./ad-recognition-setup-tab";
+import { getAdminClient } from "@/admin/admin-api";
+import { hydrate, makeCropInstance, type AdConfig, type AdSample, type StreamInfo } from "./ad-recognition-setup-tab";
 
 type Props = {
+  tenantId: string;
+  channelId: string;
   playerUrl: string | null;
   streamInfo?: StreamInfo | null;
+  /** Called after a crop was added as a strategy instance (so the modal can jump to Setup). */
+  onInstanceAdded?: () => void;
 };
+
+function readErrorMessage(e: unknown, fallback = "Error"): string {
+  const err = e as { response?: { data?: { error?: string } }; message?: string };
+  return err.response?.data?.error || err.message || fallback;
+}
 
 /** Selection rectangle in NATIVE (base-resolution) pixels. */
 type NativeRect = { x: number; y: number; w: number; h: number };
@@ -19,8 +29,10 @@ type NativeRect = { x: number; y: number; w: number; h: number };
  * region and download that crop at 1:1 with the base resolution. Those crops are the ideal template
  * samples to upload in the "Ad Recognition Setup" tab (they match the analyzed ROI pixel-for-pixel).
  */
-export function AdRecognitionPlayerTab({ playerUrl, streamInfo }: Props) {
+export function AdRecognitionPlayerTab({ tenantId, channelId, playerUrl, streamInfo, onInstanceAdded }: Props) {
   const { t } = useTranslation("admin");
+  const { message } = App.useApp();
+  const [addingTo, setAddingTo] = useState<"logoAppearance" | "logoDisappearance" | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const playerRef = useRef<Player | null>(null);
 
@@ -136,16 +148,24 @@ export function AdRecognitionPlayerTab({ playerUrl, streamInfo }: Props) {
     };
   };
 
-  const downloadCrop = () => {
+  /** Build a canvas with the selected region at native (base) resolution, or null. */
+  const cropCanvas = (): HTMLCanvasElement | null => {
     const src = frameCanvasRef.current;
     const r = nativeRect();
-    if (!src || !r) return;
+    if (!src || !r) return null;
     const out = document.createElement("canvas");
     out.width = r.w;
     out.height = r.h;
     const ctx = out.getContext("2d");
-    if (!ctx) return;
+    if (!ctx) return null;
     ctx.drawImage(src, r.x, r.y, r.w, r.h, 0, 0, r.w, r.h);
+    return out;
+  };
+
+  const downloadCrop = () => {
+    const out = cropCanvas();
+    const r = nativeRect();
+    if (!out || !r) return;
     out.toBlob((blob) => {
       if (!blob) return;
       const url = URL.createObjectURL(blob);
@@ -157,6 +177,48 @@ export function AdRecognitionPlayerTab({ playerUrl, streamInfo }: Props) {
       a.remove();
       URL.revokeObjectURL(url);
     }, "image/png");
+  };
+
+  /**
+   * Upload the crop as a sample and append a new instance (with the 1:1 pixel ROI) to the chosen
+   * logo strategy, then persist. On success the modal jumps to the Setup tab where it shows up.
+   */
+  const addAsLogo = async (kind: "logoAppearance" | "logoDisappearance") => {
+    const out = cropCanvas();
+    const r = nativeRect();
+    if (!out || !r) return;
+    setAddingTo(kind);
+    try {
+      const dataUrl = out.toDataURL("image/png");
+      const apiBase = `/tenants/${encodeURIComponent(tenantId)}/streams/${encodeURIComponent(channelId)}`;
+
+      // 1) Upload the crop as a template sample (S3 + pHash/OCR precomputed).
+      const { data: up } = await getAdminClient().post<{ sample: AdSample }>(`${apiBase}/ad-samples`, {
+        imageBase64: dataUrl,
+      });
+      if (!up?.sample) throw new Error("upload failed");
+
+      // 2) Load the current config (converted to pixels + base resolution) and append the instance.
+      const { data: cfgResp } = await getAdminClient().get<{ config: AdConfig }>(`${apiBase}/ad-config`);
+      const cfg: AdConfig = hydrate(cfgResp?.config, streamInfo);
+      if (streamInfo?.width) cfg.baseWidth = streamInfo.width;
+      if (streamInfo?.height) cfg.baseHeight = streamInfo.height;
+      if (streamInfo?.fps) cfg.fps = streamInfo.fps;
+
+      const instance = makeCropInstance({ x: r.x, y: r.y, w: r.w, h: r.h }, up.sample);
+      cfg[kind] = { enabled: true, instances: [...cfg[kind].instances, instance] };
+
+      // 3) Persist.
+      await getAdminClient().put(`${apiBase}/ad-config`, { config: cfg });
+      message.success(
+        t(kind === "logoAppearance" ? "player.addedAppearance" : "player.addedDisappearance"),
+      );
+      onInstanceAdded?.();
+    } catch (e) {
+      message.error(readErrorMessage(e));
+    } finally {
+      setAddingTo(null);
+    }
   };
 
   const sel = nativeRect();
@@ -179,12 +241,26 @@ export function AdRecognitionPlayerTab({ playerUrl, streamInfo }: Props) {
             {t("player.hint")}
           </Typography.Text>
         </Space>
-        <Space>
+        <Space wrap>
           <Button type="primary" onClick={captureFrame}>
             {t("player.capture")}
           </Button>
           <Button disabled={!sel} onClick={downloadCrop}>
             {t("player.download")}
+          </Button>
+          <Button
+            disabled={!sel}
+            loading={addingTo === "logoAppearance"}
+            onClick={() => void addAsLogo("logoAppearance")}
+          >
+            {t("player.addAppearance")}
+          </Button>
+          <Button
+            disabled={!sel}
+            loading={addingTo === "logoDisappearance"}
+            onClick={() => void addAsLogo("logoDisappearance")}
+          >
+            {t("player.addDisappearance")}
           </Button>
         </Space>
       </div>

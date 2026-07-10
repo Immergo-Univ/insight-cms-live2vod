@@ -34,6 +34,9 @@ class RoiSpec(BaseModel):
     h: float = 1.0
     ocr: bool = False
     translate: bool = False
+    # Template Matching (OpenCV) — when true, score the ROI against these sample image URLs.
+    templateMatch: bool = False
+    templates: list[str] = []
 
 
 class AnalyzeRequest(BaseModel):
@@ -156,6 +159,12 @@ async def analyze(req: AnalyzeRequest):
         for roi in req.rois:
             roi_dict = {"x": roi.x, "y": roi.y, "w": roi.w, "h": roi.h}
             entry = {"id": roi.id, "phash": phash.phash_crop(req.frame, roi_dict, hash_size)}
+            if roi.templateMatch and roi.templates:
+                import template_match
+
+                entry["templateScore"] = template_match.match_roi(req.frame, roi_dict, roi.templates)
+            else:
+                entry["templateScore"] = 0.0
             if roi.ocr:
                 roi_text = ocr.crop_text(req.frame, roi_dict)
                 entry["ocrText"] = roi_text

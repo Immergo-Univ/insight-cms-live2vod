@@ -74,6 +74,7 @@ export function StreamScansModal({ open, onClose, tenantId, channelId, channelTi
   const [loading, setLoading] = useState(false);
   const [scans, setScans] = useState<AdRecognitionScan[]>([]);
   const [streamInfo, setStreamInfo] = useState<StreamInfo | null>(null);
+  const [activeKey, setActiveKey] = useState("setup");
 
   const load = useCallback(async () => {
     if (!tenantId || !channelId) return;
@@ -274,7 +275,8 @@ export function StreamScansModal({ open, onClose, tenantId, channelId, channelTi
       destroyOnClose
     >
       <Tabs
-        defaultActiveKey="setup"
+        activeKey={activeKey}
+        onChange={setActiveKey}
         destroyInactiveTabPane
         items={[
           {
@@ -293,7 +295,13 @@ export function StreamScansModal({ open, onClose, tenantId, channelId, channelTi
             key: "player",
             label: t("streams.tabPlayer"),
             children: open ? (
-              <AdRecognitionPlayerTab playerUrl={streamInfo?.playerUrl ?? null} streamInfo={streamInfo} />
+              <AdRecognitionPlayerTab
+                tenantId={tenantId}
+                channelId={channelId}
+                playerUrl={streamInfo?.playerUrl ?? null}
+                streamInfo={streamInfo}
+                onInstanceAdded={() => setActiveKey("setup")}
+              />
             ) : null,
           },
           { key: "markers", label: t("streams.tabMarkers"), children: markersTab },
