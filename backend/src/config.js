@@ -129,6 +129,13 @@ export const config = {
       10,
     ),
     /**
+     * Minimum duration (seconds) for an ad window to be recorded as a segment. When an ad window
+     * closes (after PROGRAM_CONFIRM_SAMPLES consecutive "program" probes), if it lasted less than
+     * this it is DISCARDED — a handful of "ad" probes that are quickly followed by "program" do not
+     * form an ad slot. Env: AD_RECOGNITION_MIN_AD_SEGMENT_SEC (default 60).
+     */
+    minAdSegmentSec: parseInt(process.env.AD_RECOGNITION_MIN_AD_SEGMENT_SEC || "60", 10),
+    /**
      * Optional restriction: when set, only these tenant IDs are probed (intersected with the tenants
      * that have `adRecognitionEnabled === true`). When empty, ALL enabled tenants are probed.
      */

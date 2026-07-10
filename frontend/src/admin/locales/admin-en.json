@@ -166,6 +166,7 @@
     "viewScans": "View scans",
     "channelModalTitle": "Channel — {{title}}",
     "tabAdSetup": "Ad Recognition Setup",
+    "tabPlayer": "Player",
     "tabMarkers": "Scans",
     "scansCount": "{{count}} scan(s)",
     "scansEmpty": "No scans recorded yet for this stream.",
@@ -182,6 +183,10 @@
   },
   "adSetup": {
     "saved": "Detection config saved",
+    "resolutionUnknown": "Stream resolution unknown",
+    "clearMarkers": "Clear all AD markers",
+    "clearMarkersConfirm": "Delete ALL scans and ad segments recorded for this channel? This cannot be undone.",
+    "markersPurged": "{{count}} AD marker(s) deleted",
     "recalcPhash": "Recompute pHash",
     "recalcDone": "pHash recomputed ({{ok}}/{{total}})",
     "warnTitle": "Some sample images won't work yet",
@@ -230,6 +235,18 @@
       "majorTo": "Major to",
       "minorTo": "Minor to"
     }
+  },
+  "player": {
+    "noStream": "No playable stream URL for this channel.",
+    "hint": "Pause on a frame, drag to select a region, then download the crop (1:1 with the base resolution) to upload it as a template.",
+    "capture": "Capture frame",
+    "download": "Download crop",
+    "livePlayer": "Stream",
+    "capturedFrame": "Captured frame",
+    "capturePrompt": "Capture a frame to select and crop a region.",
+    "captureNoFrame": "No frame available yet — start playback first.",
+    "captureFailed": "Could not capture the frame.",
+    "captureCors": "Can't read the video pixels (the stream origin doesn't allow cross-origin reads)."
   },
   "clips": {
     "title": "Generated clips",

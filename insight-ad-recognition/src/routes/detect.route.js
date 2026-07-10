@@ -15,6 +15,7 @@ import path from "node:path";
 import { Router } from "express";
 import { config } from "../config.js";
 import { analyzeVideo } from "../services/analyze.service.js";
+import { probeStream } from "../services/media.service.js";
 import { analyzeSample } from "../services/sidecar.client.js";
 import { previewUrl } from "../services/preview.service.js";
 import { requireSecret } from "../middleware/auth.js";
@@ -86,6 +87,26 @@ detectRouter.post("/detect", requireSecret, async (req, res) => {
     return res.status(502).json({ error: `Analysis failed: ${e?.message || String(e)}` });
   } finally {
     await removeWorkDir(workDir);
+  }
+});
+
+/**
+ * Probe the stream's base resolution + frame rate (ffprobe, no frame extraction).
+ * POST /probe { video } -> { width, height, fps, duration }
+ */
+detectRouter.post("/probe", requireSecret, async (req, res) => {
+  const video = req.body?.video;
+  if (!isValidVideoArg(video)) {
+    return res.status(400).json({ error: "Missing or invalid required field: video" });
+  }
+  try {
+    const info = await jobs.run(() => probeStream(String(video)));
+    return res.json(info);
+  } catch (e) {
+    const msg = String(e?.message || e);
+    if (isUpstreamFetchError(msg)) logger.warn("probe failed (upstream)", { error: msg });
+    else logger.warn("probe failed", { error: msg });
+    return res.status(502).json({ error: `Probe failed: ${e?.message || String(e)}` });
   }
 });
 

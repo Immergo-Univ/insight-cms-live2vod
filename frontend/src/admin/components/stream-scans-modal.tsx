@@ -3,7 +3,8 @@ import { App, Button, Descriptions, Modal, Progress, Space, Table, Tabs, Tag, Ty
 import type { ColumnsType } from "antd/es/table";
 import { useTranslation } from "react-i18next";
 import { getAdminClient } from "@/admin/admin-api";
-import { AdRecognitionSetupTab } from "./ad-recognition-setup-tab";
+import { AdRecognitionSetupTab, type StreamInfo } from "./ad-recognition-setup-tab";
+import { AdRecognitionPlayerTab } from "./ad-recognition-player-tab";
 
 /** One AD-recognition scan row as returned by the admin API (rule engine). */
 export type AdRecognitionScan = {
@@ -72,6 +73,7 @@ export function StreamScansModal({ open, onClose, tenantId, channelId, channelTi
   const { message } = App.useApp();
   const [loading, setLoading] = useState(false);
   const [scans, setScans] = useState<AdRecognitionScan[]>([]);
+  const [streamInfo, setStreamInfo] = useState<StreamInfo | null>(null);
 
   const load = useCallback(async () => {
     if (!tenantId || !channelId) return;
@@ -93,6 +95,28 @@ export function StreamScansModal({ open, onClose, tenantId, channelId, channelTi
     if (open) void load();
     else setScans([]);
   }, [open, load]);
+
+  // Probe the channel's base resolution / fps + a playable archive URL (best-effort) once per open.
+  useEffect(() => {
+    if (!open || !tenantId || !channelId) {
+      setStreamInfo(null);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const { data } = await getAdminClient().get<StreamInfo>(
+          `/tenants/${encodeURIComponent(tenantId)}/streams/${encodeURIComponent(channelId)}/stream-info`,
+        );
+        if (!cancelled) setStreamInfo(data || null);
+      } catch {
+        if (!cancelled) setStreamInfo(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [open, tenantId, channelId]);
 
   const columns: ColumnsType<AdRecognitionScan> = useMemo(
     () => [
@@ -251,11 +275,26 @@ export function StreamScansModal({ open, onClose, tenantId, channelId, channelTi
     >
       <Tabs
         defaultActiveKey="setup"
+        destroyInactiveTabPane
         items={[
           {
             key: "setup",
             label: t("streams.tabAdSetup"),
-            children: open ? <AdRecognitionSetupTab tenantId={tenantId} channelId={channelId} /> : null,
+            children: open ? (
+              <AdRecognitionSetupTab
+                tenantId={tenantId}
+                channelId={channelId}
+                streamInfo={streamInfo}
+                onMarkersPurged={() => void load()}
+              />
+            ) : null,
+          },
+          {
+            key: "player",
+            label: t("streams.tabPlayer"),
+            children: open ? (
+              <AdRecognitionPlayerTab playerUrl={streamInfo?.playerUrl ?? null} streamInfo={streamInfo} />
+            ) : null,
           },
           { key: "markers", label: t("streams.tabMarkers"), children: markersTab },
         ]}

@@ -16,6 +16,7 @@ import {
   Space,
   Spin,
   Switch,
+  Tag,
   Typography,
   Upload,
 } from "antd";
@@ -27,6 +28,17 @@ import { getAdminClient } from "@/admin/admin-api";
 
 type TextSource = "original" | "translated";
 
+/** Base video resolution + fps of the channel stream (probed via the microservice). */
+export type StreamInfo = {
+  width: number | null;
+  height: number | null;
+  fps: number | null;
+  duration?: number | null;
+  hls?: string | null;
+  playerUrl?: string | null;
+};
+
+/** ROI in PIXELS relative to the channel base resolution (x, y, width, height). */
 type Roi = { x: number; y: number; w: number; h: number };
 
 type Sample = {
@@ -80,12 +92,22 @@ type OcrRulesStrategy = { enabled: boolean; groups: OcrGroup[] };
 
 type AdConfig = {
   threshold: number;
+  /** Base resolution the pixel ROIs were defined against + stream fps (for reference). */
+  baseWidth: number;
+  baseHeight: number;
+  fps: number;
   logoAppearance: LogoStrategy;
   logoDisappearance: LogoStrategy;
   ocrRules: OcrRulesStrategy;
 };
 
-type Props = { tenantId: string; channelId: string };
+type Props = {
+  tenantId: string;
+  channelId: string;
+  streamInfo?: StreamInfo | null;
+  /** Called after all AD markers were purged (so the modal can reload the scans list). */
+  onMarkersPurged?: () => void;
+};
 
 const OPERATORS: OcrOp[] = [
   "includes",
@@ -114,6 +136,9 @@ function readErrorMessage(e: unknown, fallback = "Error"): string {
 function emptyConfig(): AdConfig {
   return {
     threshold: 0.5,
+    baseWidth: 0,
+    baseHeight: 0,
+    fps: 0,
     logoAppearance: { enabled: false, instances: [] },
     logoDisappearance: { enabled: false, instances: [] },
     ocrRules: { enabled: false, groups: [] },
@@ -123,7 +148,8 @@ function emptyConfig(): AdConfig {
 function newLogoInstance(): LogoInstance {
   return {
     id: genId(),
-    roi: { x: 0, y: 0, w: 1, h: 1 },
+    // 0/0 size = whole frame until the operator sets a pixel ROI (or picks one in the Player tab).
+    roi: { x: 0, y: 0, w: 0, h: 0 },
     hashSensitivity: 85,
     samples: [],
     ocr: { enabled: false, matchText: "", textSource: "original", similarity: 80 },
@@ -138,22 +164,59 @@ function newGroup(): OcrGroup {
   return { id: genId(), conditions: [newCondition()] };
 }
 
-/** Normalize whatever the API returns into a fully-populated config (defaults for missing bits). */
-function hydrate(raw: unknown): AdConfig {
-  const base = emptyConfig();
-  if (!raw || typeof raw !== "object") return base;
-  const src = raw as Partial<AdConfig>;
+/**
+ * Normalize whatever the API returns into a fully-populated config (defaults for missing bits).
+ * ROIs are kept in PIXELS. Legacy configs stored fractions (0..1) with no baseWidth — those are
+ * converted to pixels using the current stream resolution so the UI can show real pixel values.
+ */
+function hydrate(raw: unknown, streamInfo?: StreamInfo | null): AdConfig {
+  const src = raw && typeof raw === "object" ? (raw as Partial<AdConfig>) : {};
+
+  const storedW = typeof src.baseWidth === "number" ? src.baseWidth : 0;
+  const storedH = typeof src.baseHeight === "number" ? src.baseHeight : 0;
+  const baseWidth = storedW > 0 ? storedW : streamInfo?.width || 0;
+  const baseHeight = storedH > 0 ? storedH : streamInfo?.height || 0;
+  const fps = typeof src.fps === "number" && src.fps > 0 ? src.fps : streamInfo?.fps || 0;
+
+  // A ROI is "legacy fractions" when the config had no baseWidth and every value is <= 1.
+  const legacyFractions = !(storedW > 0);
+  const toPx = (roi: Partial<Roi> | undefined): Roi => {
+    const r = roi || {};
+    let x = Number(r.x) || 0;
+    let y = Number(r.y) || 0;
+    let w = Number(r.w) || 0;
+    let h = Number(r.h) || 0;
+    const looksFraction = x <= 1 && y <= 1 && w <= 1 && h <= 1;
+    if (legacyFractions && looksFraction && baseWidth > 0 && baseHeight > 0) {
+      x = Math.round(x * baseWidth);
+      y = Math.round(y * baseHeight);
+      w = Math.round(w * baseWidth);
+      h = Math.round(h * baseHeight);
+    }
+    return { x, y, w, h };
+  };
+
   const hydrateLogo = (s: unknown): LogoStrategy => {
     const ls = (s as LogoStrategy) || {};
     return {
       enabled: Boolean(ls.enabled),
       instances: Array.isArray(ls.instances)
-        ? ls.instances.map((i) => ({ ...newLogoInstance(), ...i, roi: { ...newLogoInstance().roi, ...i?.roi }, ocr: { ...newLogoInstance().ocr, ...i?.ocr }, samples: Array.isArray(i?.samples) ? i.samples : [] }))
+        ? ls.instances.map((i) => ({
+            ...newLogoInstance(),
+            ...i,
+            roi: toPx(i?.roi),
+            ocr: { ...newLogoInstance().ocr, ...i?.ocr },
+            samples: Array.isArray(i?.samples) ? i.samples : [],
+          }))
         : [],
     };
   };
+
   return {
     threshold: typeof src.threshold === "number" ? src.threshold : 0.5,
+    baseWidth,
+    baseHeight,
+    fps,
     logoAppearance: hydrateLogo(src.logoAppearance),
     logoDisappearance: hydrateLogo(src.logoDisappearance),
     ocrRules: {
@@ -179,29 +242,34 @@ function fileToDataUrl(file: File): Promise<string> {
   });
 }
 
-export function AdRecognitionSetupTab({ tenantId, channelId }: Props) {
+export function AdRecognitionSetupTab({ tenantId, channelId, streamInfo, onMarkersPurged }: Props) {
   const { t } = useTranslation("admin");
   const { message } = App.useApp();
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [recalculating, setRecalculating] = useState(false);
+  const [purging, setPurging] = useState(false);
   const [cfg, setCfg] = useState<AdConfig>(emptyConfig());
 
   const base = `/tenants/${encodeURIComponent(tenantId)}/streams/${encodeURIComponent(channelId)}`;
+
+  // Base resolution for the pixel ROI inputs: live stream probe wins, else whatever was saved.
+  const baseW = streamInfo?.width || cfg.baseWidth || 0;
+  const baseH = streamInfo?.height || cfg.baseHeight || 0;
 
   const load = useCallback(async () => {
     if (!tenantId || !channelId) return;
     setLoading(true);
     try {
       const { data } = await getAdminClient().get<{ config: AdConfig }>(`${base}/ad-config`);
-      setCfg(hydrate(data?.config));
+      setCfg(hydrate(data?.config, streamInfo));
     } catch (e: unknown) {
       message.error(readErrorMessage(e));
-      setCfg(emptyConfig());
+      setCfg(hydrate(null, streamInfo));
     } finally {
       setLoading(false);
     }
-  }, [base, channelId, message, tenantId]);
+  }, [base, channelId, message, tenantId, streamInfo]);
 
   useEffect(() => {
     void load();
@@ -210,12 +278,37 @@ export function AdRecognitionSetupTab({ tenantId, channelId }: Props) {
   const save = async () => {
     setSaving(true);
     try {
-      await getAdminClient().put(`${base}/ad-config`, { config: cfg });
+      // Persist the resolution the pixel ROIs are relative to (so the engine can convert to
+      // fractions), preferring the freshly probed stream resolution.
+      const toSave: AdConfig = {
+        ...cfg,
+        baseWidth: baseW || cfg.baseWidth,
+        baseHeight: baseH || cfg.baseHeight,
+        fps: streamInfo?.fps || cfg.fps,
+      };
+      await getAdminClient().put(`${base}/ad-config`, { config: toSave });
+      setCfg(toSave);
       message.success(t("adSetup.saved"));
     } catch (e: unknown) {
       message.error(readErrorMessage(e));
     } finally {
       setSaving(false);
+    }
+  };
+
+  // Purge ALL ad markers of this channel (scan rows in the DB + the live ad timeline).
+  const purgeMarkers = async () => {
+    setPurging(true);
+    try {
+      const { data } = await getAdminClient().delete<{ ok: boolean; deleted: number }>(
+        `${base}/scans`,
+      );
+      message.success(t("adSetup.markersPurged", { count: data?.deleted ?? 0 }));
+      onMarkersPurged?.();
+    } catch (e: unknown) {
+      message.error(readErrorMessage(e));
+    } finally {
+      setPurging(false);
     }
   };
 
@@ -228,7 +321,7 @@ export function AdRecognitionSetupTab({ tenantId, channelId }: Props) {
         config: AdConfig;
         stats?: { total: number; ok: number; failed: number };
       }>(`${base}/ad-config/recalc`, { config: cfg });
-      setCfg(hydrate(data?.config));
+      setCfg(hydrate(data?.config, streamInfo));
       const s = data?.stats;
       message.success(
         s ? t("adSetup.recalcDone", { ok: s.ok, total: s.total }) : t("adSetup.saved"),
@@ -373,24 +466,27 @@ export function AdRecognitionSetupTab({ tenantId, channelId }: Props) {
       },
     };
 
-    const roiField = (label: string, field: keyof Roi) => (
-      <Col xs={12} sm={6}>
-        <Typography.Text style={{ fontSize: 12 }}>{label}</Typography.Text>
-        <InputNumber
-          min={0}
-          max={100}
-          value={Math.round(inst.roi[field] * 100)}
-          onChange={(v) =>
-            patchInstance(key, inst.id, (i) => ({
-              ...i,
-              roi: { ...i.roi, [field]: Math.min(1, Math.max(0, (Number(v) || 0) / 100)) },
-            }))
-          }
-          addonAfter="%"
-          style={{ width: "100%" }}
-        />
-      </Col>
-    );
+    const roiField = (label: string, field: keyof Roi) => {
+      const axisMax = field === "x" || field === "w" ? baseW : baseH;
+      return (
+        <Col xs={12} sm={6}>
+          <Typography.Text style={{ fontSize: 12 }}>{label}</Typography.Text>
+          <InputNumber
+            min={0}
+            max={axisMax > 0 ? axisMax : undefined}
+            value={Math.round(inst.roi[field] || 0)}
+            onChange={(v) =>
+              patchInstance(key, inst.id, (i) => ({
+                ...i,
+                roi: { ...i.roi, [field]: Math.max(0, Math.round(Number(v) || 0)) },
+              }))
+            }
+            addonAfter="px"
+            style={{ width: "100%" }}
+          />
+        </Col>
+      );
+    };
 
     return (
       <Card size="small" type="inner" title={`#${idx + 1}`} extra={
@@ -673,6 +769,16 @@ export function AdRecognitionSetupTab({ tenantId, channelId }: Props) {
 
   return (
     <div>
+      <div style={{ marginBottom: 12 }}>
+        {baseW > 0 && baseH > 0 ? (
+          <Tag color="geekblue" style={{ fontSize: 13, padding: "2px 10px" }}>
+            {baseW}×{baseH}
+            {streamInfo?.fps || cfg.fps ? ` @ ${streamInfo?.fps || cfg.fps} fps` : ""}
+          </Tag>
+        ) : (
+          <Tag color="warning">{t("adSetup.resolutionUnknown")}</Tag>
+        )}
+      </div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
         <Space>
           <Typography.Text strong>{t("adSetup.threshold")}: {cfg.threshold.toFixed(2)}</Typography.Text>
@@ -698,6 +804,20 @@ export function AdRecognitionSetupTab({ tenantId, channelId }: Props) {
       <Typography.Paragraph type="secondary" style={{ fontSize: 12 }}>
         {t("adSetup.thresholdHint")}
       </Typography.Paragraph>
+
+      <div style={{ marginBottom: 16 }}>
+        <Popconfirm
+          title={t("adSetup.clearMarkersConfirm")}
+          okText={t("common.delete")}
+          okButtonProps={{ danger: true }}
+          cancelText={t("common.cancel")}
+          onConfirm={() => void purgeMarkers()}
+        >
+          <Button danger loading={purging}>
+            {t("adSetup.clearMarkers")}
+          </Button>
+        </Popconfirm>
+      </div>
 
       {(sampleIssues.missingPhash > 0 || sampleIssues.dead > 0) && (
         <Alert

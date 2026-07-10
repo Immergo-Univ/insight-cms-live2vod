@@ -43,6 +43,13 @@ export const AD_CONFIRM_SAMPLES = 3;
 export const PROGRAM_CONFIRM_SAMPLES = 3;
 
 /**
+ * Minimum ad-window duration (seconds) to be recorded as a segment. Windows shorter than this are
+ * discarded on close: even if AD_CONFIRM_SAMPLES "ad" probes opened a window, if "program" resumes
+ * before this many seconds elapse, it does NOT form an ad slot. Configurable via env.
+ */
+export const MIN_AD_SEGMENT_SECONDS = Math.max(0, config.adRecognition.minAdSegmentSec);
+
+/**
  * Some channel HLS URLs are DVR/archive playlists (e.g. `streamPlaylist-archive.m3u8` or the
  * `fillgaps` proxy) that only serve content when given a bounded window via startTime/endTime.
  * For those we request the last N seconds on every probe so the origin returns a small playlist
@@ -145,6 +152,47 @@ function channelHlsUrl(row) {
 }
 
 /**
+ * Purge ALL ad markers of a channel: delete every `ad_recognition_scans` row from the DB and reset
+ * the live ad segments + hysteresis (in-memory state + persisted snapshot) so the ad timeline is
+ * cleared too. Used by the admin "Clear all AD markers" button.
+ * @param {string} channelId
+ * @returns {Promise<{ deleted: number }>}
+ */
+export async function purgeChannelAdMarkers(channelId) {
+  const cid = String(channelId || "").trim();
+  if (!cid) return { deleted: 0 };
+
+  let deleted = 0;
+  const sequelize = getSequelize();
+  const Model = sequelize?.models?.AdRecognitionScan;
+  if (Model) {
+    try {
+      deleted = await Model.destroy({ where: { channelId: cid } });
+    } catch (e) {
+      console.warn("[ad-recognition] purge scans failed:", e && e.message ? e.message : e);
+    }
+  }
+
+  // Reset in-memory hysteresis so a new probe starts from a clean slate.
+  channelStates.delete(cid);
+
+  // Clear the persisted ad segments / open-ad state in the channel snapshot (the ad timeline).
+  try {
+    await mergeChannelSnapshotFields(cid, {
+      liveStreamAdSegments: [],
+      liveStreamInAd: false,
+      liveStreamAdStartEpoch: null,
+      liveStreamLastDetection: null,
+      liveStreamLastScore: null,
+    });
+  } catch (e) {
+    console.warn("[ad-recognition] purge snapshot failed:", e && e.message ? e.message : e);
+  }
+
+  return { deleted };
+}
+
+/**
  * Drop in-memory hysteresis state for all channels of a tenant (used when a tenant is deleted).
  * @param {string} tenantId
  */
@@ -224,7 +272,12 @@ export function applyDetection(st, detection, epoch) {
     st.adStreak = 0;
     if (st.inAd && st.programStreak >= PROGRAM_CONFIRM_SAMPLES) {
       const endEpoch = st.pendingProgramEpoch ?? epoch;
-      if (st.adStartEpoch != null && endEpoch > st.adStartEpoch) {
+      // Only record the ad slot if it met the minimum duration; otherwise discard the short burst.
+      if (
+        st.adStartEpoch != null &&
+        endEpoch > st.adStartEpoch &&
+        endEpoch - st.adStartEpoch >= MIN_AD_SEGMENT_SECONDS
+      ) {
         st.segments.push({ startEpoch: st.adStartEpoch, endEpoch });
       }
       st.inAd = false;

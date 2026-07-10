@@ -11,6 +11,7 @@ import * as adminTenants from "../services/admin-tenant.service.js";
 import * as adminStreams from "../services/admin-stream.service.js";
 import * as appSettings from "../services/admin-settings.service.js";
 import * as adRecognitionConfig from "../services/ad-recognition-config.service.js";
+import { purgeChannelAdMarkers } from "../services/ad-recognition.service.js";
 import { isSequelizeReady } from "../db/sequelize.js";
 
 export const adminRouter = Router();
@@ -338,6 +339,19 @@ adminSecured.get(
 );
 
 adminSecured.get(
+  "/tenants/:tenantId/streams/:channelId/stream-info",
+  requireAdminPermission("tenants", "view"),
+  async (req, res) => {
+    try {
+      const info = await adminStreams.adminGetStreamInfo(req.params.tenantId, req.params.channelId);
+      res.json(info);
+    } catch (e) {
+      res.status(500).json({ error: e instanceof Error ? e.message : String(e) });
+    }
+  },
+);
+
+adminSecured.get(
   "/tenants/:tenantId/streams/:channelId/scans",
   requireAdminPermission("tenants", "view"),
   async (req, res) => {
@@ -349,6 +363,20 @@ adminSecured.get(
         { limit },
       );
       res.json({ scans });
+    } catch (e) {
+      res.status(500).json({ error: e instanceof Error ? e.message : String(e) });
+    }
+  },
+);
+
+// Purge ALL ad markers of a channel: scan rows (DB) + live ad segments/state (timeline).
+adminSecured.delete(
+  "/tenants/:tenantId/streams/:channelId/scans",
+  requireAdminPermission("tenants", "edit"),
+  async (req, res) => {
+    try {
+      const out = await purgeChannelAdMarkers(req.params.channelId);
+      res.json({ ok: true, deleted: out.deleted });
     } catch (e) {
       res.status(500).json({ error: e instanceof Error ? e.message : String(e) });
     }

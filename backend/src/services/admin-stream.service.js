@@ -3,13 +3,73 @@
  * AD-recognition scan history for a channel (from the ad_recognition_scans table).
  */
 
+import { config } from "../config.js";
 import { getSequelize } from "../db/sequelize.js";
 import { resolveTenant } from "./auth.service.js";
 import { fetchChannelsWithArchive, mapChannelData } from "./channels.service.js";
+import { buildProbeUrl } from "./ad-recognition.service.js";
 
 /** Effective probe URL preference — must match the scheduler's channelHlsUrl(). */
 function effectiveHlsUrl(channel) {
   return channel.hlsStream || channel.hlsMaster || "";
+}
+
+/** Build a longer archive window (for the Player tab so the operator can scrub) — ~5 min back. */
+function buildPlayerUrl(hls) {
+  try {
+    const u = new URL(hls);
+    if (u.searchParams.has("startTime") || u.searchParams.has("endTime")) return u.toString();
+    if (/archive|fillgaps|encoders\.immergo\.tv/i.test(hls)) {
+      const now = Math.floor(Date.now() / 1000);
+      const end = now - config.adRecognition.archiveMarginSec;
+      const start = end - 300;
+      u.searchParams.set("startTime", String(start));
+      u.searchParams.set("endTime", String(end));
+    }
+    return u.toString();
+  } catch {
+    return hls;
+  }
+}
+
+/**
+ * Resolve a channel's base video resolution + fps (via the microservice /probe) plus a playable
+ * archive URL for the admin Player tab. Best-effort: returns nulls if probing fails.
+ * @param {string} tenantId
+ * @param {string} channelId
+ */
+export async function adminGetStreamInfo(tenantId, channelId) {
+  const empty = { width: null, height: null, fps: null, duration: null, hls: null, playerUrl: null };
+  const cid = String(channelId || "").trim();
+  if (!cid) return empty;
+
+  const t = await resolveTenant(tenantId);
+  const rows = await fetchChannelsWithArchive({ accountId: t.accountId, tenantId });
+  const channels = rows.map(mapChannelData);
+  const ch = channels.find((c) => String(c.id) === cid);
+  if (!ch) return empty;
+
+  const hls = effectiveHlsUrl(ch);
+  const playerUrl = buildPlayerUrl(hls);
+  const probeUrl = buildProbeUrl(hls);
+
+  let info = { width: null, height: null, fps: null, duration: null };
+  try {
+    const ctrl = new AbortController();
+    const to = setTimeout(() => ctrl.abort(), config.adRecognition.requestTimeoutMs);
+    const res = await fetch(`${config.adRecognition.baseUrl}/probe`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-api-secret": config.adRecognition.secret },
+      body: JSON.stringify({ video: probeUrl }),
+      signal: ctrl.signal,
+    });
+    clearTimeout(to);
+    if (res.ok) info = await res.json();
+  } catch (e) {
+    console.warn("[admin-stream] stream-info probe failed:", e && e.message ? e.message : e);
+  }
+
+  return { ...info, hls, playerUrl };
 }
 
 /**

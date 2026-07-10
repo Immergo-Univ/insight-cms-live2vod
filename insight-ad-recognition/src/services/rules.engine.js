@@ -29,13 +29,42 @@ function pct(x, def) {
   return Math.min(100, Math.max(1, n));
 }
 
-function normRoi(roi) {
+/**
+ * Normalize a ROI to fractions (0..1). The admin UI stores ROIs in PIXELS relative to the channel
+ * base resolution (baseW x baseH); we convert to fractions here so the sidecar crop is
+ * resolution-independent. Legacy configs stored fractions directly (all values <= 1) — those are
+ * detected and used as-is.
+ */
+function normRoi(roi, baseW, baseH) {
   const r = roi && typeof roi === "object" ? roi : {};
-  const x = clamp01(r.x);
-  const y = clamp01(r.y);
-  // Width/height default to the full frame so a missing ROI still produces a usable crop.
-  let w = Number.isFinite(Number(r.w)) ? clamp01(r.w) : 1;
-  let h = Number.isFinite(Number(r.h)) ? clamp01(r.h) : 1;
+  let x = Number(r.x);
+  let y = Number(r.y);
+  let w = Number(r.w);
+  let h = Number(r.h);
+  if (!Number.isFinite(x)) x = 0;
+  if (!Number.isFinite(y)) y = 0;
+
+  const looksNormalized =
+    x <= 1 &&
+    y <= 1 &&
+    (!Number.isFinite(w) || w <= 1) &&
+    (!Number.isFinite(h) || h <= 1);
+
+  if (!looksNormalized && baseW > 0 && baseH > 0) {
+    // Pixels relative to the base resolution -> fractions.
+    x /= baseW;
+    y /= baseH;
+    w = Number.isFinite(w) ? w / baseW : 1;
+    h = Number.isFinite(h) ? h / baseH : 1;
+  } else if (!Number.isFinite(w) || w <= 0) {
+    w = 1;
+  }
+  if (!Number.isFinite(h) || h <= 0) h = 1;
+
+  x = clamp01(x);
+  y = clamp01(y);
+  w = clamp01(w);
+  h = clamp01(h);
   if (w <= 0) w = 1;
   if (h <= 0) h = 1;
   if (x + w > 1) w = 1 - x;
@@ -64,22 +93,22 @@ function normOcrOpt(o) {
   };
 }
 
-function normInstance(inst, idx, prefix) {
+function normInstance(inst, idx, prefix, baseW, baseH) {
   const src = inst && typeof inst === "object" ? inst : {};
   const id = src.id != null ? String(src.id) : `${prefix}-${idx}`;
   return {
     id,
-    roi: normRoi(src.roi),
+    roi: normRoi(src.roi, baseW, baseH),
     hashSensitivity: pct(src.hashSensitivity, 85),
     samples: Array.isArray(src.samples) ? src.samples.map(normSample).filter(Boolean) : [],
     ocr: normOcrOpt(src.ocr),
   };
 }
 
-function normLogoStrategy(strat, prefix) {
+function normLogoStrategy(strat, prefix, baseW, baseH) {
   const src = strat && typeof strat === "object" ? strat : {};
   const instances = Array.isArray(src.instances)
-    ? src.instances.map((inst, i) => normInstance(inst, i, prefix))
+    ? src.instances.map((inst, i) => normInstance(inst, i, prefix, baseW, baseH))
     : [];
   return { enabled: Boolean(src.enabled) && instances.length > 0, instances };
 }
@@ -131,10 +160,19 @@ export function normalizeConfig(raw, defaultThreshold) {
   let threshold = Number(src.threshold);
   if (!Number.isFinite(threshold)) threshold = defaultThreshold;
   threshold = Math.min(1, Math.max(0, threshold));
+
+  // Base resolution the pixel ROIs were defined against (from the admin "Ad Recognition Setup").
+  const baseWidth = Number.isFinite(Number(src.baseWidth)) ? Number(src.baseWidth) : 0;
+  const baseHeight = Number.isFinite(Number(src.baseHeight)) ? Number(src.baseHeight) : 0;
+  const fps = Number.isFinite(Number(src.fps)) ? Number(src.fps) : 0;
+
   return {
     threshold,
-    logoAppearance: normLogoStrategy(src.logoAppearance, "app"),
-    logoDisappearance: normLogoStrategy(src.logoDisappearance, "dis"),
+    baseWidth,
+    baseHeight,
+    fps,
+    logoAppearance: normLogoStrategy(src.logoAppearance, "app", baseWidth, baseHeight),
+    logoDisappearance: normLogoStrategy(src.logoDisappearance, "dis", baseWidth, baseHeight),
     ocrRules: normOcrRules(src.ocrRules),
   };
 }

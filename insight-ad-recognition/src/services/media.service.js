@@ -106,4 +106,58 @@ async function fileNonEmpty(p) {
   }
 }
 
-export default { extractLastFrame };
+function parseFps(v) {
+  if (!v || typeof v !== "string") return null;
+  const [a, b] = v.split("/").map(Number);
+  if (!Number.isFinite(a) || a === 0) return null;
+  const f = b ? a / b : a;
+  return Number.isFinite(f) ? Math.round(f * 100) / 100 : null;
+}
+
+/**
+ * Probe the stream's base video resolution + frame rate with ffprobe (no frame extraction).
+ * @param {string} videoUrl
+ * @returns {Promise<{ width: number|null, height: number|null, fps: number|null, duration: number|null }>}
+ */
+export async function probeStream(videoUrl) {
+  const { ffmpegInput, kind } = await resolveInput(videoUrl, null);
+  const isHls = kind === "hls";
+  const isHttp = /^https?:\/\//i.test(ffmpegInput);
+
+  const args = [
+    "-v",
+    "error",
+    ...(isHttp ? HTTP_ARGS : []),
+    ...(isHls ? HLS_PROTOCOL_ARGS : []),
+    "-select_streams",
+    "v:0",
+    "-show_entries",
+    "stream=width,height,r_frame_rate,avg_frame_rate",
+    "-show_entries",
+    "format=duration",
+    "-of",
+    "json",
+    ffmpegInput,
+  ];
+
+  const res = await run(config.tools.ffprobe, args, { timeoutMs: config.limits.requestTimeoutMs });
+  let parsed = {};
+  try {
+    parsed = JSON.parse(res.stdout || "{}");
+  } catch {
+    parsed = {};
+  }
+  const st = (Array.isArray(parsed.streams) && parsed.streams[0]) || {};
+  const duration =
+    parsed.format && Number.isFinite(Number(parsed.format.duration))
+      ? Math.round(Number(parsed.format.duration) * 100) / 100
+      : null;
+  return {
+    width: Number.isFinite(Number(st.width)) ? Number(st.width) : null,
+    height: Number.isFinite(Number(st.height)) ? Number(st.height) : null,
+    fps: parseFps(st.r_frame_rate) || parseFps(st.avg_frame_rate) || null,
+    duration,
+  };
+}
+
+export default { extractLastFrame, probeStream };

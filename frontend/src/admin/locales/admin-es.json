@@ -166,6 +166,7 @@
     "viewScans": "Ver escaneos",
     "channelModalTitle": "Canal — {{title}}",
     "tabAdSetup": "Ad Recognition Setup",
+    "tabPlayer": "Player",
     "tabMarkers": "Escaneos",
     "scansCount": "{{count}} escaneo(s)",
     "scansEmpty": "Todavía no hay escaneos registrados para este stream.",
@@ -182,6 +183,10 @@
   },
   "adSetup": {
     "saved": "Configuración de detección guardada",
+    "resolutionUnknown": "Resolución del stream desconocida",
+    "clearMarkers": "Limpiar todos los AD markers",
+    "clearMarkersConfirm": "¿Borrar TODOS los escaneos y segmentos de ad de este canal? Esta acción no se puede deshacer.",
+    "markersPurged": "{{count}} AD marker(s) eliminados",
     "recalcPhash": "Recalcular pHash",
     "recalcDone": "pHash recalculado ({{ok}}/{{total}})",
     "warnTitle": "Algunas imágenes de muestra todavía no van a funcionar",
@@ -230,6 +235,18 @@
       "majorTo": "Mayor a",
       "minorTo": "Menor a"
     }
+  },
+  "player": {
+    "noStream": "No hay URL de stream reproducible para este canal.",
+    "hint": "Pausá en un frame, arrastrá para seleccionar una región y descargá el recorte (1:1 con la resolución base) para subirlo como template.",
+    "capture": "Capturar frame",
+    "download": "Descargar recorte",
+    "livePlayer": "Stream",
+    "capturedFrame": "Frame capturado",
+    "capturePrompt": "Capturá un frame para seleccionar y recortar una región.",
+    "captureNoFrame": "Todavía no hay frame — iniciá la reproducción primero.",
+    "captureFailed": "No se pudo capturar el frame.",
+    "captureCors": "No se pueden leer los píxeles del video (el origen del stream no permite lecturas cross-origin)."
   },
   "clips": {
     "title": "Clips generados",
