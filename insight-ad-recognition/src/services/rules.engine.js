@@ -112,7 +112,9 @@ function normLogoStrategy(strat, prefix, baseW, baseH) {
   const instances = Array.isArray(src.instances)
     ? src.instances.map((inst, i) => normInstance(inst, i, prefix, baseW, baseH))
     : [];
-  return { enabled: Boolean(src.enabled) && instances.length > 0, instances };
+  // How the multiple instances are combined: OR (any) or AND (all). Default OR.
+  const combine = src.combine === "and" ? "and" : "or";
+  return { enabled: Boolean(src.enabled) && instances.length > 0, combine, instances };
 }
 
 const OPERATORS = new Set([
@@ -372,10 +374,21 @@ function instancePresence(inst, roiResult) {
 
 function scoreAppearance(strat, roiResults) {
   const instances = strat.instances.map((inst) => instancePresence(inst, roiResults.get(inst.id)));
-  const matched = instances.some((i) => i.matched);
-  const bestSignal = instances.reduce((m, i) => Math.max(m, i.signal), 0);
-  const score = matched ? 1 : round3(bestSignal);
-  return { score, matched, instances };
+  const and = strat.combine === "and";
+  let matched;
+  let score;
+  if (and) {
+    // AND: every configured logo must APPEAR. Score is bounded by the weakest (min) signal.
+    matched = instances.length > 0 && instances.every((i) => i.matched);
+    const minSignal = instances.reduce((m, i) => Math.min(m, i.signal), 1);
+    score = matched ? 1 : round3(minSignal);
+  } else {
+    // OR: any configured logo appearing is enough. Score = strongest (max) signal.
+    matched = instances.some((i) => i.matched);
+    const bestSignal = instances.reduce((m, i) => Math.max(m, i.signal), 0);
+    score = matched ? 1 : round3(bestSignal);
+  }
+  return { score, matched, combine: strat.combine, instances };
 }
 
 function scoreDisappearance(strat, roiResults) {
@@ -383,12 +396,23 @@ function scoreDisappearance(strat, roiResults) {
     const p = instancePresence(inst, roiResults.get(inst.id));
     return { ...p, present: p.matched, disappeared: !p.matched };
   });
-  // OR semantics: if any configured target is gone, the strategy matches.
-  const matched = instances.some((i) => i.disappeared);
-  // When not matched (everything still present) the score reflects how close we are to absence.
-  const maxPresence = instances.reduce((m, i) => Math.max(m, i.signal), 0);
-  const score = matched ? 1 : round3(1 - maxPresence);
-  return { score, matched, instances };
+  const and = strat.combine === "and";
+  let matched;
+  let score;
+  if (and) {
+    // AND: EVERY configured logo must be ABSENT. If any variant is clearly present (e.g. an animated
+    // logo that just changed color) the strategy does NOT match — avoids false ad on color changes.
+    matched = instances.length > 0 && instances.every((i) => i.disappeared);
+    // Absence score bounded by the most-present instance: min(1 - presence) = 1 - max(presence).
+    const maxPresence = instances.reduce((m, i) => Math.max(m, i.signal), 0);
+    score = matched ? 1 : round3(1 - maxPresence);
+  } else {
+    // OR: any configured target gone is enough.
+    matched = instances.some((i) => i.disappeared);
+    const maxPresence = instances.reduce((m, i) => Math.max(m, i.signal), 0);
+    score = matched ? 1 : round3(1 - maxPresence);
+  }
+  return { score, matched, combine: strat.combine, instances };
 }
 
 function scoreOcrRules(strat, fullText, fullTextEn) {

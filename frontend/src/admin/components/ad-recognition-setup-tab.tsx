@@ -70,7 +70,9 @@ type LogoInstance = {
   ocr: OcrOpt;
 };
 
-type LogoStrategy = { enabled: boolean; instances: LogoInstance[] };
+type CombineOp = "or" | "and";
+
+type LogoStrategy = { enabled: boolean; combine: CombineOp; instances: LogoInstance[] };
 
 type OcrOp =
   | "includes"
@@ -147,8 +149,8 @@ function emptyConfig(): AdConfig {
     baseWidth: 0,
     baseHeight: 0,
     fps: 0,
-    logoAppearance: { enabled: false, instances: [] },
-    logoDisappearance: { enabled: false, instances: [] },
+    logoAppearance: { enabled: false, combine: "or", instances: [] },
+    logoDisappearance: { enabled: false, combine: "or", instances: [] },
     ocrRules: { enabled: false, groups: [] },
   };
 }
@@ -221,6 +223,7 @@ export function hydrate(raw: unknown, streamInfo?: StreamInfo | null): AdConfig 
     const ls = (s as LogoStrategy) || {};
     return {
       enabled: Boolean(ls.enabled),
+      combine: ls.combine === "and" ? "and" : "or",
       instances: Array.isArray(ls.instances)
         ? ls.instances.map((i) => ({
             ...newLogoInstance(),
@@ -447,12 +450,29 @@ export function AdRecognitionSetupTab({ tenantId, channelId, streamInfo, onMarke
           </Space>
         }
         extra={
-          <Button
-            size="small"
-            onClick={() => patchLogo(key, (s) => ({ ...s, instances: [...s.instances, newLogoInstance()] }))}
-          >
-            {t("adSetup.addInstance")}
-          </Button>
+          <Space>
+            {strat.instances.length > 1 && (
+              <>
+                <Typography.Text style={{ fontSize: 12 }}>{t("adSetup.combine")}:</Typography.Text>
+                <Select
+                  size="small"
+                  value={strat.combine}
+                  style={{ width: 90 }}
+                  options={[
+                    { value: "or", label: t("adSetup.or") },
+                    { value: "and", label: t("adSetup.and") },
+                  ]}
+                  onChange={(v: CombineOp) => patchLogo(key, (s) => ({ ...s, combine: v }))}
+                />
+              </>
+            )}
+            <Button
+              size="small"
+              onClick={() => patchLogo(key, (s) => ({ ...s, instances: [...s.instances, newLogoInstance()] }))}
+            >
+              {t("adSetup.addInstance")}
+            </Button>
+          </Space>
         }
         style={{ marginBottom: 16, opacity: strat.enabled ? 1 : 0.6 }}
       >
@@ -464,7 +484,9 @@ export function AdRecognitionSetupTab({ tenantId, channelId, streamInfo, onMarke
         ) : (
           strat.instances.map((inst, idx) => (
             <div key={inst.id}>
-              {idx > 0 && <Divider plain>{t("adSetup.or")}</Divider>}
+              {idx > 0 && (
+                <Divider plain>{strat.combine === "and" ? t("adSetup.and") : t("adSetup.or")}</Divider>
+              )}
               {renderLogoInstance(key, inst, idx)}
             </div>
           ))
