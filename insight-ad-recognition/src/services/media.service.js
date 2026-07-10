@@ -58,6 +58,11 @@ export async function extractLastFrame(videoUrl, workDir) {
     "-hide_banner",
     "-loglevel",
     "error",
+    // Bound the initial stream probing so ffmpeg doesn't read/parse more of the .ts than needed.
+    "-analyzeduration",
+    "2000000",
+    "-probesize",
+    "3000000",
     ...httpArgs,
     ...protocolArgs,
     ...seekArgs,
@@ -162,4 +167,71 @@ export async function probeStream(videoUrl) {
   };
 }
 
-export default { extractLastFrame, probeStream };
+/**
+ * Extract frames across the WHOLE window at `fps` (for the boundary-polish scan). Unlike
+ * extractLastFrame, this decodes the full range so intermediate (non-keyframe) moments are covered,
+ * giving sub-segment (frame-level) resolution. Returns the frame paths (chronological) + the media
+ * epoch of the first frame (from EXT-X-PROGRAM-DATE-TIME when available, else the URL's startTime).
+ *
+ * @param {string} videoUrl
+ * @param {string} workDir
+ * @param {{ fps?: number, maxFrames?: number }} [opts]
+ * @returns {Promise<{ framePaths: string[], anchorEpoch: number|null, fps: number }>}
+ */
+export async function extractFrames(videoUrl, workDir, opts = {}) {
+  const fps = Math.max(1, Number(opts.fps) || 4);
+  const maxFrames = Math.max(1, Number(opts.maxFrames) || 1200);
+
+  const { ffmpegInput, kind, meta } = await resolveInput(videoUrl, null, { allowDirectSegment: false });
+  const isHls = kind === "hls";
+  const isHttp = /^https?:\/\//i.test(ffmpegInput);
+  const protocolArgs = isHls ? HLS_PROTOCOL_ARGS : [];
+  const httpArgs = isHttp ? HTTP_ARGS : [];
+
+  const framesDir = path.join(workDir, "scan");
+  await fs.mkdir(framesDir, { recursive: true });
+  const pattern = path.join(framesDir, "f_%05d.jpg");
+
+  const args = [
+    "-nostdin",
+    "-hide_banner",
+    "-loglevel",
+    "error",
+    ...httpArgs,
+    ...protocolArgs,
+    "-i",
+    ffmpegInput,
+    "-an",
+    "-vf",
+    `fps=${fps}`,
+    "-frames:v",
+    String(maxFrames),
+    "-q:v",
+    "3",
+    "-y",
+    pattern,
+  ];
+
+  await run(config.tools.ffmpeg, args, { timeoutMs: config.limits.requestTimeoutMs }).catch(() => null);
+
+  const entries = await fs.readdir(framesDir).catch(() => []);
+  const framePaths = entries
+    .filter((f) => /^f_\d+\.jpg$/i.test(f))
+    .sort()
+    .map((f) => path.join(framesDir, f));
+
+  let anchorEpoch = Number.isFinite(meta?.firstProgramDateEpoch) ? meta.firstProgramDateEpoch : null;
+  if (anchorEpoch == null) {
+    try {
+      const v = new URL(videoUrl).searchParams.get("startTime");
+      const n = v != null ? parseInt(v, 10) : NaN;
+      if (Number.isFinite(n)) anchorEpoch = n;
+    } catch {
+      /* no anchor */
+    }
+  }
+
+  return { framePaths, anchorEpoch, fps };
+}
+
+export default { extractLastFrame, probeStream, extractFrames };

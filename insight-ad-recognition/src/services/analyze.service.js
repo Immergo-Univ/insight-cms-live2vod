@@ -3,14 +3,15 @@
  *   1. Extract the LAST frame of the trimmed VOD window                         [media.service]
  *   2. Crop/hash/OCR the configured ROIs + full-screen OCR (+ NLLB translation) [sidecar.client]
  *   3. Evaluate the per-channel strategies into a 0..1 score + verdict          [rules.engine]
- *   4. Build a preview of the analyzed frame.
+ *
+ * No per-probe preview is generated (it added sharp CPU on every probe without being needed for
+ * detection). The admin Player tab captures frames on demand instead.
  */
 
 import { config } from "../config.js";
 import { extractLastFrame } from "./media.service.js";
 import { analyzeFrame } from "./sidecar.client.js";
 import { normalizeConfig, collectRois, evaluate } from "./rules.engine.js";
-import { buildMosaic } from "./preview.service.js";
 
 /**
  * @param {string} videoUrl
@@ -24,9 +25,6 @@ export async function analyzeVideo(videoUrl, workDir, rawConfig) {
   const tFrame = Date.now();
   const { framePath, isLive, inputMeta } = await extractLastFrame(videoUrl, workDir);
   const ffmpegMs = Date.now() - tFrame;
-
-  // Preview of the analyzed frame (before the workDir is cleaned up).
-  const previewFile = await buildMosaic([framePath], videoUrl).catch(() => null);
 
   const rois = collectRois(cfg);
 
@@ -56,7 +54,7 @@ export async function analyzeVideo(videoUrl, workDir, rawConfig) {
     ocrTextEn: result.ocrTextEn,
     elapsedMs,
     timestamp: Math.floor(Date.now() / 1000),
-    previewFile,
+    previewFile: null,
     meta: {
       elapsedMs,
       ffmpegMs,

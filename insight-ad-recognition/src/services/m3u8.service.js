@@ -128,7 +128,8 @@ function parseMediaSegments(text, baseUrl) {
  * @param {string} _workDir kept for signature compatibility (no local files written anymore)
  * @returns {Promise<{ kind: "hls"|"file", ffmpegInput: string, isLive: boolean, meta: object }>}
  */
-export async function resolveInput(videoUrl, _workDir) {
+export async function resolveInput(videoUrl, _workDir, opts = {}) {
+  const allowDirectSegment = opts.allowDirectSegment !== false;
   const timeoutMs = Math.min(config.limits.requestTimeoutMs, 8000);
   const looksHls = /\.m3u8(\?|$)/i.test(videoUrl);
 
@@ -159,6 +160,28 @@ export async function resolveInput(videoUrl, _workDir) {
 
   meta.segmentCount = segments.length;
   meta.targetDuration = targetDuration;
+  // First segment media time (epoch, seconds) from EXT-X-PROGRAM-DATE-TIME, for frame->epoch anchoring.
+  const pdtMatch = text.match(/#EXT-X-PROGRAM-DATE-TIME:([^\s]+)/i);
+  if (pdtMatch) {
+    const ms = Date.parse(pdtMatch[1]);
+    if (Number.isFinite(ms)) meta.firstProgramDateEpoch = Math.floor(ms / 1000);
+  }
+
+  // Fast path for a VOD/archive window (ENDLIST): hand ffmpeg the LAST segment URL directly instead
+  // of the playlist. This skips ffmpeg's HLS demuxer re-fetching the playlist (one fewer network
+  // round-trip) and just downloads the single .ts. Skipped when segments are AES-encrypted
+  // (EXT-X-KEY), which needs the playlist's key context. Disabled when the caller needs the whole
+  // window (e.g. the boundary-polish scan across many segments).
+  const encrypted = /#EXT-X-KEY(?![^\n]*METHOD=NONE)/i.test(text);
+  if (allowDirectSegment && !isLive && !encrypted) {
+    const seg = segments[segments.length - 1];
+    return {
+      kind: "file",
+      ffmpegInput: seg.url,
+      isLive: false,
+      meta: { ...meta, directSegment: true },
+    };
+  }
 
   return { kind: "hls", ffmpegInput: mediaUrl, isLive, meta };
 }

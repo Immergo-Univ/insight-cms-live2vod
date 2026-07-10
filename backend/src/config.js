@@ -136,6 +136,16 @@ export const config = {
      */
     minAdSegmentSec: parseInt(process.env.AD_RECOGNITION_MIN_AD_SEGMENT_SEC || "60", 10),
     /**
+     * Boundary-polish job: once an ad window is confirmed and closed (>= minAdSegmentSec), a
+     * background job scans +/- `polishMarginSec` around each boundary at `polishFps` frames/sec to
+     * refine the ad start/end to frame accuracy, then updates the stored segment.
+     * Envs: AD_RECOGNITION_POLISH_ENABLED / _MARGIN_SEC / _FPS / _TIMEOUT_MS.
+     */
+    polishEnabled: process.env.AD_RECOGNITION_POLISH_ENABLED !== "false",
+    polishMarginSec: parseInt(process.env.AD_RECOGNITION_POLISH_MARGIN_SEC || "60", 10),
+    polishFps: parseInt(process.env.AD_RECOGNITION_POLISH_FPS || "4", 10),
+    polishTimeoutMs: parseInt(process.env.AD_RECOGNITION_POLISH_TIMEOUT_MS || "180000", 10),
+    /**
      * Optional restriction: when set, only these tenant IDs are probed (intersected with the tenants
      * that have `adRecognitionEnabled === true`). When empty, ALL enabled tenants are probed.
      */

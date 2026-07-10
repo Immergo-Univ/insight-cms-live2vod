@@ -260,6 +260,7 @@ async function getOrInitState(channelId, meta) {
  * @param {number} epoch unix seconds for this sample (from the detect response `timestamp`)
  */
 export function applyDetection(st, detection, epoch) {
+  let closedSegment = null;
   if (detection === "ad") {
     if (st.adStreak === 0) st.pendingAdStartEpoch = epoch; // first "ad" of a new streak
     st.adStreak += 1;
@@ -280,7 +281,9 @@ export function applyDetection(st, detection, epoch) {
         endEpoch > st.adStartEpoch &&
         endEpoch - st.adStartEpoch >= MIN_AD_SEGMENT_SECONDS
       ) {
-        st.segments.push({ startEpoch: st.adStartEpoch, endEpoch });
+        const seg = { startEpoch: st.adStartEpoch, endEpoch };
+        st.segments.push(seg);
+        closedSegment = seg; // reference kept in st.segments; the polish job refines it in place
       }
       st.inAd = false;
       st.adStartEpoch = null;
@@ -291,6 +294,9 @@ export function applyDetection(st, detection, epoch) {
     st.adStreak = 0;
     st.programStreak = 0;
   }
+  // The just-closed ad segment (a live reference into st.segments), or null. Callers use this to
+  // trigger the frame-accurate boundary polish once we have enough evidence it's a real ad.
+  return closedSegment;
 }
 
 /** Drop segments older than the ads retention window to bound memory / snapshot growth. */
@@ -444,7 +450,7 @@ async function probeChannel(channel) {
   st.lastDetection = detection;
   st.lastScore = score;
 
-  applyDetection(st, detection, epoch);
+  const closedSegment = applyDetection(st, detection, epoch);
   st.segments = trimOldSegments(st.segments);
 
   // Positive recognition log: full detect JSON alongside the requested m3u8 (channel title + probed URL).
@@ -454,6 +460,14 @@ async function probeChannel(channel) {
   );
 
   await persistChannel(channelId, st);
+
+  // A confirmed ad window just closed (>= min duration) — refine its boundaries to frame accuracy in
+  // the background. Fire-and-forget: never blocks the probe loop.
+  if (closedSegment && config.adRecognition.polishEnabled) {
+    void polishSegment({ channelId, hls }, closedSegment, cfg).catch((e) =>
+      console.warn("[ad-recognition] polish dispatch failed:", e && e.message ? e.message : e),
+    );
+  }
   await persistScanToDb({
     tenantId,
     channelId,
@@ -472,6 +486,122 @@ async function probeChannel(channel) {
     probeEpoch: epoch,
     scannedAt,
   });
+}
+
+/** Build a scan URL over an explicit [startEpoch, endEpoch] archive window. */
+function buildScanUrl(hls, startEpoch, endEpoch) {
+  try {
+    const u = new URL(hls);
+    u.searchParams.set("startTime", String(Math.floor(startEpoch)));
+    u.searchParams.set("endTime", String(Math.floor(endEpoch)));
+    return u.toString();
+  } catch {
+    return hls;
+  }
+}
+
+/** Call the microservice /scan for a window; returns { frames:[{epoch,detection,score}], ... } or null. */
+async function callScan(hls, startEpoch, endEpoch, channelConfig) {
+  const url = `${config.adRecognition.baseUrl}/scan`;
+  const video = buildScanUrl(hls, startEpoch, endEpoch);
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), config.adRecognition.polishTimeoutMs);
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-api-secret": config.adRecognition.secret },
+      body: JSON.stringify({ video, config: channelConfig || {}, fps: config.adRecognition.polishFps }),
+      signal: ctrl.signal,
+    });
+    if (!res.ok) throw new Error(`scan HTTP ${res.status}`);
+    return await res.json();
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+/** Minimum consecutive ad frames to treat a run as real (filters isolated noise in the scan). */
+function scanMinRun() {
+  return Math.max(1, Math.ceil(config.adRecognition.polishFps * 1.5));
+}
+
+/** First epoch where a sustained ad run begins (program -> ad), or null. */
+function findStartTransition(scan) {
+  const frames = (scan?.frames || []).filter((f) => f && typeof f.epoch === "number");
+  const minRun = scanMinRun();
+  for (let i = 0; i < frames.length; i++) {
+    if (frames[i].detection !== "ad") continue;
+    let run = 0;
+    for (let j = i; j < frames.length && frames[j].detection === "ad"; j++) run++;
+    if (run >= minRun) return frames[i].epoch;
+  }
+  return null;
+}
+
+/** First program epoch right after the LAST sustained ad run (ad -> program), or null. */
+function findEndTransition(scan) {
+  const frames = (scan?.frames || []).filter((f) => f && typeof f.epoch === "number");
+  const minRun = scanMinRun();
+  for (let i = frames.length - 1; i >= 0; i--) {
+    if (frames[i].detection !== "ad") continue;
+    let run = 0;
+    for (let j = i; j >= 0 && frames[j].detection === "ad"; j--) run++;
+    if (run >= minRun) {
+      const next = frames[i + 1];
+      return next ? next.epoch : frames[i].epoch;
+    }
+  }
+  return null;
+}
+
+/**
+ * Frame-accurate boundary polish: refine a confirmed ad segment's start/end by scanning +/- margin
+ * around each boundary. Mutates the segment (a live reference in st.segments) and re-persists.
+ * Best-effort background job; never throws to the caller.
+ * @param {{ channelId: string, hls: string }} channel
+ * @param {{ startEpoch: number, endEpoch: number, polished?: boolean }} seg
+ * @param {object} channelConfig
+ */
+export async function polishSegment(channel, seg, channelConfig) {
+  if (!config.adRecognition.polishEnabled) return;
+  if (!seg || seg.polished) return;
+  const { channelId, hls } = channel;
+  if (!needsArchiveWindow(hls)) return; // can only rescan an addressable archive window
+  const margin = Math.max(5, config.adRecognition.polishMarginSec);
+
+  try {
+    const origStart = seg.startEpoch;
+    const origEnd = seg.endEpoch;
+
+    const [startScan, endScan] = await Promise.all([
+      callScan(hls, origStart - margin, origStart + margin, channelConfig).catch(() => null),
+      callScan(hls, origEnd - margin, origEnd + margin, channelConfig).catch(() => null),
+    ]);
+
+    const refinedStart = startScan ? findStartTransition(startScan) : null;
+    const refinedEnd = endScan ? findEndTransition(endScan) : null;
+
+    // Keep refined values only when they are near the original boundary and stay a valid window.
+    const newStart =
+      refinedStart != null && Math.abs(refinedStart - origStart) <= margin ? refinedStart : origStart;
+    const newEnd =
+      refinedEnd != null && Math.abs(refinedEnd - origEnd) <= margin ? refinedEnd : origEnd;
+
+    if (newStart < newEnd && newEnd - newStart >= MIN_AD_SEGMENT_SECONDS) {
+      seg.startEpoch = newStart;
+      seg.endEpoch = newEnd;
+    }
+    seg.polished = true;
+
+    const st = channelStates.get(channelId);
+    if (st) await persistChannel(channelId, st);
+    console.log(
+      `[ad-recognition] polished segment channel=${channelId} ` +
+        `start ${origStart}->${seg.startEpoch} end ${origEnd}->${seg.endEpoch}`,
+    );
+  } catch (e) {
+    console.warn("[ad-recognition] polish failed:", e && e.message ? e.message : e);
+  }
 }
 
 async function persistChannel(channelId, st) {

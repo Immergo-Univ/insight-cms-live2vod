@@ -15,8 +15,9 @@ import path from "node:path";
 import { Router } from "express";
 import { config } from "../config.js";
 import { analyzeVideo } from "../services/analyze.service.js";
-import { probeStream } from "../services/media.service.js";
-import { analyzeSample } from "../services/sidecar.client.js";
+import { probeStream, extractFrames } from "../services/media.service.js";
+import { analyzeFrame, analyzeSample } from "../services/sidecar.client.js";
+import { normalizeConfig, collectRois, evaluate } from "../services/rules.engine.js";
 import { previewUrl } from "../services/preview.service.js";
 import { requireSecret } from "../middleware/auth.js";
 import { Semaphore } from "../utils/semaphore.js";
@@ -85,6 +86,59 @@ detectRouter.post("/detect", requireSecret, async (req, res) => {
     if (isUpstreamFetchError(msg)) logger.warn("detect failed (upstream)", meta);
     else logger.error("detect failed", meta);
     return res.status(502).json({ error: `Analysis failed: ${e?.message || String(e)}` });
+  } finally {
+    await removeWorkDir(workDir);
+  }
+});
+
+/**
+ * Frame-accurate boundary scan for the polish job.
+ * POST /scan { video, config, fps } — extracts frames across the window at `fps`, evaluates the
+ * per-channel config on each, and returns the per-frame detection + media epoch. The CMS uses this
+ * to refine an ad segment's start/end once it's confirmed.
+ */
+detectRouter.post("/scan", requireSecret, async (req, res) => {
+  const body = req.body || {};
+  const video = body.video;
+  if (!isValidVideoArg(video)) {
+    return res.status(400).json({ error: "Missing or invalid required field: video" });
+  }
+  const startedAt = Date.now();
+  const workDir = await createWorkDir();
+  try {
+    const cfg = normalizeConfig(body.config, config.rules.defaultThreshold);
+    const rois = collectRois(cfg);
+    const needFullOcr = Boolean(cfg.ocrRules.enabled);
+
+    const result = await jobs.run(async () => {
+      const { framePaths, anchorEpoch, fps } = await extractFrames(String(video), workDir, {
+        fps: body.fps,
+      });
+      const frames = [];
+      for (let i = 0; i < framePaths.length; i++) {
+        const analysis =
+          (await analyzeFrame(framePaths[i], rois, {
+            fullOcr: needFullOcr,
+            translateFull: false,
+          })) || { fullOcr: { text: "", textEn: "" }, rois: [] };
+        const ev = evaluate(cfg, analysis);
+        const offsetSec = i / fps;
+        frames.push({
+          offsetSec: Math.round(offsetSec * 1000) / 1000,
+          epoch: anchorEpoch != null ? Math.round(anchorEpoch + offsetSec) : null,
+          detection: ev.detection,
+          score: ev.score,
+        });
+      }
+      return { fps, anchorEpoch, count: frames.length, frames };
+    });
+
+    return res.json({ ...result, took: Date.now() - startedAt });
+  } catch (e) {
+    const msg = String(e?.message || e);
+    if (isUpstreamFetchError(msg)) logger.warn("scan failed (upstream)", { error: msg });
+    else logger.warn("scan failed", { error: msg });
+    return res.status(502).json({ error: `Scan failed: ${e?.message || String(e)}` });
   } finally {
     await removeWorkDir(workDir);
   }
