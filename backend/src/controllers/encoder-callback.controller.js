@@ -8,6 +8,7 @@ import { tryTwitterSyndicationAfterJobCompleted } from "../services/twitter-synd
 import { tryFacebookSyndicationAfterJobCompleted } from "../services/facebook-syndication-runner.service.js";
 import { tryInstagramSyndicationAfterJobCompleted } from "../services/instagram-syndication-runner.service.js";
 import { tryTiktokSyndicationAfterJobCompleted } from "../services/tiktok-syndication-runner.service.js";
+import { resolveJobMasterOutputUrl } from "../services/encoder-output-url.service.js";
 
 /** Fields the encoder service may update on a job (defense in depth). */
 const ENCODER_PATCH_KEYS = new Set([
@@ -65,6 +66,15 @@ encoderCallbackRouter.patch("/jobs/:jobId", requireEncoderSecret, async (req, re
   }
   if (Object.keys(patch).length === 0) {
     return res.status(400).json({ error: "No valid fields to patch" });
+  }
+  if (patch.status === "completed") {
+    const masterUrl = await resolveJobMasterOutputUrl(job);
+    if (masterUrl) {
+      patch.outputUrl = masterUrl;
+      if (!Array.isArray(patch.outputUrls) || patch.outputUrls.length === 0) {
+        patch.outputUrls = [masterUrl];
+      }
+    }
   }
   const updatedJob = await updateJob(jobId, patch);
   if (updatedJob) {

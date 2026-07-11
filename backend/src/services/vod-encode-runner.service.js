@@ -104,7 +104,7 @@ async function createInsightVodForJob({
 }) {
   if (spec?.realtimeTranscribeOnly === true || !accountId) return {};
   try {
-    const { guid, posterUrl } = await createInsightVod({
+    const { guid, posterUrl, masterUrl } = await createInsightVod({
       accountId,
       tenantId,
       spec,
@@ -123,6 +123,7 @@ async function createInsightVodForJob({
     await mergeJobEditorSpec(jobId, (prev) => ({
       ...(prev || {}),
       __vodGuid: guid,
+      ...(masterUrl ? { __masterUrl: masterUrl } : {}),
       ...(posterUrl ? { __vodPosterUrl: posterUrl } : {}),
     })).catch(() => {});
     vodEncodeStdout(`insight VOD created job=${jobId} guid=${guid}`);
@@ -252,6 +253,13 @@ export async function startBackgroundVodJob(opts) {
     try {
       const { accountId, s3, renditions } = await resolveTenantContext(tenantId, jobId);
       const encoderS3 = buildEncoderS3Payload(s3, tenantId);
+      if (encoderS3) {
+        await mergeJobEditorSpec(jobId, (prev) => ({
+          ...(prev || {}),
+          ...(encoderS3.cdnBase ? { __cdnBase: encoderS3.cdnBase } : {}),
+          ...(encoderS3.customerFolder ? { __customerFolder: encoderS3.customerFolder } : {}),
+        })).catch(() => {});
+      }
       const { vodGuid, insightWebhook } = await createInsightVodForJob({
         tenantId,
         spec,

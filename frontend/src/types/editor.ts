@@ -735,6 +735,16 @@ export interface EditorStateJson {
   availableLanguages?: string[];
   /** Selected subtitle language codes for this encode. */
   subtitleLanguages?: string[];
+  /** insight-api VOD guid (= encoder originId); set by backend at job dispatch. */
+  __vodGuid?: string;
+  /** Public HLS master URL precomputed at job dispatch ({cdn}/{tenant}/transcoded/{guid}/hls/master.m3u8). */
+  __masterUrl?: string;
+  /** Tenant CDN base (no trailing slash); used to rebuild master.m3u8 on the client. */
+  __cdnBase?: string;
+  /** Tenant public URL folder segment (customerFolder). */
+  __customerFolder?: string;
+  /** Default poster CDN URL for transcript news share pages. */
+  __vodPosterUrl?: string;
 }
 
 /** Defaults for encode-related fields when creating or hydrating a sub-clip. */

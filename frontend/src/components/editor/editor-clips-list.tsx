@@ -54,6 +54,8 @@ import {
   formatTime,
   parseRelativeTimeInput,
 } from "./editor-timeline";
+import { resolveEncodedPlaybackUrl } from "@/utils/encoded-playback-url";
+import { EncodedOutputPreviewPlayer } from "./encoded-output-preview-player";
 
 const THUMB_HEIGHT_DEFAULT = 36;
 const THUMB_HEIGHT_COMPACT = 28;
@@ -389,14 +391,7 @@ function TranscriptAndNewsTabs({
   );
 }
 
-function firstNonEmptyOutputUrl(job: VodJobRecord): string | null {
-  const direct = job.outputUrl?.trim();
-  if (direct) return direct;
-  const fromList = job.outputUrls?.find((u) => typeof u === "string" && u.trim().length > 0);
-  return fromList?.trim() ?? null;
-}
-
-/** Latest completed encode for this editor clip row with a public MP4 URL. */
+/** Latest completed encode for this editor clip row with a public playback URL (HLS master preferred). */
 function pickLatestCompletedOutputUrlForEditorClip(
   jobs: VodJobRecord[],
   clipId: string,
@@ -409,7 +404,7 @@ function pickLatestCompletedOutputUrlForEditorClip(
   );
   completed.sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
   for (const j of completed) {
-    const url = firstNonEmptyOutputUrl(j);
+    const url = resolveEncodedPlaybackUrl(j);
     if (url) return url;
   }
   return null;
@@ -831,13 +826,7 @@ export function EditorClipsList({
                   {encodedOutputPreview.label}
                 </h3>
                 <p className="mt-0.5 text-xs text-tertiary">Encoded output preview</p>
-                <video
-                  key={encodedOutputPreview.url}
-                  className="mt-3 aspect-video w-full rounded-lg bg-black"
-                  src={encodedOutputPreview.url}
-                  controls
-                  playsInline
-                />
+                <EncodedOutputPreviewPlayer key={encodedOutputPreview.url} url={encodedOutputPreview.url} />
               </div>
             </Dialog>
           </Modal>
