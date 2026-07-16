@@ -6,7 +6,7 @@
  * POST /sample  { imageUrl | imageBase64 }
  *   -> { phash, ocrText, ocrTextEn }   (template analysis performed when the admin uploads a sample)
  *
- * The CMS drives the pulse: it posts a trimmed VOD window (`endTime ≈ startTime + 10s` in `video`)
+ * The CMS drives the pulse: it posts a trimmed VOD window (`endTime ≈ startTime + 60s` in `video`)
  * plus the per-channel detection config. This service only ever inspects the LAST keyframe.
  */
 

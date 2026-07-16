@@ -2,7 +2,7 @@
  * insight-ad-recognition — HTTP entrypoint.
  *
  * Express API (CORS enabled) that classifies what a live channel is currently showing (ad /
- * program) with a per-channel rule engine. The CMS posts a trimmed VOD window (`endTime ≈ startTime + 10s`
+ * program) with a per-channel rule engine. The CMS posts a trimmed VOD window (`endTime ≈ startTime + 60s`
  * embedded in the URL) plus the channel detection config; this service grabs ONLY the last keyframe
  * and runs an in-container ML sidecar (Tesseract OCR heb/eng/spa + perceptual hashing + NLLB-200
  * translation) to score the configured strategies (logo appearance / disappearance / OCR rules).

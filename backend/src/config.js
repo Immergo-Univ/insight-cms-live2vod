@@ -107,9 +107,9 @@ export const config = {
     /**
      * Length (seconds) of the DVR/archive probe window: `endTime = startTime + probeWindowSec`.
      * The microservice keeps only the LAST keyframe of this window.
-     * Env: AD_RECOGNITION_PROBE_WINDOW_SEC (default 10).
+     * Env: AD_RECOGNITION_PROBE_WINDOW_SEC (default 60).
      */
-    probeWindowSec: parseInt(process.env.AD_RECOGNITION_PROBE_WINDOW_SEC || "10", 10),
+    probeWindowSec: parseInt(process.env.AD_RECOGNITION_PROBE_WINDOW_SEC || "60", 10),
     /**
      * Safety margin (seconds) subtracted from `endTime` when building the archive-window URL.
      * DVR/archive origins (Akamai, `fillgaps` proxy) have a small packaging delay: if `endTime`

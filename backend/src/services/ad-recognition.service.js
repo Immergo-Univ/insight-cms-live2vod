@@ -52,7 +52,7 @@ export const MIN_AD_SEGMENT_SECONDS = Math.max(0, config.adRecognition.minAdSegm
 /**
  * Archive probe window length (seconds). `endTime = startTime + PROBE_WINDOW_SECONDS`.
  * The detect service keeps only the LAST keyframe of this window.
- * Env: AD_RECOGNITION_PROBE_WINDOW_SEC (default 10).
+ * Env: AD_RECOGNITION_PROBE_WINDOW_SEC (default 60).
  */
 export const PROBE_WINDOW_SECONDS = () => Math.max(1, config.adRecognition.probeWindowSec);
 
@@ -81,7 +81,7 @@ function isRetriableUpstreamError(msg) {
 
 /**
  * Build the URL to probe. For archive/DVR playlists without an explicit window, append
- * `startTime`/`endTime` with `endTime = startTime + probeWindowSec` (default 10s), ending
+ * `startTime`/`endTime` with `endTime = startTime + probeWindowSec` (default 60s), ending
  * `archiveMarginSec` before now so we stay clear of the origin's packaging delay.
  * The detect service extracts the LAST keyframe of that window (marker epoch ≈ endTime).
  * Live playlists are left untouched.

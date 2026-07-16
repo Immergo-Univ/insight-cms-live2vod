@@ -1,7 +1,7 @@
 /**
  * Extracts a SINGLE frame (the LAST keyframe) from a resolved input.
  *
- * The CMS posts a trimmed archive window (`endTime = startTime + ~10s` embedded in the URL).
+ * The CMS posts a trimmed archive window (`endTime = startTime + ~60s` embedded in the URL).
  * We decode keyframes only and keep the last one via ffmpeg `-skip_frame nokey` + `-update 1`.
  */
 
@@ -45,7 +45,7 @@ export async function extractLastFrame(videoUrl, workDir) {
   const protocolArgs = isHls ? HLS_PROTOCOL_ARGS : [];
   const httpArgs = isHttp ? HTTP_ARGS : [];
 
-  // The CMS posts a short archive window (typically endTime = startTime + 10s). We decode ONLY
+  // The CMS posts a short archive window (typically endTime = startTime + 60s). We decode ONLY
   // keyframes (`-skip_frame nokey`) and keep the LAST one (`-update 1`). Live HLS still reads the
   // tail from the live edge.
   const seekArgs = isHls && isLive ? ["-live_start_index", "-1"] : [];
