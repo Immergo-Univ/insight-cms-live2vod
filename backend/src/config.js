@@ -193,7 +193,7 @@ export const config = {
     return `http://127.0.0.1:${port}`;
   })(),
 
-  /** Thumbnail microservice for editor capture posters (same as frontend editor-constants). */
+  /** External genThumbTime service. Editor thumbs go through `/api/thumbnails` which resolves HLS master → lowest media playlist first. */
   thumbnailApiBase: (
     process.env.THUMBNAIL_API_BASE ||
     "https://556gh0y4oh.execute-api.us-east-1.amazonaws.com/dev/genThumbTime"

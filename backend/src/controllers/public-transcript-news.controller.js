@@ -5,22 +5,25 @@ import { getJob } from "../services/vod-jobs.store.js";
 import { decodeTenantParam } from "../middleware/decode-tenant.middleware.js";
 import { getSequelize } from "../db/sequelize.js";
 import { normalizeAvailableLanguages } from "../utils/tenant-languages.js";
+import { resolveLowestRenditionUrl } from "../services/m3u8.service.js";
 
 /**
  * Clip thumbnail (genThumbTime) from the stored editor spec — universal poster fallback for
  * older jobs that predate the persisted __vodPosterUrl. No insight-api call required.
+ * Resolves HLS master → lowest media playlist before calling genThumbTime.
  * @param {any} spec
- * @returns {string}
+ * @returns {Promise<string>}
  */
-function clipThumbnailUrlFromSpec(spec) {
+async function clipThumbnailUrlFromSpec(spec) {
   const base = (config.thumbnailApiBase || "").trim();
   const clipUrl = typeof spec?.clipUrl === "string" ? spec.clipUrl.trim() : "";
   const channelId = typeof spec?.channelId === "string" ? spec.channelId.trim() : "";
   if (!base || !clipUrl || !channelId) return "";
   const startTime =
     Array.isArray(spec?.clips) && spec.clips[0] ? Number(spec.clips[0].startTime) || 0 : 0;
+  const mediaUrl = await resolveLowestRenditionUrl(clipUrl);
   const params = new URLSearchParams();
-  params.set("url", clipUrl);
+  params.set("url", mediaUrl);
   params.set("time", String(startTime));
   params.set("channelId", channelId);
   return `${base}?${params.toString()}`;
@@ -136,7 +139,7 @@ publicTranscriptNewsRouter.get("/transcript-news/:tenantId/:jobId", async (req, 
       typeof block.posterUrl === "string" && /^https?:\/\//i.test(block.posterUrl.trim())
         ? block.posterUrl.trim()
         : "";
-    const clipThumbUrl = clipThumbnailUrlFromSpec(job.editorSpec);
+    const clipThumbUrl = await clipThumbnailUrlFromSpec(job.editorSpec);
     const posterUrlHttp =
       blockPosterUrl ||
       (/^https?:\/\//i.test(jobPosterUrl) ? jobPosterUrl : "") ||

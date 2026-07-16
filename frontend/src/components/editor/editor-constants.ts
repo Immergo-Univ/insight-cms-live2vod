@@ -1,8 +1,9 @@
 /**
- * Thumbnail microservice base URL (same as reference Insight CMS).
+ * Thumbnail API used by <img src> in the editor.
+ * Goes through Live2VOD `/api/thumbnails`, which resolves HLS master playlists to the
+ * lowest-resolution media playlist before calling the external genThumbTime service.
  */
-export const THUMBNAIL_API_BASE =
-  "https://556gh0y4oh.execute-api.us-east-1.amazonaws.com/dev/genThumbTime";
+export const THUMBNAIL_API_BASE = "/api/thumbnails";
 
 /**
  * Zoom levels: milliseconds per column.

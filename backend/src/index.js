@@ -10,6 +10,7 @@ import { mainCategoriesRouter } from "./controllers/main-categories.controller.j
 import { channelSettingsRouter } from "./controllers/channel-settings.controller.js";
 import { editorPostersRouter } from "./controllers/editor-posters.controller.js";
 import { m3u8Router } from "./controllers/m3u8.controller.js";
+import { thumbnailsRouter } from "./controllers/thumbnails.controller.js";
 import { adsRouter } from "./controllers/ads.controller.js";
 import { authRouter } from "./controllers/auth.controller.js";
 import { vodRouter } from "./controllers/vod.controller.js";
@@ -117,6 +118,7 @@ app.use("/api/channels", editorPostersRouter);
 app.use("/api/channels", channelsRouter);
 app.use("/api/main-categories", mainCategoriesRouter);
 app.use("/api/m3u8", m3u8Router);
+app.use("/api/thumbnails", thumbnailsRouter);
 app.use("/api/ads", adsRouter);
 app.use("/api/vod", vodRouter);
 app.use("/api/tenants", tenantsRouter);

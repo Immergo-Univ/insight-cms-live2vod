@@ -7,6 +7,7 @@ import { config } from "../config.js";
 import { extensionFromDownloadUrl } from "./insight-content-types.service.js";
 import { loadEditorPosterBuffer, mimeForPosterExt } from "./editor-posters.service.js";
 import { putTenantTranscodedObject } from "./vod-tenant-s3.service.js";
+import { resolveHighestRenditionUrl } from "./m3u8.service.js";
 
 /**
  * @param {object} spec
@@ -36,16 +37,18 @@ function formatFromMime(mime) {
 }
 
 /**
+ * Build genThumbTime URL after resolving HLS master → highest media playlist (poster quality).
  * @param {string} clipUrl
  * @param {number} timeSeconds
  * @param {string} channelId
- * @returns {string}
+ * @returns {Promise<string>}
  */
-function buildThumbnailFetchUrl(clipUrl, timeSeconds, channelId) {
+async function buildThumbnailFetchUrl(clipUrl, timeSeconds, channelId) {
   const base = (config.thumbnailApiBase || "").trim();
   if (!base || !clipUrl || !channelId) return "";
+  const mediaUrl = await resolveHighestRenditionUrl(clipUrl);
   const params = new URLSearchParams();
-  params.set("url", clipUrl);
+  params.set("url", mediaUrl);
   params.set("time", String(timeSeconds));
   params.set("channelId", channelId);
   return `${base}?${params.toString()}`;
@@ -120,7 +123,7 @@ async function resolvePosterImageBuffer(poster, ctx) {
   }
 
   if (poster.kind === "capture") {
-    const thumbUrl = buildThumbnailFetchUrl(
+    const thumbUrl = await buildThumbnailFetchUrl(
       ctx.clipUrl,
       Number(poster.timeSeconds) || 0,
       ctx.channelId,
