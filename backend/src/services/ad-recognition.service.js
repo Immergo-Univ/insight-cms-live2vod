@@ -81,12 +81,17 @@ function isRetriableUpstreamError(msg) {
 
 /**
  * Build the URL to probe. For archive/DVR playlists without an explicit window, append
- * `startTime`/`endTime` with `endTime = startTime + probeWindowSec` (default 60s), ending
- * `archiveMarginSec` before now so we stay clear of the origin's packaging delay.
- * The detect service extracts the LAST keyframe of that window (marker epoch ≈ endTime).
+ * `startTime`/`endTime` covering a `probeWindowSec`-long window (default 60s) whose `endTime`
+ * is deferred `archiveMarginSec` (default 60s → exactly 1 minute) behind `now`, so we always
+ * hit media the origin has already consolidated.
+ *
+ * The detect service extracts the LAST keyframe of that window, and the caller stamps the marker
+ * epoch at `endTime` (the media / PROGRAM-DATE-TIME axis). Because the marker uses `endTime` and
+ * not the wall clock, the 1-minute deferral is inherently accounted for: ad start/end land on the
+ * real stream timeline with no loss of precision.
  * Live playlists are left untouched.
  * @param {string} hls
- * @param {number} [marginSec] override the default safety margin (used by the retry path).
+ * @param {number} [marginSec] override the default deferral (used by the retry path).
  */
 export function buildProbeUrl(hls, marginSec) {
   try {

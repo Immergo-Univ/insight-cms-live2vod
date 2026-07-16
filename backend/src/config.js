@@ -111,13 +111,15 @@ export const config = {
      */
     probeWindowSec: parseInt(process.env.AD_RECOGNITION_PROBE_WINDOW_SEC || "60", 10),
     /**
-     * Safety margin (seconds) subtracted from `endTime` when building the archive-window URL.
-     * DVR/archive origins (Akamai, `fillgaps` proxy) have a small packaging delay: if `endTime`
-     * lands inside that delay, the origin returns HTTP 400 ("no segments for that window") or
-     * the proxy returns 5xx. A ~30 s margin keeps us safely on the packaged side of the stream.
-     * Env: AD_RECOGNITION_ARCHIVE_MARGIN_SEC.
+     * Deferral (seconds) subtracted from `now` to get the probe window's `endTime` — i.e. how far
+     * behind the live edge we analyze. DVR/archive origins (Akamai, `fillgaps` proxy, immergo
+     * encoders) only serve a window once it is fully packaged; requesting too close to the live
+     * edge yields HTTP 400 ("no segments for that window") / 5xx and, worse, a non-consolidated
+     * stream. We defer a full minute so `endTime` always points at consolidated media, and since
+     * markers use `endTime` (the media/PROGRAM-DATE-TIME axis) this deferral does NOT shift the
+     * detected ad start/end. Env: AD_RECOGNITION_ARCHIVE_MARGIN_SEC (default 60).
      */
-    archiveMarginSec: parseInt(process.env.AD_RECOGNITION_ARCHIVE_MARGIN_SEC || "30", 10),
+    archiveMarginSec: parseInt(process.env.AD_RECOGNITION_ARCHIVE_MARGIN_SEC || "60", 10),
     /**
      * On the first probe attempt failing with an upstream-looking error (HTTP 4xx/5xx from the
      * origin, ffmpeg "Server returned" errors), retry ONCE with a further-back window using this
