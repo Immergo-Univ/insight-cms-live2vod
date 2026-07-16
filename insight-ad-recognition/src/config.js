@@ -2,8 +2,8 @@
  * Centralized runtime configuration, resolved from environment variables.
  * All values have sane defaults so the service can boot without an .env file.
  *
- * Rule-engine pipeline: the CMS posts a trimmed VOD window (startTime/endTime already embedded in
- * the `video` URL) plus a per-channel detection config. The service grabs ONLY the last frame,
+ * Rule-engine pipeline: the CMS posts a trimmed VOD window (`endTime ≈ startTime + 10s` embedded in
+ * the `video` URL) plus a per-channel detection config. The service grabs ONLY the last keyframe,
  * runs Tesseract OCR (heb/eng/spa) + perceptual hashing over the configured ROIs, translates the
  * OCR text to English with NLLB-200, evaluates the configured strategies (logo appearance, logo
  * disappearance, OCR rules) into a 0..1 score each, and returns the average + verdict.

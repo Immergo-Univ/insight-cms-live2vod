@@ -105,9 +105,9 @@ export const config = {
      */
     requestTimeoutMs: parseInt(process.env.AD_RECOGNITION_TIMEOUT_MS || "180000", 10),
     /**
-     * Length (seconds) of the DVR/archive window we probe for archive-style playlists (i.e. the
-     * ones that only return media when given `startTime`/`endTime`). The microservice only keeps
-     * the LAST frame of this window. Env: AD_RECOGNITION_PROBE_WINDOW_SEC.
+     * Length (seconds) of the DVR/archive probe window: `endTime = startTime + probeWindowSec`.
+     * The microservice keeps only the LAST keyframe of this window.
+     * Env: AD_RECOGNITION_PROBE_WINDOW_SEC (default 10).
      */
     probeWindowSec: parseInt(process.env.AD_RECOGNITION_PROBE_WINDOW_SEC || "10", 10),
     /**

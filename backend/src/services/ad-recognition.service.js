@@ -50,14 +50,11 @@ export const PROGRAM_CONFIRM_SAMPLES = 3;
 export const MIN_AD_SEGMENT_SECONDS = Math.max(0, config.adRecognition.minAdSegmentSec);
 
 /**
- * Some channel HLS URLs are DVR/archive playlists (e.g. `streamPlaylist-archive.m3u8` or the
- * `fillgaps` proxy) that only serve content when given a bounded window via startTime/endTime.
- * For those we request the last N seconds on every probe so the origin returns a small playlist
- * (the detect service then samples the live edge of that window).
- *
- * Configured via env in `config.adRecognition.probeWindowSec` (default 120 s).
+ * Archive probe window length (seconds). `endTime = startTime + PROBE_WINDOW_SECONDS`.
+ * The detect service keeps only the LAST keyframe of this window.
+ * Env: AD_RECOGNITION_PROBE_WINDOW_SEC (default 10).
  */
-export const PROBE_WINDOW_SECONDS = () => Math.max(30, config.adRecognition.probeWindowSec);
+export const PROBE_WINDOW_SECONDS = () => Math.max(1, config.adRecognition.probeWindowSec);
 
 /**
  * Heuristic: DVR/archive playlists that only return media when given a startTime/endTime window.
@@ -84,9 +81,9 @@ function isRetriableUpstreamError(msg) {
 
 /**
  * Build the URL to probe. For archive/DVR playlists without an explicit window, append
- * `startTime`/`endTime` covering the last {@link PROBE_WINDOW_SECONDS} seconds, with a small
- * safety margin subtracted from `endTime` so we don't land inside the origin's packaging delay
- * (which yields HTTP 400 on Akamai / 5xx through the `fillgaps` proxy).
+ * `startTime`/`endTime` with `endTime = startTime + probeWindowSec` (default 10s), ending
+ * `archiveMarginSec` before now so we stay clear of the origin's packaging delay.
+ * The detect service extracts the LAST keyframe of that window (marker epoch ≈ endTime).
  * Live playlists are left untouched.
  * @param {string} hls
  * @param {number} [marginSec] override the default safety margin (used by the retry path).
@@ -101,12 +98,11 @@ export function buildProbeUrl(hls, marginSec) {
         0,
         Number.isFinite(marginSec) ? Number(marginSec) : config.adRecognition.archiveMarginSec,
       );
-      // Single-instant window: startTime == endTime makes the origin return exactly one segment.
-      // The detector grabs the last keyframe of it; the segment's media time == endTime, which we
-      // use as the marker epoch (aligned with the stream's PROGRAM-DATE-TIME).
-      const t = now - margin;
-      u.searchParams.set("startTime", String(t));
-      u.searchParams.set("endTime", String(t));
+      const windowSec = PROBE_WINDOW_SECONDS();
+      const end = now - margin;
+      const start = end - windowSec;
+      u.searchParams.set("startTime", String(start));
+      u.searchParams.set("endTime", String(end));
     }
     return u.toString();
   } catch {

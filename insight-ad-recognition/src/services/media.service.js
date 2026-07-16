@@ -1,10 +1,8 @@
 /**
- * Extracts a SINGLE frame (the LAST one) from a resolved input.
+ * Extracts a SINGLE frame (the LAST keyframe) from a resolved input.
  *
- * The CMS always posts a trimmed archive window (startTime/endTime already embedded in the URL),
- * so we treat the input as the VOD it is and keep the last decoded frame. ffmpeg's `-update 1`
- * trick makes a single output file that is overwritten by every decoded frame, so the file ends
- * up holding the LAST frame of the tail window. No audio is extracted anymore.
+ * The CMS posts a trimmed archive window (`endTime = startTime + ~10s` embedded in the URL).
+ * We decode keyframes only and keep the last one via ffmpeg `-skip_frame nokey` + `-update 1`.
  */
 
 import fs from "node:fs/promises";
@@ -47,9 +45,9 @@ export async function extractLastFrame(videoUrl, workDir) {
   const protocolArgs = isHls ? HLS_PROTOCOL_ARGS : [];
   const httpArgs = isHttp ? HTTP_ARGS : [];
 
-  // The CMS sends a single-instant window (startTime == endTime), so a VOD/archive input is a
-  // single segment (~one GOP). We decode ONLY keyframes (`-skip_frame nokey`) and keep the last one
-  // (`-update 1`) — minimal decode, mostly I/O. Live HLS still reads the tail from the live edge.
+  // The CMS posts a short archive window (typically endTime = startTime + 10s). We decode ONLY
+  // keyframes (`-skip_frame nokey`) and keep the LAST one (`-update 1`). Live HLS still reads the
+  // tail from the live edge.
   const seekArgs = isHls && isLive ? ["-live_start_index", "-1"] : [];
   const durationArgs = isHls && isLive ? ["-t", String(tail)] : [];
 
@@ -81,7 +79,7 @@ export async function extractLastFrame(videoUrl, workDir) {
     framePath,
   ];
 
-  // 1) Keyframe-only pass (cheapest): keep the last keyframe.
+  // 1) Keyframe-only pass: always keep the last keyframe of the window.
   await run(config.tools.ffmpeg, buildArgs(["-skip_frame", "nokey"]), {
     timeoutMs: config.limits.requestTimeoutMs,
   }).catch(() => null);

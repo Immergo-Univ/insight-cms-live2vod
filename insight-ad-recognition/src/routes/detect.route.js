@@ -6,8 +6,8 @@
  * POST /sample  { imageUrl | imageBase64 }
  *   -> { phash, ocrText, ocrTextEn }   (template analysis performed when the admin uploads a sample)
  *
- * The CMS drives the pulse: it posts a trimmed VOD window (startTime/endTime embedded in `video`)
- * plus the per-channel detection config. This service only ever inspects the LAST frame.
+ * The CMS drives the pulse: it posts a trimmed VOD window (`endTime ≈ startTime + 10s` in `video`)
+ * plus the per-channel detection config. This service only ever inspects the LAST keyframe.
  */
 
 import fs from "node:fs/promises";
