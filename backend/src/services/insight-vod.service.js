@@ -32,6 +32,7 @@ import {
   subtitleLanguagesFromSpec,
   whisperLanguageMeta,
 } from "./subtitle-language-utils.js";
+import { resolveJobVodGuid } from "./vod-jobs.store.js";
 
 /** Title/description/keywords from the editor spec (clip metadata first, then root). */
 function extractMetadata(spec) {
@@ -300,7 +301,8 @@ export async function patchInsightVodWhisperSubtitleLabels({
  * @param {import("./vod-jobs.store.js").VodJob | null | undefined} job
  */
 export async function trySyncInsightVodWhisperSubtitleLabels(job) {
-  if (!job?.vodGuid || !job?.tenantId) return;
+  const vodGuid = resolveJobVodGuid(job);
+  if (!vodGuid || !job?.tenantId) return;
   const spec = job.editorSpec && typeof job.editorSpec === "object" ? job.editorSpec : null;
   if (!anyWhisperSubtitlesEnabled(spec)) return;
   try {
@@ -309,17 +311,17 @@ export async function trySyncInsightVodWhisperSubtitleLabels(job) {
     const ok = await patchInsightVodWhisperSubtitleLabels({
       accountId,
       tenantId: job.tenantId,
-      vodGuid: job.vodGuid,
+      vodGuid,
       spec,
     });
     if (ok) {
       console.log(
-        `[insight-vod] synced whisper subtitle labels guid=${job.vodGuid} tenant=${job.tenantId}`,
+        `[insight-vod] synced whisper subtitle labels guid=${vodGuid} tenant=${job.tenantId}`,
       );
     }
   } catch (e) {
     const m = e instanceof Error ? e.message : String(e);
-    console.error(`[insight-vod] subtitle label sync failed guid=${job.vodGuid}: ${m}`);
+    console.error(`[insight-vod] subtitle label sync failed guid=${vodGuid}: ${m}`);
   }
 }
 
@@ -441,7 +443,8 @@ export function buildInsightNewsArray(job) {
  * @returns {Promise<boolean>}
  */
 export async function syncInsightVodTranscriptAndNews(job) {
-  if (!job?.vodGuid || !job?.tenantId) return false;
+  const vodGuid = resolveJobVodGuid(job);
+  if (!vodGuid || !job?.tenantId) return false;
 
   const transcript = buildInsightTranscriptArray(job);
   const news = buildInsightNewsArray(job);
@@ -460,14 +463,14 @@ export async function syncInsightVodTranscriptAndNews(job) {
 
     const findUrl = `${config.insightApiBase}/cms/entity/vods/find`;
     const findRes = await axios.get(findUrl, {
-      params: { filter: `guid||$eq||${job.vodGuid}` },
+      params: { filter: `guid||$eq||${vodGuid}` },
       headers,
     });
     const rows = Array.isArray(findRes.data) ? findRes.data : findRes.data ? [findRes.data] : [];
     const vod = rows[0];
     if (!vod?._id) {
       console.warn(
-        `[insight-vod] transcript/news sync skipped: no vod for guid=${job.vodGuid} tenant=${job.tenantId}`,
+        `[insight-vod] transcript/news sync skipped: no vod for guid=${vodGuid} tenant=${job.tenantId}`,
       );
       return false;
     }
@@ -483,12 +486,12 @@ export async function syncInsightVodTranscriptAndNews(job) {
     await axios.post(`${config.insightApiBase}/cms/entity/vods/insertOrUpdate`, patch, { headers });
     console.log(
       `[insight-vod] synced transcript(${transcript.length}) news(${news.length}) ` +
-        `guid=${job.vodGuid} tenant=${job.tenantId}`,
+        `guid=${vodGuid} tenant=${job.tenantId}`,
     );
     return true;
   } catch (e) {
     const m = e instanceof Error ? e.message : String(e);
-    console.error(`[insight-vod] transcript/news sync failed guid=${job.vodGuid}: ${m}`);
+    console.error(`[insight-vod] transcript/news sync failed guid=${vodGuid}: ${m}`);
     return false;
   }
 }

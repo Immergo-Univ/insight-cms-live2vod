@@ -40,6 +40,10 @@ function modelToJob(instance) {
     return undefined;
   };
 
+  const editorSpec = obj(o.editorSpec);
+  const vodGuidFromCol = str(o.vodGuid);
+  const vodGuidFromSpec =
+    editorSpec && typeof editorSpec.__vodGuid === "string" ? String(editorSpec.__vodGuid).trim() : "";
   return {
     id: o.id,
     tenantId: o.tenantId,
@@ -65,7 +69,9 @@ function modelToJob(instance) {
     transcriptNewsBundle: obj(o.transcriptNewsBundle),
     jobKind: str(o.jobKind),
     editorClipId: str(o.editorClipId),
-    editorSpec: obj(o.editorSpec),
+    // Column may be empty on older rows; fall back to editor_spec.__vodGuid.
+    vodGuid: vodGuidFromCol || vodGuidFromSpec || undefined,
+    editorSpec,
   };
 }
 
@@ -99,6 +105,7 @@ export async function pgInsertJob(job) {
     transcriptNewsBundle: job.transcriptNewsBundle ?? null,
     jobKind: job.jobKind ?? null,
     editorClipId: job.editorClipId ?? null,
+    vodGuid: job.vodGuid ?? null,
     editorSpec: job.editorSpec ?? null,
   });
 }
@@ -159,6 +166,7 @@ const PATCH_DB_KEYS = new Set([
   "openaiClipUsage",
   "transcriptNewsBundle",
   "jobKind",
+  "vodGuid",
   "editorSpec",
 ]);
 

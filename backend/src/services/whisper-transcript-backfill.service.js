@@ -7,7 +7,7 @@ import { resolveTenant } from "./auth.service.js";
 import { resolveTenantS3 } from "./tenant-storage.service.js";
 import { resolveTenantVideoProfiles } from "./video-profiles.service.js";
 import { vodOutputUrls } from "./vod-output-layout.js";
-import { getJob, updateJob } from "./vod-jobs.store.js";
+import { getJob, updateJob, resolveJobVodGuid } from "./vod-jobs.store.js";
 import { subtitleLanguagesFromSpec } from "./subtitle-language-utils.js";
 
 function sleep(ms) {
@@ -81,7 +81,7 @@ function whisperSubtitlesEnabledInSpec(spec) {
  * @param {import("./vod-jobs.store.js").VodJob} job
  */
 async function whisperArtifactUrlsForJob(job) {
-  const guid = job.vodGuid;
+  const guid = resolveJobVodGuid(job);
   if (!guid || !job.tenantId) return null;
   const { accountId } = await resolveTenant(job.tenantId);
   const s3 = await resolveTenantS3({ accountId, tenantId: job.tenantId }).catch(() => null);
@@ -171,7 +171,8 @@ async function fetchText(url, timeoutMs = 20_000) {
  * @returns {Promise<WhisperBackfillResult>}
  */
 export async function backfillWhisperTranscriptDetailed(job, opts = {}) {
-  if (!job?.id || !job.vodGuid) {
+  const vodGuid = resolveJobVodGuid(job);
+  if (!job?.id || !vodGuid) {
     return { ok: false, reason: "missing_job_or_guid", job: job ?? null };
   }
   if (String(job.transcriptText || "").trim()) {
@@ -184,7 +185,7 @@ export async function backfillWhisperTranscriptDetailed(job, opts = {}) {
 
   const artifactSet = await whisperArtifactUrlsForJob(job);
   if (!artifactSet?.candidates?.length) {
-    console.warn(`[whisper-backfill] no CDN URLs job=${job.id} guid=${job.vodGuid}`);
+    console.warn(`[whisper-backfill] no CDN URLs job=${job.id} guid=${vodGuid}`);
     return { ok: false, reason: "no_cdn_urls", job };
   }
 
@@ -234,7 +235,7 @@ export async function backfillWhisperTranscriptDetailed(job, opts = {}) {
     message: "Transcript loaded from encode artifacts",
   });
   console.log(
-    `[whisper-backfill] stored transcript job=${job.id} guid=${job.vodGuid} chars=${transcriptText.length}`,
+    `[whisper-backfill] stored transcript job=${job.id} guid=${vodGuid} chars=${transcriptText.length}`,
   );
   return { ok: true, reason: "ok", job: updated };
 }

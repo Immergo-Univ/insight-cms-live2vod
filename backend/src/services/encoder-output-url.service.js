@@ -7,6 +7,7 @@ import { resolveTenant } from "./auth.service.js";
 import { resolveTenantS3 } from "./tenant-storage.service.js";
 import { resolveTenantVideoProfiles } from "./video-profiles.service.js";
 import { vodOutputUrls } from "./vod-output-layout.js";
+import { resolveJobVodGuid } from "./vod-jobs.store.js";
 
 /**
  * @param {import("./vod-jobs.store.js").VodJob} job
@@ -20,9 +21,7 @@ export async function resolveJobMasterOutputUrl(job) {
     spec && typeof spec.__masterUrl === "string" ? spec.__masterUrl.trim() : "";
   if (fromSpec && /^https?:\/\//i.test(fromSpec)) return fromSpec;
 
-  const guid =
-    (typeof job.vodGuid === "string" && job.vodGuid.trim()) ||
-    (spec && typeof spec.__vodGuid === "string" ? spec.__vodGuid.trim() : "");
+  const guid = resolveJobVodGuid(job);
   if (!guid) return null;
 
   try {

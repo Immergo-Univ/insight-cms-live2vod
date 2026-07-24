@@ -4,6 +4,7 @@ import {
   listJobsForTenant,
   getJob,
   updateJob,
+  resolveJobVodGuid,
 } from "../services/vod-jobs.store.js";
 import { startBackgroundVodJob, requestCancelJob } from "../services/vod-encode-runner.service.js";
 import { listTenantVodMp4s } from "../services/vod-s3.service.js";
@@ -170,7 +171,7 @@ vodRouter.patch("/jobs/:jobId", async (req, res) => {
 
     await updateJob(jobId, patch);
     const refreshed = await getJob(jobId);
-    if (refreshed?.vodGuid) {
+    if (resolveJobVodGuid(refreshed)) {
       void trySyncInsightVodTranscriptAndNews(refreshed);
     }
     res.json({ ok: true, job: refreshed });

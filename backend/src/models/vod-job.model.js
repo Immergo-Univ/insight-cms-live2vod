@@ -35,6 +35,8 @@ export function registerVodJobModel(sequelize) {
       transcriptNewsBundle: DataTypes.JSONB,
       jobKind: DataTypes.STRING,
       editorClipId: DataTypes.STRING,
+      /** insight-api Mongo VOD guid (also mirrored as editor_spec.__vodGuid). */
+      vodGuid: DataTypes.STRING,
       /** Full editor job spec (clips, ads, syndication per clip, etc.). */
       editorSpec: DataTypes.JSONB,
     },

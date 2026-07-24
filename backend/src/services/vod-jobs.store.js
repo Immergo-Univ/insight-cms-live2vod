@@ -154,7 +154,7 @@ export async function mergeJobEditorSpec(jobId, fn) {
 
 /**
  * @param {string} id
- * @param {Partial<Pick<VodJob, 'status' | 'progress' | 'phase' | 'message' | 'error' | 's3Key' | 's3Keys' | 'outputUrl' | 'outputUrls' | 'transcriptText' | 'transcriptDiarization' | 'transcriptNewsEn' | 'transcriptNewsEs' | 'transcriptNewsHe' | 'transcriptNewsError' | 'openaiClipUsage' | 'transcriptNewsBundle' | 'jobKind' | 'editorSpec'>>} patch
+ * @param {Partial<Pick<VodJob, 'status' | 'progress' | 'phase' | 'message' | 'error' | 's3Key' | 's3Keys' | 'outputUrl' | 'outputUrls' | 'transcriptText' | 'transcriptDiarization' | 'transcriptNewsEn' | 'transcriptNewsEs' | 'transcriptNewsHe' | 'transcriptNewsError' | 'openaiClipUsage' | 'transcriptNewsBundle' | 'jobKind' | 'vodGuid' | 'editorSpec'>>} patch
  * @returns {Promise<VodJob | null>}
  */
 export async function updateJob(id, patch) {
@@ -197,6 +197,20 @@ function broadcastTenant(tenantId, payload) {
       }
     }
   }
+}
+
+/**
+ * Insight VOD guid for a job: column `vodGuid`, else `editorSpec.__vodGuid`.
+ * @param {VodJob | null | undefined} job
+ * @returns {string}
+ */
+export function resolveJobVodGuid(job) {
+  if (!job) return "";
+  const fromCol = typeof job.vodGuid === "string" ? job.vodGuid.trim() : "";
+  if (fromCol) return fromCol;
+  const spec = job.editorSpec && typeof job.editorSpec === "object" ? job.editorSpec : null;
+  const fromSpec = spec && typeof spec.__vodGuid === "string" ? String(spec.__vodGuid).trim() : "";
+  return fromSpec || "";
 }
 
 /**
