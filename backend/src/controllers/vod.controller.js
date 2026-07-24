@@ -8,6 +8,7 @@ import {
 import { startBackgroundVodJob, requestCancelJob } from "../services/vod-encode-runner.service.js";
 import { listTenantVodMp4s } from "../services/vod-s3.service.js";
 import { backfillWhisperTranscriptByJobId } from "../services/whisper-transcript-backfill.service.js";
+import { trySyncInsightVodTranscriptAndNews } from "../services/insight-vod.service.js";
 import { getRequestTenantId } from "../utils/tenant-cipher.js";
 
 export const vodRouter = Router();
@@ -168,7 +169,11 @@ vodRouter.patch("/jobs/:jobId", async (req, res) => {
     }
 
     await updateJob(jobId, patch);
-    res.json({ ok: true, job: await getJob(jobId) });
+    const refreshed = await getJob(jobId);
+    if (refreshed?.vodGuid) {
+      void trySyncInsightVodTranscriptAndNews(refreshed);
+    }
+    res.json({ ok: true, job: refreshed });
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
     res.status(400).json({ error: message });

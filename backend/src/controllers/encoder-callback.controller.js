@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { config } from "../config.js";
 import { getJob, updateJob } from "../services/vod-jobs.store.js";
-import { trySyncInsightVodWhisperSubtitleLabels } from "../services/insight-vod.service.js";
+import { trySyncInsightVodWhisperSubtitleLabels, trySyncInsightVodTranscriptAndNews } from "../services/insight-vod.service.js";
 import { tryBackfillWhisperTranscriptForJob } from "../services/whisper-transcript-backfill.service.js";
 import { tryYoutubeSyndicationAfterJobCompleted } from "../services/youtube-syndication-runner.service.js";
 import { tryTwitterSyndicationAfterJobCompleted } from "../services/twitter-syndication-runner.service.js";
@@ -81,11 +81,27 @@ encoderCallbackRouter.patch("/jobs/:jobId", requireEncoderSecret, async (req, re
     if (patch.transcriptText || patch.status === "completed") {
       void trySyncInsightVodWhisperSubtitleLabels(updatedJob);
     }
+    const hasTranscriptOrNews =
+      patch.transcriptText != null ||
+      patch.transcriptDiarization != null ||
+      patch.transcriptNewsBundle != null ||
+      patch.transcriptNewsEn != null ||
+      patch.transcriptNewsEs != null ||
+      patch.transcriptNewsHe != null ||
+      patch.status === "completed";
+    if (hasTranscriptOrNews) {
+      void trySyncInsightVodTranscriptAndNews(updatedJob);
+    }
     if (patch.status === "completed") {
-      void tryBackfillWhisperTranscriptForJob(updatedJob).catch((e) => {
-        const m = e instanceof Error ? e.message : String(e);
-        console.error(`[encoder-callback] whisper transcript backfill job=${jobId}`, m);
-      });
+      void tryBackfillWhisperTranscriptForJob(updatedJob)
+        .then(async () => {
+          const refreshed = await getJob(jobId);
+          if (refreshed) void trySyncInsightVodTranscriptAndNews(refreshed);
+        })
+        .catch((e) => {
+          const m = e instanceof Error ? e.message : String(e);
+          console.error(`[encoder-callback] whisper transcript backfill job=${jobId}`, m);
+        });
     }
   }
   if (patch.status === "completed") {

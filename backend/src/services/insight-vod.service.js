@@ -7,6 +7,9 @@
  *   1) insertOrUpdate base doc  -> read back `guid` + `_id`
  *   2) insertOrUpdate `_id` + `content[]` built from that `guid`
  *
+ * After STT/news complete, `syncInsightVodTranscriptAndNews` PATCHes the same VOD with
+ * top-level `transcript[]` and `news[]` arrays (language + payload per locale).
+ *
  * `guid` is the shared key: it is the legacy webhook `media_id`, the S3 path
  * segment and the base for the pre-populated `content[]` URLs.
  *
@@ -24,6 +27,7 @@ import {
   resolveInsightContentTypes,
 } from "./insight-content-types.service.js";
 import {
+  resolveWhisperSubtitleLanguage,
   resolveWhisperSubtitleLanguageFromSpec,
   subtitleLanguagesFromSpec,
   whisperLanguageMeta,
@@ -316,6 +320,189 @@ export async function trySyncInsightVodWhisperSubtitleLabels(job) {
   } catch (e) {
     const m = e instanceof Error ? e.message : String(e);
     console.error(`[insight-vod] subtitle label sync failed guid=${job.vodGuid}: ${m}`);
+  }
+}
+
+/**
+ * Insight language label: lowercase English name (e.g. "hebrew", "english").
+ * @param {string} iso2
+ */
+function insightLanguageLabel(iso2) {
+  return String(whisperLanguageMeta(iso2).name || iso2 || "english")
+    .trim()
+    .toLowerCase();
+}
+
+/**
+ * Build `transcript[]` for insight-api from a Live2VOD job (raw STT + optional diarization).
+ * @param {import("./vod-jobs.store.js").VodJob} job
+ * @returns {Array<Record<string, unknown>>}
+ */
+export function buildInsightTranscriptArray(job) {
+  const text = String(job?.transcriptText || "").trim();
+  const di =
+    job?.transcriptDiarization &&
+    typeof job.transcriptDiarization === "object" &&
+    !Array.isArray(job.transcriptDiarization)
+      ? job.transcriptDiarization
+      : null;
+  if (!text && !di) return [];
+
+  const spec = job.editorSpec && typeof job.editorSpec === "object" ? job.editorSpec : null;
+  const lang = resolveWhisperSubtitleLanguageFromSpec(spec);
+  /** @type {Record<string, unknown>} */
+  const entry = {
+    language: insightLanguageLabel(lang.iso2),
+    languageCode: lang.iso2,
+    text: text || "",
+  };
+  if (di) {
+    entry.diarization = di;
+  }
+  return [entry];
+}
+
+/**
+ * Build `news[]` for insight-api from transcriptNewsBundle + legacy plain fields.
+ * @param {import("./vod-jobs.store.js").VodJob} job
+ * @returns {Array<Record<string, unknown>>}
+ */
+export function buildInsightNewsArray(job) {
+  /** @type {Map<string, Record<string, unknown>>} */
+  const byCode = new Map();
+
+  const bundle =
+    job?.transcriptNewsBundle &&
+    typeof job.transcriptNewsBundle === "object" &&
+    !Array.isArray(job.transcriptNewsBundle)
+      ? /** @type {Record<string, unknown>} */ (job.transcriptNewsBundle)
+      : {};
+
+  for (const [key, raw] of Object.entries(bundle)) {
+    if (key === "version") continue;
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) continue;
+    const code = String(key || "")
+      .trim()
+      .toLowerCase();
+    if (!code) continue;
+    const b = /** @type {Record<string, unknown>} */ (raw);
+    byCode.set(code, {
+      language: insightLanguageLabel(code),
+      languageCode: code,
+      title: String(b.title ?? "").trim(),
+      description: String(b.description ?? b.subtitle ?? "").trim(),
+      posterCaption: String(b.posterCaption ?? "").trim(),
+      date: String(b.date ?? "").trim(),
+      time: String(b.time ?? "").trim(),
+      htmlBody: typeof b.htmlBody === "string" ? b.htmlBody : "",
+      posterUrl: typeof b.posterUrl === "string" ? b.posterUrl : b.posterUrl ?? null,
+      posterDataUrl: typeof b.posterDataUrl === "string" ? b.posterDataUrl : b.posterDataUrl ?? null,
+    });
+  }
+
+  /** @type {Record<string, string>} */
+  const legacy = {
+    en: String(job?.transcriptNewsEn || "").trim(),
+    es: String(job?.transcriptNewsEs || "").trim(),
+    he: String(job?.transcriptNewsHe || "").trim(),
+  };
+  for (const [code, plain] of Object.entries(legacy)) {
+    if (!plain || byCode.has(code)) continue;
+    const nl = plain.indexOf("\n");
+    const title = (nl === -1 ? plain : plain.slice(0, nl)).trim().slice(0, 200) || "News";
+    const body = (nl === -1 ? plain : plain.slice(nl + 1)).trim() || plain;
+    byCode.set(code, {
+      language: insightLanguageLabel(code),
+      languageCode: code,
+      title,
+      description: "",
+      posterCaption: "",
+      date: "",
+      time: "",
+      htmlBody: `<p>${body
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/\n/g, "<br/>")}</p>`,
+      posterUrl: null,
+      posterDataUrl: null,
+      text: plain,
+    });
+  }
+
+  return [...byCode.values()];
+}
+
+/**
+ * PATCH insight-api VOD with `transcript` + `news` arrays (schema-free Mongo fields).
+ * Called when STT/news land on the job (encode callback or editor PATCH). Never throws to caller.
+ *
+ * @param {import("./vod-jobs.store.js").VodJob | null | undefined} job
+ * @returns {Promise<boolean>}
+ */
+export async function syncInsightVodTranscriptAndNews(job) {
+  if (!job?.vodGuid || !job?.tenantId) return false;
+
+  const transcript = buildInsightTranscriptArray(job);
+  const news = buildInsightNewsArray(job);
+  if (transcript.length === 0 && news.length === 0) return false;
+
+  try {
+    const { accountId } = await resolveTenant(job.tenantId);
+    if (!accountId) return false;
+
+    const token = await getAuthToken();
+    const headers = {
+      Authorization: `Bearer ${token}`,
+      "x-tenant-id": job.tenantId,
+      "Content-Type": "application/json",
+    };
+
+    const findUrl = `${config.insightApiBase}/cms/entity/vods/find`;
+    const findRes = await axios.get(findUrl, {
+      params: { filter: `guid||$eq||${job.vodGuid}` },
+      headers,
+    });
+    const rows = Array.isArray(findRes.data) ? findRes.data : findRes.data ? [findRes.data] : [];
+    const vod = rows[0];
+    if (!vod?._id) {
+      console.warn(
+        `[insight-vod] transcript/news sync skipped: no vod for guid=${job.vodGuid} tenant=${job.tenantId}`,
+      );
+      return false;
+    }
+
+    /** @type {Record<string, unknown>} */
+    const patch = {
+      _id: vod._id,
+      accountId: vod.accountId || accountId,
+    };
+    if (transcript.length > 0) patch.transcript = transcript;
+    if (news.length > 0) patch.news = news;
+
+    await axios.post(`${config.insightApiBase}/cms/entity/vods/insertOrUpdate`, patch, { headers });
+    console.log(
+      `[insight-vod] synced transcript(${transcript.length}) news(${news.length}) ` +
+        `guid=${job.vodGuid} tenant=${job.tenantId}`,
+    );
+    return true;
+  } catch (e) {
+    const m = e instanceof Error ? e.message : String(e);
+    console.error(`[insight-vod] transcript/news sync failed guid=${job.vodGuid}: ${m}`);
+    return false;
+  }
+}
+
+/**
+ * Fire-and-forget wrapper for encode/editor paths.
+ * @param {import("./vod-jobs.store.js").VodJob | null | undefined} job
+ */
+export async function trySyncInsightVodTranscriptAndNews(job) {
+  try {
+    await syncInsightVodTranscriptAndNews(job);
+  } catch (e) {
+    const m = e instanceof Error ? e.message : String(e);
+    console.error(`[insight-vod] trySyncInsightVodTranscriptAndNews: ${m}`);
   }
 }
 
