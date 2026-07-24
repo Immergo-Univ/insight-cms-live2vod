@@ -126,3 +126,45 @@ export function subtitleLanguagesFromSpec(spec) {
   }
   return [resolveWhisperSubtitleLanguage(cfg).iso2];
 }
+
+/**
+ * Guess ISO-639-1 from script in transcript text (Hebrew/Arabic/Cyrillic/CJK/…).
+ * @param {string} text
+ * @returns {string | null}
+ */
+export function detectLanguageIso2FromTranscriptText(text) {
+  const sample = String(text || "").slice(0, 8000);
+  if (!sample.trim()) return null;
+  if (/[\u0590-\u05FF]/.test(sample)) return "he";
+  if (/[\u0600-\u06FF]/.test(sample)) return "ar";
+  if (/[\u0400-\u04FF]/.test(sample)) return "ru";
+  if (/[\u3040-\u30FF]/.test(sample)) return "ja";
+  if (/[\uAC00-\uD7AF]/.test(sample)) return "ko";
+  if (/[\u4E00-\u9FFF]/.test(sample)) return "zh";
+  if (/[\u0E00-\u0E7F]/.test(sample)) return "th";
+  if (/[\u0900-\u097F]/.test(sample)) return "hi";
+  if (/[\u0370-\u03FF]/.test(sample)) return "el";
+  return null;
+}
+
+/**
+ * Language of the CMS transcript text (not burn-in / sidecar display language).
+ * Prefers script detection, then whisperSourceLanguage, then subtitle output / default.
+ *
+ * @param {object | null | undefined} job
+ * @returns {{ iso2: string, name: string, hlsLanguage: string }}
+ */
+export function resolveTranscriptLanguageFromJob(job) {
+  const text = String(job?.transcriptText || "").trim();
+  const fromScript = detectLanguageIso2FromTranscriptText(text);
+  if (fromScript) return whisperLanguageMeta(fromScript);
+
+  const spec = job?.editorSpec && typeof job.editorSpec === "object" ? job.editorSpec : null;
+  const cfg = whisperSubsConfigFromSpec(spec);
+  const source = String(cfg?.whisperSourceLanguage || "auto").trim() || "auto";
+  const output = String(cfg?.whisperOutputLanguage || "same").trim() || "same";
+
+  if (output !== "same" && output !== "auto") return whisperLanguageMeta(output);
+  if (source !== "auto") return whisperLanguageMeta(source);
+  return resolveWhisperSubtitleLanguage(cfg);
+}

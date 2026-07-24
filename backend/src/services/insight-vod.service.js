@@ -29,6 +29,7 @@ import {
 import {
   resolveWhisperSubtitleLanguage,
   resolveWhisperSubtitleLanguageFromSpec,
+  resolveTranscriptLanguageFromJob,
   subtitleLanguagesFromSpec,
   whisperLanguageMeta,
 } from "./subtitle-language-utils.js";
@@ -224,6 +225,17 @@ function isWhisperSidecarSubtitleItem(item) {
 }
 
 /**
+ * ISO-639-1 from whisper sidecar URL (`subs_whisper_he.vtt` → `he`).
+ * @param {unknown} downloadUrl
+ * @returns {string | null}
+ */
+function whisperIso2FromSidecarUrl(downloadUrl) {
+  const url = String(downloadUrl || "").toLowerCase();
+  const m = url.match(/subs_whisper_([a-z]{2})(?:_|\.|$)/i) || url.match(/\/subs\/([a-z]{2})\.vtt(?:\?|$)/i);
+  return m?.[1] ? String(m[1]).toLowerCase() : null;
+}
+
+/**
  * Update Mongo `content[]` subtitle labels (name / language / languageName) for Immergo whisper sidecar.
  * Idempotent; no-ops when labels already match or the VOD cannot be loaded.
  *
@@ -243,7 +255,7 @@ export async function patchInsightVodWhisperSubtitleLabels({
 }) {
   if (!accountId || !tenantId || !vodGuid) return false;
 
-  const lang =
+  const fallbackLang =
     languageOverride?.iso2 && languageOverride?.name
       ? {
           iso2: String(languageOverride.iso2),
@@ -273,6 +285,8 @@ export async function patchInsightVodWhisperSubtitleLabels({
   let changed = false;
   const content = vod.content.map((item) => {
     if (!isWhisperSidecarSubtitleItem(item)) return item;
+    const fromUrl = whisperIso2FromSidecarUrl(item.downloadUrl);
+    const lang = fromUrl ? whisperLanguageMeta(fromUrl) : fallbackLang;
     if (item.name === lang.name && item.languageName === lang.name && item.language === lang.iso2) {
       return item;
     }
@@ -350,8 +364,7 @@ export function buildInsightTranscriptArray(job) {
       : null;
   if (!text && !di) return [];
 
-  const spec = job.editorSpec && typeof job.editorSpec === "object" ? job.editorSpec : null;
-  const lang = resolveWhisperSubtitleLanguageFromSpec(spec);
+  const lang = resolveTranscriptLanguageFromJob(job);
   /** @type {Record<string, unknown>} */
   const entry = {
     language: insightLanguageLabel(lang.iso2),
