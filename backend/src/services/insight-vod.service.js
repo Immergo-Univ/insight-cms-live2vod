@@ -436,8 +436,9 @@ export function buildInsightNewsArray(job) {
 }
 
 /**
- * PATCH insight-api VOD with `transcript` + `news` arrays (schema-free Mongo fields).
- * Called when STT/news land on the job (encode callback or editor PATCH). Never throws to caller.
+ * After the immergo encode finishes (or the editor saves news), PATCH insight-api with
+ * `transcript` + `news`. Echoes existing `content` so insight-api does not treat a
+ * partial body as a content wipe.
  *
  * @param {import("./vod-jobs.store.js").VodJob | null | undefined} job
  * @returns {Promise<boolean>}
@@ -482,6 +483,11 @@ export async function syncInsightVodTranscriptAndNews(job) {
     };
     if (transcript.length > 0) patch.transcript = transcript;
     if (news.length > 0) patch.news = news;
+    // insight-api vods.insertOrUpdate crashes / treats missing content as "delete all
+    // subtitles" when content is omitted. Echo the existing content from find.
+    if (Array.isArray(vod.content)) {
+      patch.content = vod.content;
+    }
 
     await axios.post(`${config.insightApiBase}/cms/entity/vods/insertOrUpdate`, patch, { headers });
     console.log(
@@ -490,8 +496,10 @@ export async function syncInsightVodTranscriptAndNews(job) {
     );
     return true;
   } catch (e) {
+    const ax = e && typeof e === "object" && "response" in e ? /** @type {any} */ (e).response : null;
+    const detail = ax?.data != null ? ` status=${ax.status} body=${JSON.stringify(ax.data).slice(0, 500)}` : "";
     const m = e instanceof Error ? e.message : String(e);
-    console.error(`[insight-vod] transcript/news sync failed guid=${vodGuid}: ${m}`);
+    console.error(`[insight-vod] transcript/news sync failed guid=${vodGuid}: ${m}${detail}`);
     return false;
   }
 }

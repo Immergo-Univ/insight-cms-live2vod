@@ -81,17 +81,8 @@ encoderCallbackRouter.patch("/jobs/:jobId", requireEncoderSecret, async (req, re
     if (patch.transcriptText || patch.status === "completed") {
       void trySyncInsightVodWhisperSubtitleLabels(updatedJob);
     }
-    const hasTranscriptOrNews =
-      patch.transcriptText != null ||
-      patch.transcriptDiarization != null ||
-      patch.transcriptNewsBundle != null ||
-      patch.transcriptNewsEn != null ||
-      patch.transcriptNewsEs != null ||
-      patch.transcriptNewsHe != null ||
-      patch.status === "completed";
-    if (hasTranscriptOrNews) {
-      void trySyncInsightVodTranscriptAndNews(updatedJob);
-    }
+    // Wait for the immergo encode to finish, then push transcript/news to insight-api.
+    // Mid-encode STT patches are stored on the job; Insight is updated once on completed.
     if (patch.status === "completed") {
       void tryBackfillWhisperTranscriptForJob(updatedJob)
         .then(async () => {
@@ -101,6 +92,7 @@ encoderCallbackRouter.patch("/jobs/:jobId", requireEncoderSecret, async (req, re
         .catch((e) => {
           const m = e instanceof Error ? e.message : String(e);
           console.error(`[encoder-callback] whisper transcript backfill job=${jobId}`, m);
+          void trySyncInsightVodTranscriptAndNews(updatedJob);
         });
     }
   }
