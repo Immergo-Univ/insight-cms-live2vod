@@ -12,6 +12,7 @@ export { EditorJsonButton } from "./editor-json-button";
 export { EditorVerticalCropButton } from "./editor-vertical-crop-button";
 export { EditorSubtitleButton } from "./editor-subtitle-button";
 export { EditorRightPanel } from "./editor-right-panel";
+export { TranscriptNewsLocalePanel } from "./transcript-news-locale-panel";
 export {
   buildMarkOutThumbnailUrl,
   buildThumbnailUrl,

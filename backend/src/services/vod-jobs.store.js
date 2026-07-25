@@ -11,6 +11,7 @@ import {
   pgGetJob,
   pgListJobsForTenant,
   pgCountActiveJobsForTenant,
+  pgFindJobByVodGuid,
   pgUpdateJob,
   pgMergeEditorSpec,
 } from "./vod-jobs-pg.repository.js";
@@ -97,6 +98,28 @@ export async function countActiveJobsForTenant(tenantId) {
 export async function getJob(id) {
   if (usePg()) return /** @type {Promise<VodJob | undefined>} */ (pgGetJob(id));
   return jobsById.get(id);
+}
+
+/**
+ * Newest job for tenant whose Insight VOD guid matches (column or editorSpec.__vodGuid).
+ * @param {string} tenantId
+ * @param {string} vodGuid
+ * @returns {Promise<VodJob | undefined>}
+ */
+export async function findJobByVodGuid(tenantId, vodGuid) {
+  const guid = String(vodGuid || "").trim();
+  if (!tenantId || !guid) return undefined;
+  if (usePg()) {
+    return /** @type {Promise<VodJob | undefined>} */ (pgFindJobByVodGuid(tenantId, guid));
+  }
+  /** @type {VodJob | undefined} */
+  let best;
+  for (const job of jobsById.values()) {
+    if (job.tenantId !== tenantId) continue;
+    if (resolveJobVodGuid(job) !== guid) continue;
+    if (!best || job.createdAt > best.createdAt) best = job;
+  }
+  return best;
 }
 
 /**

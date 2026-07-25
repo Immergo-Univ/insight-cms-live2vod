@@ -13,7 +13,8 @@ function exec(cmd: string, value?: string) {
 
 interface TranscriptNewsLocalePanelProps {
   locale: string;
-  jobId: string;
+  /** When set, shows the public share URL for this job/locale. */
+  jobId?: string;
   /** Bumps when job is refetched so editor body can sync from server. */
   jobContentStamp?: string;
   block: TranscriptNewsLocaleBlock;
@@ -32,7 +33,7 @@ export function TranscriptNewsLocalePanel({
   const editorRef = useRef<HTMLDivElement>(null);
   const tenantId = httpClient.getTenantId().trim();
   const publicUrl =
-    typeof window !== "undefined" && tenantId
+    typeof window !== "undefined" && tenantId && jobId
       ? `${window.location.origin}/api/public/transcript-news/${encodeURIComponent(tenantId)}/${encodeURIComponent(jobId)}?lang=${locale}`
       : "";
 

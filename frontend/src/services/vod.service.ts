@@ -1,5 +1,6 @@
 import { httpClient } from "./http-client";
 import type { EditorStateJson } from "@/types/editor";
+import type { VodAiPagePatchBody, VodAiPageResponse } from "@/types/insight-vod";
 import type { TranscriptNewsBundle, VodJobRecord } from "@/types/vod-job";
 
 export async function startVodJob(
@@ -27,6 +28,32 @@ export async function fetchVodJobs(): Promise<VodJobRecord[]> {
     params: { tenantId },
   });
   return data.jobs ?? [];
+}
+
+/** Load Insight VOD (source of truth) + optional linked Live2VOD job by guid. */
+export async function fetchVodAiByGuid(vodGuid: string): Promise<VodAiPageResponse> {
+  const client = httpClient.getBffClient();
+  const tenantId = httpClient.getTenantId();
+  const { data } = await client.get<VodAiPageResponse>(
+    `/vod/by-guid/${encodeURIComponent(vodGuid)}`,
+    { params: { tenantId } },
+  );
+  return data;
+}
+
+/** Persist news/transcript to Insight first, then mirror to Postgres when a job is linked. */
+export async function patchVodAiByGuid(
+  vodGuid: string,
+  body: VodAiPagePatchBody,
+): Promise<VodAiPageResponse> {
+  const client = httpClient.getBffClient();
+  const tenantId = httpClient.getTenantId();
+  const { data } = await client.patch<VodAiPageResponse & { ok?: boolean }>(
+    `/vod/by-guid/${encodeURIComponent(vodGuid)}`,
+    body,
+    { params: { tenantId } },
+  );
+  return { vod: data.vod, job: data.job };
 }
 
 export async function cancelVodJob(jobId: string): Promise<void> {

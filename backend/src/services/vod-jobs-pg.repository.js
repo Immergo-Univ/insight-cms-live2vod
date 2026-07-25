@@ -134,6 +134,38 @@ export async function pgListJobsForTenant(tenantId) {
 }
 
 /**
+ * Find the newest job for a tenant whose Insight VOD guid matches.
+ * Prefer column `vod_guid`; fall back to `editor_spec.__vodGuid` for older rows.
+ *
+ * @param {string} tenantId
+ * @param {string} vodGuid
+ * @returns {Promise<object | undefined>}
+ */
+export async function pgFindJobByVodGuid(tenantId, vodGuid) {
+  const guid = String(vodGuid || "").trim();
+  if (!tenantId || !guid) return undefined;
+
+  const VodJob = getVodJobModel();
+  const byColumn = await VodJob.findOne({
+    where: { tenantId, vodGuid: guid },
+    order: [["createdAt", "DESC"]],
+  });
+  if (byColumn) return modelToJob(byColumn);
+
+  // Legacy rows: guid only under editor_spec.__vodGuid (JSONB).
+  const sequelize = VodJob.sequelize;
+  if (!sequelize) return undefined;
+  const bySpec = await VodJob.findOne({
+    where: {
+      tenantId,
+      [Op.and]: [sequelize.literal(`editor_spec->>'__vodGuid' = ${sequelize.escape(guid)}`)],
+    },
+    order: [["createdAt", "DESC"]],
+  });
+  return modelToJob(bySpec);
+}
+
+/**
  * @param {string} tenantId
  */
 export async function pgCountActiveJobsForTenant(tenantId) {

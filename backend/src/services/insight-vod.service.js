@@ -34,6 +34,7 @@ import {
   whisperLanguageMeta,
 } from "./subtitle-language-utils.js";
 import { resolveJobVodGuid } from "./vod-jobs.store.js";
+import { normalizeInsightEntityFindResults } from "../utils/insight-entity.util.js";
 
 /** Title/description/keywords from the editor spec (clip metadata first, then root). */
 function extractMetadata(spec) {
@@ -531,6 +532,250 @@ export async function trySyncInsightVodTranscriptAndNews(job) {
 }
 
 /**
+ * @param {string} tenantId
+ * @returns {Promise<{ accountId: string, headers: Record<string, string> }>}
+ */
+async function insightWriteContext(tenantId) {
+  const { accountId } = await resolveTenant(tenantId);
+  if (!accountId) throw new Error("Unable to resolve accountId for tenant");
+  const token = await getAuthToken();
+  return {
+    accountId,
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "x-tenant-id": tenantId,
+      "Content-Type": "application/json",
+    },
+  };
+}
+
+/**
+ * Load a VOD from insight-api by guid (tenant-scoped). Source of truth for AI page.
+ *
+ * @param {string} tenantId
+ * @param {string} vodGuid
+ * @returns {Promise<Record<string, unknown> | null>}
+ */
+export async function findInsightVodByGuid(tenantId, vodGuid) {
+  const guid = String(vodGuid || "").trim();
+  if (!tenantId || !guid) return null;
+
+  const { headers } = await insightWriteContext(tenantId);
+  const findRes = await axios.get(`${config.insightApiBase}/cms/entity/vods/find`, {
+    params: { filter: `guid||$eq||${guid}` },
+    headers,
+  });
+  const rows = normalizeInsightEntityFindResults(findRes.data);
+  const vod = rows[0];
+  if (!vod || typeof vod !== "object") return null;
+  if (String(vod.guid || "").trim() !== guid) return null;
+  return /** @type {Record<string, unknown>} */ (vod);
+}
+
+/**
+ * Normalize one Insight news entry for insertOrUpdate.
+ * @param {unknown} raw
+ * @returns {Record<string, unknown> | null}
+ */
+function normalizeInsightNewsEntry(raw) {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const o = /** @type {Record<string, unknown>} */ (raw);
+  const code = String(o.languageCode || "")
+    .trim()
+    .toLowerCase();
+  if (!code) return null;
+  return {
+    language: String(o.language || insightLanguageLabel(code)).trim() || insightLanguageLabel(code),
+    languageCode: code,
+    title: String(o.title ?? "").trim(),
+    description: String(o.description ?? o.subtitle ?? "").trim(),
+    posterCaption: String(o.posterCaption ?? "").trim(),
+    date: String(o.date ?? "").trim(),
+    time: String(o.time ?? "").trim(),
+    htmlBody: typeof o.htmlBody === "string" ? o.htmlBody : "",
+    posterUrl: typeof o.posterUrl === "string" ? o.posterUrl : o.posterUrl ?? null,
+    posterDataUrl: typeof o.posterDataUrl === "string" ? o.posterDataUrl : o.posterDataUrl ?? null,
+  };
+}
+
+/**
+ * Normalize one Insight transcript entry.
+ * @param {unknown} raw
+ * @returns {Record<string, unknown> | null}
+ */
+function normalizeInsightTranscriptEntry(raw) {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const o = /** @type {Record<string, unknown>} */ (raw);
+  const code = String(o.languageCode || "")
+    .trim()
+    .toLowerCase();
+  if (!code) return null;
+  /** @type {Record<string, unknown>} */
+  const entry = {
+    language: String(o.language || insightLanguageLabel(code)).trim() || insightLanguageLabel(code),
+    languageCode: code,
+    text: String(o.text ?? ""),
+  };
+  if (o.diarization && typeof o.diarization === "object" && !Array.isArray(o.diarization)) {
+    entry.diarization = o.diarization;
+  }
+  return entry;
+}
+
+/**
+ * Merge incoming news/transcript arrays into existing Insight arrays by languageCode.
+ *
+ * @param {unknown} existing
+ * @param {unknown} incoming
+ * @param {(raw: unknown) => Record<string, unknown> | null} normalize
+ * @returns {Array<Record<string, unknown>>}
+ */
+function mergeInsightLocaleArrays(existing, incoming, normalize) {
+  /** @type {Map<string, Record<string, unknown>>} */
+  const byCode = new Map();
+  for (const item of Array.isArray(existing) ? existing : []) {
+    const n = normalize(item);
+    if (n) byCode.set(String(n.languageCode), n);
+  }
+  for (const item of Array.isArray(incoming) ? incoming : []) {
+    const n = normalize(item);
+    if (n) byCode.set(String(n.languageCode), n);
+  }
+  return [...byCode.values()];
+}
+
+/**
+ * Update Insight VOD news/transcript (Insight-first). Echoes content to avoid wipe.
+ *
+ * @param {object} opts
+ * @param {string} opts.tenantId
+ * @param {string} opts.vodGuid
+ * @param {unknown} [opts.news]
+ * @param {unknown} [opts.transcript]
+ * @param {boolean} [opts.replaceNews] when true, replace entire news[] with incoming (not merge)
+ * @param {boolean} [opts.replaceTranscript] when true, replace entire transcript[] with incoming
+ * @returns {Promise<Record<string, unknown>>}
+ */
+export async function updateInsightVodAiByGuid({
+  tenantId,
+  vodGuid,
+  news,
+  transcript,
+  replaceNews = true,
+  replaceTranscript = true,
+}) {
+  const guid = String(vodGuid || "").trim();
+  if (!tenantId || !guid) throw new Error("Missing tenantId or vodGuid");
+
+  const existing = await findInsightVodByGuid(tenantId, guid);
+  if (!existing?._id) throw new Error(`VOD not found for guid=${guid}`);
+
+  const { accountId, headers } = await insightWriteContext(tenantId);
+
+  /** @type {Record<string, unknown>} */
+  const patch = {
+    _id: existing._id,
+    accountId: existing.accountId || accountId,
+  };
+
+  if (news !== undefined) {
+    if (!Array.isArray(news)) throw new Error("news must be an array");
+    const normalizedIncoming = news.map(normalizeInsightNewsEntry).filter(Boolean);
+    patch.news = replaceNews
+      ? normalizedIncoming
+      : mergeInsightLocaleArrays(existing.news, news, normalizeInsightNewsEntry);
+  }
+
+  if (transcript !== undefined) {
+    if (!Array.isArray(transcript)) throw new Error("transcript must be an array");
+    const normalizedIncoming = transcript.map(normalizeInsightTranscriptEntry).filter(Boolean);
+    patch.transcript = replaceTranscript
+      ? normalizedIncoming
+      : mergeInsightLocaleArrays(existing.transcript, transcript, normalizeInsightTranscriptEntry);
+  }
+
+  if (Array.isArray(existing.content)) {
+    patch.content = existing.content;
+  }
+
+  await axios.post(`${config.insightApiBase}/cms/entity/vods/insertOrUpdate`, patch, { headers });
+
+  const refreshed = await findInsightVodByGuid(tenantId, guid);
+  if (!refreshed) throw new Error(`VOD disappeared after update guid=${guid}`);
+  return refreshed;
+}
+
+/**
+ * Map Insight news[] into Postgres transcriptNewsBundle (+ legacy plain fields).
+ *
+ * @param {unknown} newsArr
+ * @returns {{
+ *   transcriptNewsBundle: Record<string, unknown>,
+ *   transcriptNewsEn?: string | null,
+ *   transcriptNewsEs?: string | null,
+ *   transcriptNewsHe?: string | null,
+ * }}
+ */
+export function mapInsightNewsToJobFields(newsArr) {
+  /** @type {Record<string, unknown>} */
+  const bundle = { version: 1 };
+  /** @type {Record<string, string | null>} */
+  const legacy = { transcriptNewsEn: null, transcriptNewsEs: null, transcriptNewsHe: null };
+
+  for (const item of Array.isArray(newsArr) ? newsArr : []) {
+    const n = normalizeInsightNewsEntry(item);
+    if (!n) continue;
+    const code = String(n.languageCode);
+    bundle[code] = {
+      title: n.title,
+      description: n.description,
+      posterCaption: n.posterCaption,
+      date: n.date,
+      time: n.time,
+      htmlBody: n.htmlBody,
+      posterUrl: n.posterUrl,
+      posterDataUrl: n.posterDataUrl,
+    };
+    const plain = [String(n.title || "").trim(), String(n.description || "").trim()]
+      .filter(Boolean)
+      .join("\n");
+    if (code === "en") legacy.transcriptNewsEn = plain || null;
+    if (code === "es") legacy.transcriptNewsEs = plain || null;
+    if (code === "he") legacy.transcriptNewsHe = plain || null;
+  }
+
+  return {
+    transcriptNewsBundle: bundle,
+    ...legacy,
+  };
+}
+
+/**
+ * Map Insight transcript[] (prefer first entry) into job transcript fields.
+ *
+ * @param {unknown} transcriptArr
+ * @returns {{
+ *   transcriptText?: string | null,
+ *   transcriptDiarization?: object | null,
+ * }}
+ */
+export function mapInsightTranscriptToJobFields(transcriptArr) {
+  const list = Array.isArray(transcriptArr) ? transcriptArr : [];
+  const first = list.map(normalizeInsightTranscriptEntry).find(Boolean);
+  if (!first) {
+    return { transcriptText: null, transcriptDiarization: null };
+  }
+  const di =
+    first.diarization && typeof first.diarization === "object" && !Array.isArray(first.diarization)
+      ? first.diarization
+      : null;
+  return {
+    transcriptText: String(first.text || "").trim() || null,
+    transcriptDiarization: di,
+  };
+}
+
+/**
  * @param {object} opts
  * @param {string} opts.accountId  insight-api account ObjectId
  * @param {string} opts.tenantId   tenant code (x-tenant-id)
@@ -539,7 +784,7 @@ export async function trySyncInsightVodTranscriptAndNews(job) {
  * @param {string} [opts.customerFolder] legacy customer folder override
  * @param {Array<object>} [opts.renditions] tenant video profiles (encoder shape)
  * @param {string} [opts.editorClipId] correlates posters to the encoded sub-clip
- * @returns {Promise<{ vodId: string, guid: string, masterUrl: string }>}
+ * @returns {Promise<{ vodId: string, guid: string, masterUrl: string, posterUrl?: string }>}
  */
 export async function createInsightVod({
   accountId,
