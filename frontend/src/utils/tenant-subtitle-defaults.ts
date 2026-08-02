@@ -33,10 +33,10 @@ export function buildDefaultSubtitleLocales(tenant: TenantDto | null | undefined
   return Object.fromEntries(langs.map((code) => [code, true]));
 }
 
-/** News locale toggles default from tenant News tab. */
+/** News locale toggles default from tenant Transcribe & News tab. */
 export function buildDefaultNewsLocales(tenant: TenantDto | null | undefined): Record<string, boolean> {
   const langs = tenantAvailableLanguages(tenant);
-  const on = tenant?.newsDefaultGenerate !== false;
+  const on = tenantNewsButtonEnabled(tenant) && tenant?.newsDefaultGenerate !== false;
   return Object.fromEntries(langs.map((code) => [code, on]));
 }
 

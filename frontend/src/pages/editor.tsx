@@ -67,8 +67,11 @@ import {
   buildDefaultSubtitleLocales,
   buildDefaultNewsLocales,
   mergeSubtitleLocalesWithTenantPool,
+  selectedSubtitleLanguageCodes,
 } from "@/utils/tenant-subtitle-defaults";
 import {
+  applyTranscriptNewsGenerateOff,
+  applyTranscriptNewsGenerateOn,
   clipBurnInEnabled,
   clipHasSelectedSubtitleLocales,
   clipSubtitleGenerateEnabled,
@@ -111,6 +114,7 @@ function createDefaultFullWindowSubClip(
   id: string,
   defaults?: {
     subtitlesDefaultEnabled?: boolean;
+    transcriptNewsGenerateEnabled?: boolean;
     defaultSyndication?: EditorClipSyndication | undefined;
     defaultSubtitleSettings?: EditorSubtitleSettings;
     subtitleLocales?: Record<string, boolean>;
@@ -126,7 +130,8 @@ function createDefaultFullWindowSubClip(
   const endTime = isRealtime
     ? Math.max(60, Math.floor(nowUnixSec) - clipState.startTime)
     : wallSpan;
-  const subtitleOn = defaults?.subtitlesDefaultEnabled === true;
+  const transcriptNewsOn = defaults?.transcriptNewsGenerateEnabled === true;
+  const subtitleOn = defaults?.subtitlesDefaultEnabled === true || transcriptNewsOn;
   const poolLocales = defaults?.subtitleLocales ?? buildDefaultSubtitleLocales(undefined);
   const newsLocales = defaults?.newsLocales ?? buildDefaultNewsLocales(undefined);
   return {
@@ -140,6 +145,7 @@ function createDefaultFullWindowSubClip(
     burnInEnabled: subtitleOn && defaults?.burnInDefault === true,
     subtitleLocales: poolLocales,
     newsLocales,
+    transcriptNewsGenerateEnabled: transcriptNewsOn,
     ...(subtitleOn && defaults?.defaultSubtitleSettings
       ? { subtitleSettings: defaults.defaultSubtitleSettings }
       : {}),
@@ -599,6 +605,7 @@ export function EditorPage() {
     tenant,
     availableLanguages,
     newsButtonEnabled,
+    newsDefaultGenerate,
     syndicationYoutubeEnabled,
     syndicationYoutubeDefaultEnabled,
     syndicationTwitterEnabled,
@@ -639,7 +646,11 @@ export function EditorPage() {
   const defaultClipSubtitleFields = useMemo(() => {
     const locales = buildDefaultSubtitleLocales(tenant);
     const newsLocales = buildDefaultNewsLocales(tenant);
-    const subtitleOn = tenantSubtitlesEnabled && subtitlesDefaultEnabled === true;
+    // Tenant "Transcribe & News" default also enables VTT for all tenant languages.
+    const transcriptNewsOn =
+      tenantSubtitlesEnabled && newsButtonEnabled && tenant?.newsDefaultGenerate !== false;
+    const subtitleOn =
+      (tenantSubtitlesEnabled && subtitlesDefaultEnabled === true) || transcriptNewsOn;
     const burnInDefault = tenant?.subtitlesDefaultBurnIn === true;
     if (!subtitleOn) {
       return {
@@ -648,6 +659,7 @@ export function EditorPage() {
         burnInEnabled: false,
         subtitleLocales: locales,
         newsLocales,
+        transcriptNewsGenerateEnabled: false,
       };
     }
     return {
@@ -656,9 +668,16 @@ export function EditorPage() {
       burnInEnabled: burnInDefault,
       subtitleLocales: locales,
       newsLocales,
+      transcriptNewsGenerateEnabled: transcriptNewsOn,
       subtitleSettings: tenantDefaultSubtitleSettings,
     };
-  }, [tenant, tenantSubtitlesEnabled, subtitlesDefaultEnabled, tenantDefaultSubtitleSettings]);
+  }, [
+    tenant,
+    tenantSubtitlesEnabled,
+    subtitlesDefaultEnabled,
+    newsButtonEnabled,
+    tenantDefaultSubtitleSettings,
+  ]);
 
   useEffect(() => {
     if (appliedInitialTenantDefaultsRef.current) return;
@@ -674,8 +693,10 @@ export function EditorPage() {
     setClips((prev) => {
       if (prev.length !== 1) return prev;
       const clip = prev[0];
-      const shouldSetSubtitle =
-        tenantSubtitlesEnabled && subtitlesDefaultEnabled === true && !clipSubtitleGenerateEnabled(clip);
+      const wantsSubtitleDefaults =
+        (tenantSubtitlesEnabled && subtitlesDefaultEnabled === true) ||
+        (tenantSubtitlesEnabled && newsButtonEnabled && newsDefaultGenerate);
+      const shouldSetSubtitle = wantsSubtitleDefaults && !clipSubtitleGenerateEnabled(clip);
       const shouldSetSyndication = Boolean(defaultClipSyndication && !clip.syndication);
       if (!shouldSetSubtitle && !shouldSetSyndication) return prev;
       appliedInitialTenantDefaultsRef.current = true;
@@ -696,6 +717,8 @@ export function EditorPage() {
     clipState?.selectionMode,
     tenantSubtitlesEnabled,
     subtitlesDefaultEnabled,
+    newsButtonEnabled,
+    newsDefaultGenerate,
     defaultClipSyndication,
     defaultClipSubtitleFields,
   ]);
@@ -1380,12 +1403,13 @@ export function EditorPage() {
       setClips((prev) =>
         prev.map((c) => {
           if (c.id !== clipId) return c;
-          if (!payload.generateEnabled) {
+          if (!payload.generateEnabled || selectedSubtitleLanguageCodes(payload.subtitleLocales).length === 0) {
             return {
               ...c,
               subtitleGenerateEnabled: false,
               subtitleMode: false,
               burnInEnabled: false,
+              ...applyTranscriptNewsGenerateOff(tenant),
             };
           }
           const merged = reconcileBurnInAfterLocaleChange(c, payload.subtitleLocales);
@@ -1400,7 +1424,23 @@ export function EditorPage() {
         }),
       );
     },
-    [],
+    [tenant],
+  );
+
+  const handleSetClipTranscriptNewsGenerate = useCallback(
+    (clipId: string, enabled: boolean) => {
+      setClips((prev) =>
+        prev.map((c) => {
+          if (c.id !== clipId) return c;
+          if (!enabled) return { ...c, ...applyTranscriptNewsGenerateOff(tenant) };
+          return {
+            ...c,
+            ...applyTranscriptNewsGenerateOn(c, tenant, tenantDefaultSubtitleSettings),
+          };
+        }),
+      );
+    },
+    [tenant, tenantDefaultSubtitleSettings],
   );
 
   const handleSaveSubtitleBurn = useCallback(
@@ -1419,9 +1459,29 @@ export function EditorPage() {
     [],
   );
 
-  const handleUpdateClipNewsLocales = useCallback((clipId: string, newsLocales: Record<string, boolean>) => {
-    setClips((prev) => prev.map((c) => (c.id === clipId ? { ...c, newsLocales } : c)));
-  }, []);
+  const handleUpdateClipNewsLocales = useCallback(
+    (clipId: string, newsLocales: Record<string, boolean>) => {
+      setClips((prev) =>
+        prev.map((c) => {
+          if (c.id !== clipId) return c;
+          const anyOn = Object.values(newsLocales).some(Boolean);
+          if (!anyOn) {
+            return { ...c, newsLocales, transcriptNewsGenerateEnabled: false };
+          }
+          // Selecting a news locale with the master off turns the package on (+ VTT).
+          if (c.transcriptNewsGenerateEnabled !== true) {
+            return {
+              ...c,
+              ...applyTranscriptNewsGenerateOn(c, tenant, tenantDefaultSubtitleSettings),
+              newsLocales,
+            };
+          }
+          return { ...c, newsLocales, transcriptNewsGenerateEnabled: true };
+        }),
+      );
+    },
+    [tenant, tenantDefaultSubtitleSettings],
+  );
 
   const handleVerticalCropCenterX = useCallback(
     (centerX: number) => {
@@ -1777,6 +1837,7 @@ export function EditorPage() {
               realtimeTranscriptUi={isRealtime && tenantSubtitlesEnabled}
               transcriptNewsUiEnabled={newsButtonEnabled}
               onUpdateClipNewsLocales={handleUpdateClipNewsLocales}
+              onSetClipTranscriptNewsGenerate={handleSetClipTranscriptNewsGenerate}
               onVodJobsRefresh={refreshVodJobs}
           />
           </aside>

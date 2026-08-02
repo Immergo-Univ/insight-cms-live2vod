@@ -11,6 +11,7 @@ import {
 import {
   clipBurnInEnabled,
   clipSubtitleGenerateEnabled,
+  clipTranscriptNewsGenerateEnabled,
   resolveClipBurnInLanguage,
 } from "@/utils/editor-subclip-subtitles";
 
@@ -56,11 +57,12 @@ export function newsLocalesFromClip(
   const pool = tenantAvailableLanguages(tenant);
   const prev =
     clip.newsLocales && typeof clip.newsLocales === "object" ? clip.newsLocales : {};
-  // Mirror the editor checkbox exactly: ON unless explicitly disabled (=== false).
-  // The tenant default (newsDefaultGenerate) is applied when the clip is seeded, writing
-  // explicit false values that this preserves.
+  const wantTn = clipTranscriptNewsGenerateEnabled(clip);
   const out: Record<string, boolean> = {};
-  for (const code of pool) out[code] = prev[code] !== false;
+  for (const code of pool) {
+    // Master toggle off → no news locales. When on, ON unless explicitly disabled.
+    out[code] = wantTn ? prev[code] !== false : false;
+  }
   return out;
 }
 
@@ -81,13 +83,15 @@ export function transcribeRootFromClip(
   const st = normalizeEditorSubtitleSettings(clip.subtitleSettings);
   const newsLocales = newsLocalesFromClip(clip, tenant);
   const anyNews = Object.values(newsLocales).some(Boolean);
+  const wantTn = clipTranscriptNewsGenerateEnabled(clip);
   return {
     availableLanguages,
     subtitleLanguages,
     ...(gen
       ? {
           transcribeSpeakerDiarization: st.transcribeSpeakerDiarization,
-          transcribeGenerateNews: gen && anyNews,
+          // Transcript + news require VTT ready (at least one language) and the master toggle.
+          transcribeGenerateNews: gen && wantTn && anyNews,
           transcribeNewsLocales: newsLocales,
           transcribeInferSpeakerNames: st.transcribeInferSpeakerNames,
         }

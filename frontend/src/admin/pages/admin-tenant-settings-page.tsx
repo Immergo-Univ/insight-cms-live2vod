@@ -175,6 +175,7 @@ export function AdminTenantSettingsPage() {
 
   const burnInDefaultOn = Form.useWatch("subtitlesDefaultBurnIn", form);
   const watchedAvailableLanguages = Form.useWatch("availableLanguages", form);
+  const newsButtonOn = Form.useWatch("newsButtonEnabled", form);
 
   const setFormFromDetail = useCallback(
     (data: TenantDetail) => {
@@ -346,7 +347,9 @@ export function AdminTenantSettingsPage() {
         (c: unknown) => typeof c === "string" && c.trim(),
       ),
       newsButtonEnabled: Boolean(form.getFieldValue("newsButtonEnabled")),
-      newsDefaultGenerate: Boolean(form.getFieldValue("newsDefaultGenerate")),
+      newsDefaultGenerate:
+        Boolean(form.getFieldValue("newsButtonEnabled")) &&
+        Boolean(form.getFieldValue("newsDefaultGenerate")),
       subtitlesTranscriptNewsUiEnabled: Boolean(form.getFieldValue("newsButtonEnabled")),
       subtitlesDefaultBurnIn: Boolean(form.getFieldValue("subtitlesDefaultBurnIn")),
       subtitlesDefaultBurnInLanguage: String(form.getFieldValue("subtitlesDefaultBurnInLanguage") || "en").trim(),
@@ -538,22 +541,41 @@ export function AdminTenantSettingsPage() {
     { name: "subtitlesDefaultInferSpeakerNames", label: t("tenants.subtitlesDefaultInferSpeakerNamesLabel") },
   ];
 
-  const newsSwitches: Array<{
-    name: "newsButtonEnabled" | "newsDefaultGenerate";
-    label: string;
-    hint?: string;
-  }> = [
-    {
-      name: "newsButtonEnabled",
-      label: t("tenants.newsButtonEnabledLabel"),
-      hint: t("tenants.newsButtonEnabledHint"),
-    },
-    {
-      name: "newsDefaultGenerate",
-      label: t("tenants.newsDefaultGenerateLabel"),
-      hint: t("tenants.newsDefaultGenerateHint"),
-    },
-  ];
+  const renderNewsTab = () => (
+    <div style={{ maxWidth: 900 }}>
+      <Form.Item style={{ marginBottom: 14 }}>
+        <Space align="start" size={10}>
+          <Form.Item name="newsButtonEnabled" valuePropName="checked" noStyle>
+            <Switch
+              disabled={!can("tenants", "edit")}
+              onChange={(checked) => {
+                if (!checked) form.setFieldValue("newsDefaultGenerate", false);
+              }}
+            />
+          </Form.Item>
+          <div>
+            <Typography.Text>{t("tenants.newsButtonEnabledLabel")}</Typography.Text>
+            <Typography.Paragraph type="secondary" style={{ marginBottom: 0, marginTop: 4 }}>
+              {t("tenants.newsButtonEnabledHint")}
+            </Typography.Paragraph>
+          </div>
+        </Space>
+      </Form.Item>
+      <Form.Item style={{ marginBottom: 14 }}>
+        <Space align="start" size={10}>
+          <Form.Item name="newsDefaultGenerate" valuePropName="checked" noStyle>
+            <Switch disabled={!can("tenants", "edit") || !newsButtonOn} />
+          </Form.Item>
+          <div>
+            <Typography.Text>{t("tenants.newsDefaultGenerateLabel")}</Typography.Text>
+            <Typography.Paragraph type="secondary" style={{ marginBottom: 0, marginTop: 4 }}>
+              {t("tenants.newsDefaultGenerateHint")}
+            </Typography.Paragraph>
+          </div>
+        </Space>
+      </Form.Item>
+    </div>
+  );
 
   const languageOptions = WHISPER_SOURCE_LANGUAGE_OPTIONS.filter((o) => o.code !== "auto").map((o) => ({
     label: o.label,
@@ -980,7 +1002,7 @@ export function AdminTenantSettingsPage() {
               {
                 key: "news",
                 label: t("tenants.tabNews"),
-                children: renderSwitchList(newsSwitches),
+                children: renderNewsTab(),
               },
               {
                 key: "syndication",

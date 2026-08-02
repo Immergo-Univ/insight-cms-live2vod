@@ -114,6 +114,7 @@ interface EditorRightPanelProps {
   /** When true, show per-clip transcript/news control. */
   transcriptNewsUiEnabled?: boolean;
   onUpdateClipNewsLocales?: (clipId: string, newsLocales: Record<string, boolean>) => void;
+  onSetClipTranscriptNewsGenerate?: (clipId: string, enabled: boolean) => void;
   /** Refetch VOD jobs after transcript speaker PATCH (realtime modal). */
   onVodJobsRefresh?: () => Promise<void>;
 }
@@ -176,6 +177,7 @@ export function EditorRightPanel({
   realtimeTranscriptUi = false,
   transcriptNewsUiEnabled = true,
   onUpdateClipNewsLocales,
+  onSetClipTranscriptNewsGenerate,
   onVodJobsRefresh,
 }: EditorRightPanelProps) {
   const [clipMetadataId, setClipMetadataId] = useState<string | null>(null);
@@ -315,6 +317,7 @@ export function EditorRightPanel({
               realtimeTranscriptUi={realtimeTranscriptUi}
               transcriptNewsUiEnabled={transcriptNewsUiEnabled}
               onUpdateClipNewsLocales={onUpdateClipNewsLocales}
+              onSetClipTranscriptNewsGenerate={onSetClipTranscriptNewsGenerate}
               vodJobs={vodJobs}
               clipVodEncodeErrors={clipVodEncodeErrors}
               onClipStartVodEncode={onClipStartVodEncode}

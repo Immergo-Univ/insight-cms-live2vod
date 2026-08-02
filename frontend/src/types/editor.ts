@@ -637,6 +637,11 @@ export interface EditorSubClipEncodeOptions {
   burnInEnabled?: boolean;
   /** Per-locale VTT generation flags (subset of tenant availableLanguages). */
   subtitleLocales?: Record<string, boolean>;
+  /**
+   * When true, encode generates transcript + news drafts (requires VTT generation).
+   * Turning this on in the editor also enables VTT for all tenant languages.
+   */
+  transcriptNewsGenerateEnabled?: boolean;
   /** Per-locale news generation flags for transcript modal. */
   newsLocales?: Record<string, boolean>;
   subtitleSettings?: EditorSubtitleSettings;

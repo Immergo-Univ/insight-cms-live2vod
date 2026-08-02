@@ -44,6 +44,7 @@ import {
   clipBurnInEnabled,
   clipHasSelectedSubtitleLocales,
   clipSubtitleGenerateEnabled,
+  clipTranscriptNewsGenerateEnabled,
 } from "@/utils/editor-subclip-subtitles";
 import { whisperLanguageLabel } from "@/types/editor-whisper-languages";
 import { Checkbox } from "@/components/base/checkbox/checkbox";
@@ -631,6 +632,7 @@ interface EditorClipsListProps {
   /** When true, show transcript control on clip rows (tenant news button). */
   transcriptNewsUiEnabled?: boolean;
   onUpdateClipNewsLocales?: (clipId: string, newsLocales: Record<string, boolean>) => void;
+  onSetClipTranscriptNewsGenerate?: (clipId: string, enabled: boolean) => void;
   vodJobs: VodJobRecord[];
   clipVodEncodeErrors: Record<string, string>;
   onClipStartVodEncode: (clipId: string, includeAds: boolean) => void | Promise<void>;
@@ -670,6 +672,7 @@ export function EditorClipsList({
   realtimeTranscriptUi = false,
   transcriptNewsUiEnabled = true,
   onUpdateClipNewsLocales,
+  onSetClipTranscriptNewsGenerate,
   vodJobs,
   clipVodEncodeErrors,
   onClipStartVodEncode,
@@ -973,26 +976,38 @@ export function EditorClipsList({
                   ) : transcriptModalClip && transcriptNewsUiEnabled ? (
                     <div className="space-y-3">
                       <p className="text-xs text-tertiary">
-                        Configure which news drafts OpenAI should generate when you encode this clip (requires subtitle
-                        generation and OPENAI_API_KEY on the encoder).
+                        When enabled, encode generates transcript and news drafts. This also turns on VTT generation for
+                        all tenant languages (requires OPENAI_API_KEY on the encoder).
                       </p>
-                      <div className="flex flex-col gap-2 rounded-lg border border-secondary bg-secondary/30 px-3 py-3">
-                        <p className="text-xs font-medium text-secondary">News languages at encode</p>
-                        {availableLanguages.map((code) => (
-                          <Checkbox
-                            key={code}
-                            size="sm"
-                            className="w-full min-w-0"
-                            isSelected={transcriptModalClip.newsLocales?.[code] !== false}
-                            onChange={(v) => {
-                              if (!onUpdateClipNewsLocales) return;
-                              const prev = transcriptModalClip.newsLocales ?? {};
-                              onUpdateClipNewsLocales(transcriptModalClip.id, { ...prev, [code]: v });
-                            }}
-                            label={whisperLanguageLabel(code)}
-                          />
-                        ))}
-                      </div>
+                      <Checkbox
+                        size="sm"
+                        className="w-full min-w-0"
+                        isSelected={clipTranscriptNewsGenerateEnabled(transcriptModalClip)}
+                        onChange={(v) => {
+                          onSetClipTranscriptNewsGenerate?.(transcriptModalClip.id, v);
+                        }}
+                        isDisabled={!onSetClipTranscriptNewsGenerate}
+                        label="Generate transcript / news"
+                      />
+                      {clipTranscriptNewsGenerateEnabled(transcriptModalClip) ? (
+                        <div className="flex flex-col gap-2 rounded-lg border border-secondary bg-secondary/30 px-3 py-3">
+                          <p className="text-xs font-medium text-secondary">News languages at encode</p>
+                          {availableLanguages.map((code) => (
+                            <Checkbox
+                              key={code}
+                              size="sm"
+                              className="w-full min-w-0"
+                              isSelected={transcriptModalClip.newsLocales?.[code] !== false}
+                              onChange={(v) => {
+                                if (!onUpdateClipNewsLocales) return;
+                                const prev = transcriptModalClip.newsLocales ?? {};
+                                onUpdateClipNewsLocales(transcriptModalClip.id, { ...prev, [code]: v });
+                              }}
+                              label={whisperLanguageLabel(code)}
+                            />
+                          ))}
+                        </div>
+                      ) : null}
                     </div>
                   ) : (
                     <p className="text-tertiary">
