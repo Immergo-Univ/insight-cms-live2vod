@@ -7,7 +7,7 @@ import {
   forwardRef,
   useState,
 } from "react";
-import { Play, PauseCircle, StopCircle, VolumeMax, VolumeX } from "@untitledui/icons";
+import { Play, PauseCircle, StopCircle, VolumeMax, VolumeX, Camera01 } from "@untitledui/icons";
 import videojs from "video.js";
 import type Player from "video.js/dist/types/player";
 import "video.js/dist/video-js.css";
@@ -44,6 +44,8 @@ interface EditorPlayerProps {
   onTransportPlay?: () => void;
   onTransportPause?: () => void;
   onTransportStop?: () => void;
+  /** Capture a poster from the current frame (same behavior as the clip row poster button). */
+  onCapturePoster?: () => void;
   /** True after Mark In (no clip selected): show hint until Mark Out. */
   markRangeAwaitingOut?: boolean;
   /** Realtime editor: show pulsing on-screen REC while a clip is open for Mark Out. */
@@ -92,6 +94,7 @@ export const EditorPlayer = forwardRef<EditorPlayerRef, EditorPlayerProps>(
       onTransportPlay,
       onTransportPause,
       onTransportStop,
+      onCapturePoster,
       markRangeAwaitingOut = false,
       realtimeRecordingActive = false,
       verticalCropActive = false,
@@ -404,6 +407,18 @@ export const EditorPlayer = forwardRef<EditorPlayerRef, EditorPlayerProps>(
                 </div>
               ) : null}
             </div>
+            {onCapturePoster ? (
+              <button
+                type="button"
+                data-editor-keyboard-seek
+                onClick={onCapturePoster}
+                className={overlayButtonClass}
+                title="Capture poster at playhead"
+                aria-label="Capture poster at playhead"
+              >
+                <Camera01 className="size-5" />
+              </button>
+            ) : null}
           </div>
         )}
         <button

@@ -1307,6 +1307,13 @@ export function EditorPage() {
     [clips, currentTime],
   );
 
+  /** Player overlay capture: attach a poster to the selected clip (or the only/first clip). */
+  const handleCapturePosterFromPlayer = useCallback(() => {
+    const targetId = selectedClipId ?? (clips.length ? clips[0].id : null);
+    if (!targetId) return;
+    handleCaptureClipPoster(targetId);
+  }, [selectedClipId, clips, handleCaptureClipPoster]);
+
   const handleSeek = useCallback((timeSeconds: number) => {
     playerRef.current?.seek(timeSeconds);
   }, []);
@@ -1765,6 +1772,7 @@ export function EditorPage() {
               onTransportPlay={handlePlay}
               onTransportPause={handlePause}
               onTransportStop={handleStop}
+              onCapturePoster={handleCapturePosterFromPlayer}
               markRangeAwaitingOut={false}
               realtimeRecordingActive={isRealtime && realtimeRecordingClipId !== null}
                 verticalCropActive={verticalCropActive}
