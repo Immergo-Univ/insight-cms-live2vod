@@ -45,7 +45,6 @@ import type {
 import {
   adjustVerticalBreakpointsAfterClipBoundsChange,
   cloneEditorClipWidget,
-  DEFAULT_EDITOR_SUBTITLE_SETTINGS,
   defaultEditorSubClipEncodeFields,
   EDITOR_VERTICAL_CROP_BP_TIME_MERGE_SEC,
   normalizeEditorClipMainCategoryIds,
@@ -714,10 +713,6 @@ export function EditorPage() {
     const id = window.setInterval(() => setRealtimeTick((n) => n + 1), 1000);
     return () => clearInterval(id);
   }, [isRealtime]);
-
-  useEffect(() => {
-    if (!tenantSubtitlesEnabled) setRealtimeTranscribeOnRec(false);
-  }, [tenantSubtitlesEnabled]);
 
   useEffect(() => {
     if (!clipState?.clipUrl) return;
