@@ -744,6 +744,48 @@ export function EditorClipsList({
     onVodJobsRefresh,
   ]);
 
+  /**
+   * Pre-encode "Generate transcript / news" control (master toggle + per-locale news).
+   * Shown before an encode job exists so editors can opt in/out and avoid unnecessary STT/news.
+   */
+  const renderTranscriptNewsConfig = (clip: EditorSubClip) => (
+    <div className="space-y-3">
+      <p className="text-xs text-tertiary">
+        When enabled, encode generates transcript and news drafts. This also turns on VTT generation for
+        all tenant languages (requires OPENAI_API_KEY on the encoder).
+      </p>
+      <Checkbox
+        size="sm"
+        className="w-full min-w-0"
+        isSelected={clipTranscriptNewsGenerateEnabled(clip)}
+        onChange={(v) => {
+          onSetClipTranscriptNewsGenerate?.(clip.id, v);
+        }}
+        isDisabled={!onSetClipTranscriptNewsGenerate}
+        label="Generate transcript / news"
+      />
+      {clipTranscriptNewsGenerateEnabled(clip) ? (
+        <div className="flex flex-col gap-2 rounded-lg border border-secondary bg-secondary/30 px-3 py-3">
+          <p className="text-xs font-medium text-secondary">News languages at encode</p>
+          {availableLanguages.map((code) => (
+            <Checkbox
+              key={code}
+              size="sm"
+              className="w-full min-w-0"
+              isSelected={clip.newsLocales?.[code] !== false}
+              onChange={(v) => {
+                if (!onUpdateClipNewsLocales) return;
+                const prev = clip.newsLocales ?? {};
+                onUpdateClipNewsLocales(clip.id, { ...prev, [code]: v });
+              }}
+              label={whisperLanguageLabel(code)}
+            />
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+
   useLayoutEffect(() => {
     if (!titleEditId) return;
     const el = titleInputRef.current;
@@ -943,11 +985,23 @@ export function EditorClipsList({
                 </h3>
                 <div className="mt-3 text-sm text-primary">
                   {!transcriptModalJob ? (
-                    <p className="text-tertiary">
-                      {realtimeTranscriptUi
-                        ? "No transcript job for this clip yet. Enable Transcribe on the REC bar and finish a segment."
-                        : "No encode job for this clip yet. Encode the clip to generate a transcript (OpenAI STT after encoding)."}
-                    </p>
+                    realtimeTranscriptUi ? (
+                      <p className="text-tertiary">
+                        No transcript job for this clip yet. Enable Transcribe on the REC bar and finish a segment.
+                      </p>
+                    ) : transcriptModalClip && transcriptNewsUiEnabled ? (
+                      <div className="space-y-3">
+                        {renderTranscriptNewsConfig(transcriptModalClip)}
+                        <p className="text-xs text-tertiary">
+                          No encode job yet — these settings apply when you encode the clip (OpenAI STT after encoding).
+                        </p>
+                      </div>
+                    ) : (
+                      <p className="text-tertiary">
+                        No encode job for this clip yet. Encode the clip to generate a transcript (OpenAI STT after
+                        encoding).
+                      </p>
+                    )
                   ) : transcriptModalJob.status === "failed" ? (
                     <p className="text-error-primary">{transcriptModalJob.error ?? "Transcript failed"}</p>
                   ) : vodJobIsActive(transcriptModalJob.status) ? (
@@ -974,41 +1028,7 @@ export function EditorClipsList({
                   ) : transcriptBackfillBusy ? (
                     <p className="text-tertiary">Loading transcript from encode artifacts…</p>
                   ) : transcriptModalClip && transcriptNewsUiEnabled ? (
-                    <div className="space-y-3">
-                      <p className="text-xs text-tertiary">
-                        When enabled, encode generates transcript and news drafts. This also turns on VTT generation for
-                        all tenant languages (requires OPENAI_API_KEY on the encoder).
-                      </p>
-                      <Checkbox
-                        size="sm"
-                        className="w-full min-w-0"
-                        isSelected={clipTranscriptNewsGenerateEnabled(transcriptModalClip)}
-                        onChange={(v) => {
-                          onSetClipTranscriptNewsGenerate?.(transcriptModalClip.id, v);
-                        }}
-                        isDisabled={!onSetClipTranscriptNewsGenerate}
-                        label="Generate transcript / news"
-                      />
-                      {clipTranscriptNewsGenerateEnabled(transcriptModalClip) ? (
-                        <div className="flex flex-col gap-2 rounded-lg border border-secondary bg-secondary/30 px-3 py-3">
-                          <p className="text-xs font-medium text-secondary">News languages at encode</p>
-                          {availableLanguages.map((code) => (
-                            <Checkbox
-                              key={code}
-                              size="sm"
-                              className="w-full min-w-0"
-                              isSelected={transcriptModalClip.newsLocales?.[code] !== false}
-                              onChange={(v) => {
-                                if (!onUpdateClipNewsLocales) return;
-                                const prev = transcriptModalClip.newsLocales ?? {};
-                                onUpdateClipNewsLocales(transcriptModalClip.id, { ...prev, [code]: v });
-                              }}
-                              label={whisperLanguageLabel(code)}
-                            />
-                          ))}
-                        </div>
-                      ) : null}
-                    </div>
+                    renderTranscriptNewsConfig(transcriptModalClip)
                   ) : (
                     <p className="text-tertiary">
                       {transcriptBackfillReasonMessage(transcriptBackfillReason)}
