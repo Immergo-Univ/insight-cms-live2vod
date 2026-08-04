@@ -347,15 +347,18 @@ export function VodAiContentTabs({
 }: VodAiContentTabsProps) {
   const tabItems = useMemo(
     () => [
-      { id: "news", label: "News", children: "News" },
       { id: "transcript", label: "Transcript", children: "Transcript" },
+      { id: "news", label: "News", children: "News" },
     ],
     [],
   );
 
   return (
-    <Tabs defaultSelectedKey="news" className="flex min-h-0 min-w-0 flex-1 flex-col gap-3">
+    <Tabs defaultSelectedKey="transcript" className="flex min-h-0 min-w-0 flex-1 flex-col gap-3">
       <Tabs.List type="underline" orientation="horizontal" size="md" items={tabItems} />
+      <Tabs.Panel id="transcript" className="min-h-0 flex-1 overflow-y-auto pt-1">
+        <VodAiTranscriptTab vod={vod} saving={transcriptSaving} onSave={onSaveTranscript} />
+      </Tabs.Panel>
       <Tabs.Panel id="news" className="min-h-0 flex-1 overflow-y-auto pt-1">
         <VodAiNewsTab
           vod={vod}
@@ -364,9 +367,6 @@ export function VodAiContentTabs({
           saving={newsSaving}
           onSave={onSaveNews}
         />
-      </Tabs.Panel>
-      <Tabs.Panel id="transcript" className="min-h-0 flex-1 overflow-y-auto pt-1">
-        <VodAiTranscriptTab vod={vod} saving={transcriptSaving} onSave={onSaveTranscript} />
       </Tabs.Panel>
     </Tabs>
   );
