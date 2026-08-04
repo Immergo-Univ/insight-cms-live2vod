@@ -752,7 +752,7 @@ export function EditorClipsList({
     <div className="space-y-3">
       <p className="text-xs text-tertiary">
         When enabled, encode generates transcript and news drafts. This also turns on VTT generation for
-        all tenant languages (requires OPENAI_API_KEY on the encoder).
+        all tenant languages.
       </p>
       <Checkbox
         size="sm"
