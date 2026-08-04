@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 
 interface EditorRealtimeSeekBarProps {
   /** Live edge (Unix seconds). Slider maximum. */
@@ -9,7 +9,7 @@ interface EditorRealtimeSeekBarProps {
   playheadEpoch: number;
   /** Playback mode: at the live edge or in a fixed past window. */
   mode: "live" | "window";
-  /** Called with the target Unix epoch when the user scrubs. */
+  /** Called with the target Unix epoch when the user commits a scrub (on release). */
   onScrub: (targetEpoch: number) => void;
   /** Jump back to the live edge. */
   onGoLive: () => void;
@@ -40,8 +40,16 @@ export function EditorRealtimeSeekBar({
   timeZone,
   isDisabled,
 }: EditorRealtimeSeekBarProps) {
-  const value = Math.min(Math.max(playheadEpoch, minEpoch), liveEpoch);
-  const isLive = mode === "live";
+  // While dragging we track the value locally and only commit onScrub on release, so the
+  // player source is not swapped mid-drag (non-blocking scrub).
+  const [dragValue, setDragValue] = useState<number | null>(null);
+
+  const clamp = (v: number) => Math.min(Math.max(v, minEpoch), liveEpoch);
+  const displayValue = clamp(dragValue ?? playheadEpoch);
+  const span = Math.max(1, liveEpoch - minEpoch);
+  const pct = Math.min(100, Math.max(0, ((displayValue - minEpoch) / span) * 100));
+
+  const isLive = mode === "live" && dragValue === null;
 
   const playheadLabel = useMemo(
     () =>
@@ -50,54 +58,76 @@ export function EditorRealtimeSeekBar({
         hour: "2-digit",
         minute: "2-digit",
         second: "2-digit",
-      }).format(new Date(value * 1000)),
-    [timeZone, value],
+      }).format(new Date(displayValue * 1000)),
+    [timeZone, displayValue],
   );
 
-  const behindLabel = isLive ? "LIVE" : formatBehind(liveEpoch - playheadEpoch);
+  const behindLabel = isLive ? "LIVE" : formatBehind(liveEpoch - displayValue);
+
+  const commit = () => {
+    if (dragValue === null) return;
+    const target = clamp(dragValue);
+    setDragValue(null);
+    onScrub(target);
+  };
 
   return (
     <div className="rounded-lg border border-secondary bg-secondary px-3 py-2.5">
-      <div className="flex items-center gap-3">
-        <span className="shrink-0 text-[11px] font-medium text-tertiary tabular-nums">-1h</span>
+      {/* Full-width scrub track with a draggable red thumb; left of the thumb (already played) is darker. */}
+      <div className="relative h-5 w-full select-none">
+        <div className="pointer-events-none absolute inset-x-0 top-1/2 h-1.5 -translate-y-1/2 rounded-full bg-tertiary" />
+        <div
+          className="pointer-events-none absolute left-0 top-1/2 h-1.5 -translate-y-1/2 rounded-full bg-quaternary"
+          style={{ width: `${pct}%` }}
+        />
+        <div
+          className="pointer-events-none absolute top-1/2 size-4 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white bg-red-600 shadow-md ring-1 ring-black/10 dark:border-gray-900"
+          style={{ left: `${pct}%` }}
+        />
         <input
           type="range"
           min={minEpoch}
           max={liveEpoch}
           step={1}
-          value={value}
+          value={Math.round(displayValue)}
           disabled={isDisabled}
-          onChange={(e) => onScrub(Number(e.target.value))}
+          onChange={(e) => setDragValue(Number(e.target.value))}
+          onPointerUp={commit}
+          onMouseUp={commit}
+          onTouchEnd={commit}
+          onKeyUp={commit}
+          onBlur={commit}
           aria-label="Seek within the last hour"
-          className="h-1.5 min-w-0 flex-1 cursor-pointer appearance-none rounded-full bg-tertiary accent-red-600 disabled:cursor-not-allowed disabled:opacity-50"
+          className="absolute inset-0 m-0 h-full w-full cursor-pointer appearance-none bg-transparent opacity-0 disabled:cursor-not-allowed"
         />
-        <span className="shrink-0 text-[11px] font-medium text-tertiary tabular-nums">LIVE</span>
-        <div className="flex shrink-0 items-center gap-2 pl-1">
-          <span className="min-w-[64px] text-right text-xs font-medium text-secondary tabular-nums">
-            {playheadLabel}
-          </span>
+      </div>
+
+      <div className="mt-1.5 flex items-center gap-3">
+        <span className="shrink-0 text-[11px] font-medium text-tertiary tabular-nums">-1h</span>
+        <div className="flex flex-1 items-center justify-center gap-2">
+          <span className="text-xs font-medium text-secondary tabular-nums">{playheadLabel}</span>
           <span
-            className={`min-w-[52px] text-right text-[11px] font-semibold tabular-nums ${
+            className={`text-[11px] font-semibold tabular-nums ${
               isLive ? "text-red-600 dark:text-red-400" : "text-amber-600"
             }`}
           >
             {behindLabel}
           </span>
-          <button
-            type="button"
-            onClick={onGoLive}
-            disabled={isDisabled || isLive}
-            className="flex shrink-0 cursor-pointer items-center gap-1.5 rounded-md border border-red-600 px-2.5 py-1 text-[11px] font-bold tracking-wide text-red-700 transition-colors hover:bg-red-600/15 disabled:cursor-default disabled:opacity-40 dark:text-red-400"
-            aria-label="Go to live edge"
-            title="Go to live edge"
-          >
-            <span
-              className={`size-2 rounded-full bg-red-600 ${isLive ? "animate-pulse" : ""}`}
-              aria-hidden
-            />
-            LIVE
-          </button>
         </div>
+        <button
+          type="button"
+          onClick={onGoLive}
+          disabled={isDisabled || isLive}
+          className="flex shrink-0 cursor-pointer items-center gap-1.5 rounded-md border border-red-600 px-2.5 py-1 text-[11px] font-bold tracking-wide text-red-700 transition-colors hover:bg-red-600/15 disabled:cursor-default disabled:opacity-40 dark:text-red-400"
+          aria-label="Go to live edge"
+          title="Go to live edge"
+        >
+          <span
+            className={`size-2 rounded-full bg-red-600 ${isLive ? "animate-pulse" : ""}`}
+            aria-hidden
+          />
+          LIVE
+        </button>
       </div>
     </div>
   );

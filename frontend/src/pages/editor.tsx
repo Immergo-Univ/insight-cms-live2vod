@@ -1778,6 +1778,19 @@ export function EditorPage() {
               onClipWidgetFocusRequestHandled={handleClipWidgetFocusRequestHandled}
               clipWidgetTimelineContext={clipWidgetTimelineContext}
             />
+            {isRealtime && (
+              <div className="mt-2 w-full">
+                <EditorRealtimeSeekBar
+                  liveEpoch={liveEpoch}
+                  minEpoch={realtimeMinEpoch}
+                  playheadEpoch={playheadEpochValue}
+                  mode={realtimePlayback.mode}
+                  onScrub={handleRealtimeScrub}
+                  onGoLive={handleRealtimeGoLive}
+                  timeZone={clientTimeZone}
+                />
+              </div>
+            )}
           </div>
           <aside className="flex min-h-0 min-w-0 flex-1 basis-0 flex-col border-l border-secondary py-0 pl-2">
             <EditorRightPanel
@@ -1851,24 +1864,13 @@ export function EditorPage() {
         {/* Row 2: timeline full width below player + preview + clips */}
         <section className="flex w-full min-w-0 shrink-0 flex-col border-t border-dashed border-secondary px-4 py-2">
           {isRealtime ? (
-            <div className="flex flex-col gap-2">
-              <EditorRealtimeSeekBar
-                liveEpoch={liveEpoch}
-                minEpoch={realtimeMinEpoch}
-                playheadEpoch={playheadEpochValue}
-                mode={realtimePlayback.mode}
-                onScrub={handleRealtimeScrub}
-                onGoLive={handleRealtimeGoLive}
-                timeZone={clientTimeZone}
-              />
-              <EditorRealtimeRecBar
-                clips={clips}
-                awaitingMarkOut={realtimeRecordingClipId !== null}
-                onRecPress={handleRealtimeRec}
-                timeZone={clientTimeZone}
-                clockTick={realtimeTick}
-              />
-            </div>
+            <EditorRealtimeRecBar
+              clips={clips}
+              awaitingMarkOut={realtimeRecordingClipId !== null}
+              onRecPress={handleRealtimeRec}
+              timeZone={clientTimeZone}
+              clockTick={realtimeTick}
+            />
           ) : (
             <EditorTimeline
               ref={timelineRef}
