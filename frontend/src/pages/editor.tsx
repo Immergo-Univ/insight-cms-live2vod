@@ -755,6 +755,7 @@ export function EditorPage() {
    * window bounds (not on the per-second tick) so the player is not recreated while playing.
    */
   const playerClipUrl = useMemo(() => {
+    if (!clipState) return "";
     if (isRealtime && realtimePlayback.mode === "window") {
       return buildClipWindowUrl(
         clipState,
