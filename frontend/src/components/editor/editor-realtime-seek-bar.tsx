@@ -1,4 +1,7 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+
+/** Seconds of tolerance to consider the real playhead as having caught up to a committed scrub. */
+const CATCH_UP_TOLERANCE_SEC = 2;
 
 interface EditorRealtimeSeekBarProps {
   /** Live edge (Unix seconds). Slider maximum. */
@@ -43,13 +46,24 @@ export function EditorRealtimeSeekBar({
   // While dragging we track the value locally and only commit onScrub on release, so the
   // player source is not swapped mid-drag (non-blocking scrub).
   const [dragValue, setDragValue] = useState<number | null>(null);
+  // After releasing, the thumb stays pinned at the dropped position until the real playhead
+  // catches up (the new archive window may still be loading), so it never snaps back.
+  const [heldValue, setHeldValue] = useState<number | null>(null);
 
   const clamp = (v: number) => Math.min(Math.max(v, minEpoch), liveEpoch);
-  const displayValue = clamp(dragValue ?? playheadEpoch);
+  const displayValue = clamp(dragValue ?? heldValue ?? playheadEpoch);
   const span = Math.max(1, liveEpoch - minEpoch);
   const pct = Math.min(100, Math.max(0, ((displayValue - minEpoch) / span) * 100));
 
-  const isLive = mode === "live" && dragValue === null;
+  const isLive = mode === "live" && dragValue === null && heldValue === null;
+
+  // Release the pinned value once the real playhead reaches the committed position.
+  useEffect(() => {
+    if (heldValue === null) return;
+    if (Math.abs(playheadEpoch - heldValue) <= CATCH_UP_TOLERANCE_SEC) {
+      setHeldValue(null);
+    }
+  }, [playheadEpoch, heldValue]);
 
   const playheadLabel = useMemo(
     () =>
@@ -68,7 +82,15 @@ export function EditorRealtimeSeekBar({
     if (dragValue === null) return;
     const target = clamp(dragValue);
     setDragValue(null);
+    setHeldValue(target);
     onScrub(target);
+  };
+
+  // Commit on pointer release and drop focus so the global Space shortcut (Mark In/Out)
+  // keeps working after scrubbing — a focused range input would otherwise swallow Space.
+  const releaseAndBlur = (el: HTMLInputElement) => {
+    commit();
+    el.blur();
   };
 
   return (
@@ -92,9 +114,9 @@ export function EditorRealtimeSeekBar({
           value={Math.round(displayValue)}
           disabled={isDisabled}
           onChange={(e) => setDragValue(Number(e.target.value))}
-          onPointerUp={commit}
-          onMouseUp={commit}
-          onTouchEnd={commit}
+          onPointerUp={(e) => releaseAndBlur(e.currentTarget)}
+          onMouseUp={(e) => releaseAndBlur(e.currentTarget)}
+          onTouchEnd={(e) => releaseAndBlur(e.currentTarget)}
           onKeyUp={commit}
           onBlur={commit}
           aria-label="Seek within the last hour"
@@ -116,7 +138,11 @@ export function EditorRealtimeSeekBar({
         </div>
         <button
           type="button"
-          onClick={onGoLive}
+          onClick={() => {
+            setDragValue(null);
+            setHeldValue(null);
+            onGoLive();
+          }}
           disabled={isDisabled || isLive}
           className="flex shrink-0 cursor-pointer items-center gap-1.5 rounded-md border border-red-600 px-2.5 py-1 text-[11px] font-bold tracking-wide text-red-700 transition-colors hover:bg-red-600/15 disabled:cursor-default disabled:opacity-40 dark:text-red-400"
           aria-label="Go to live edge"
