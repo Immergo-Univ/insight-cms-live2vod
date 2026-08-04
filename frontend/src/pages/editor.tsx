@@ -24,8 +24,10 @@ import type { VodJobRecord } from "@/types/vod-job";
 import { pickLatestVodEncodeJobForEditorClip } from "@/types/vod-job";
 import {
   FRAME_DURATION_SEC,
+  REALTIME_SEEK_BACK_SEC,
   ZOOM_LEVELS_MS,
 } from "@/components/editor/editor-constants";
+import { EditorRealtimeSeekBar } from "@/components/editor/editor-realtime-seek-bar";
 import type { RealtimeTranscribeSettings } from "@/components/editor/editor-transcribe-settings-modal";
 import { clampClipTimeRange } from "@/components/editor/editor-timeline";
 import type { EditorPlayerRef, EditorTimelineHandle } from "@/components/editor";
@@ -264,7 +266,11 @@ function buildSingleClipEditorStateJson(
     const d = new Date(t * 1000);
     return Number.isFinite(d.getTime()) ? d.toISOString() : "";
   };
-  const parentWallStart = clipState.startTime;
+  const t0 = clipState.startTime;
+  // Realtime clips may start before t0 (seek-back window): extend the archive window into
+  // the past and re-express relative times as 0-based within [parentWallStart, parentWallEnd].
+  const shift = Math.min(0, target.startTime);
+  const parentWallStart = t0 + shift;
   const parentWallEnd = parentWallEndUnix(clipState, allClips, nowUnix);
   const parentClipUrl = buildClipWindowUrl(clipState, parentWallStart, parentWallEnd);
 
@@ -275,12 +281,14 @@ function buildSingleClipEditorStateJson(
       .sort((a, b) => a.startTime - b.startTime);
     adsOut = overlapping.map((a, i) => ({
       index: i + 1,
-      startTime: a.startTime,
-      endTime: a.endTime,
-      startProgramDateTime: absEpochToIso(parentWallStart + a.startTime),
-      endProgramDateTime: absEpochToIso(parentWallStart + a.endTime),
+      startTime: a.startTime - shift,
+      endTime: a.endTime - shift,
+      startProgramDateTime: absEpochToIso(t0 + a.startTime),
+      endProgramDateTime: absEpochToIso(t0 + a.endTime),
     }));
   }
+
+  const targetJson = editorSubClipToStateJsonClip(target);
 
   const transcribeSettings = loadRealtimeTranscribeSettings();
   const rootFromClip = transcribeRootFromClip(target, tenantForSpec);
@@ -305,7 +313,7 @@ function buildSingleClipEditorStateJson(
     subtitleLanguages: rootFromClip.subtitleLanguages,
     ...(clipState.channelId?.trim() ? { channelId: clipState.channelId.trim() } : {}),
     posters: [],
-    clips: [{ ...editorSubClipToStateJsonClip(target), order: 1 }],
+    clips: [{ ...targetJson, startTime: targetJson.startTime - shift, endTime: targetJson.endTime - shift, order: 1 }],
     ads: adsOut,
     ...rootTranscribe,
   };
@@ -339,7 +347,11 @@ function buildEditorStateJson(
     return Number.isFinite(d.getTime()) ? d.toISOString() : "";
   };
 
-  const parentWallStart = clipState.startTime;
+  const t0 = clipState.startTime;
+  // Extend the archive window backwards to cover clips marked in the realtime seek-back window
+  // (negative offsets), then re-express all relative times as 0-based within the window.
+  const shift = Math.min(0, ...clips.map((c) => c.startTime));
+  const parentWallStart = t0 + shift;
   const parentWallEnd = parentWallEndUnix(clipState, clips, nowUnix);
   const parentClipUrl = buildClipWindowUrl(clipState, parentWallStart, parentWallEnd);
 
@@ -348,10 +360,10 @@ function buildEditorStateJson(
   const adsOut: EditorStateJson["ads"] = includeAds
     ? ads.map((a, i) => ({
         index: i + 1,
-        startTime: a.startTime,
-        endTime: a.endTime,
-        startProgramDateTime: absEpochToIso(parentWallStart + a.startTime),
-        endProgramDateTime: absEpochToIso(parentWallStart + a.endTime),
+        startTime: a.startTime - shift,
+        endTime: a.endTime - shift,
+        startProgramDateTime: absEpochToIso(t0 + a.startTime),
+        endProgramDateTime: absEpochToIso(t0 + a.endTime),
       }))
     : [];
 
@@ -362,7 +374,10 @@ function buildEditorStateJson(
     endTime: parentWallEnd,
     ...(clipState.channelId?.trim() ? { channelId: clipState.channelId.trim() } : {}),
     posters: [],
-    clips: sortedClips.map((c) => editorSubClipToStateJsonClip(c)),
+    clips: sortedClips.map((c) => {
+      const j = editorSubClipToStateJsonClip(c);
+      return { ...j, startTime: j.startTime - shift, endTime: j.endTime - shift };
+    }),
     ads: adsOut,
   };
 }
@@ -496,6 +511,16 @@ export function EditorPage() {
   const [playingClipId, setPlayingClipId] = useState<string | null>(null);
   /** Realtime REC: clip id between Mark In and Mark Out (drives preview REC badge only). */
   const [realtimeRecordingClipId, setRealtimeRecordingClipId] = useState<string | null>(null);
+  /**
+   * Realtime playback position: either the live edge (`live`) or a fixed past window
+   * (`window`) served by an archive URL with startTime/endTime. The window bounds are
+   * pinned at scrub time so the player source (and thus the reload) stays stable while playing.
+   */
+  const [realtimePlayback, setRealtimePlayback] = useState<{
+    mode: "live" | "window";
+    windowStartEpoch: number;
+    windowEndEpoch: number;
+  }>({ mode: "live", windowStartEpoch: 0, windowEndEpoch: 0 });
   const [clipVodEncodeErrors, setClipVodEncodeErrors] = useState<Record<string, string>>({});
   /** After adding a text widget, player overlay selects it (dashed frame + handles). */
   const [clipWidgetFocusRequestId, setClipWidgetFocusRequestId] = useState<string | null>(null);
@@ -713,6 +738,71 @@ export function EditorPage() {
     const id = window.setInterval(() => setRealtimeTick((n) => n + 1), 1000);
     return () => clearInterval(id);
   }, [isRealtime]);
+
+  /** Current live edge (Unix seconds). Ticks every second while in realtime mode. */
+  const liveEpoch = useMemo(
+    () => (isRealtime ? Math.floor(Date.now() / 1000) : 0),
+    // realtimeTick drives the recompute each second.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [isRealtime, realtimeTick],
+  );
+  /** Oldest scrubbable instant (Unix seconds): live edge minus the 1h seek-back buffer. */
+  const realtimeMinEpoch = liveEpoch - REALTIME_SEEK_BACK_SEC;
+
+  /**
+   * Player source. In realtime `window` mode we serve a fixed archive window
+   * [windowStart, windowEnd]; otherwise the raw live URL. Depends only on the pinned
+   * window bounds (not on the per-second tick) so the player is not recreated while playing.
+   */
+  const playerClipUrl = useMemo(() => {
+    if (isRealtime && realtimePlayback.mode === "window") {
+      return buildClipWindowUrl(
+        clipState,
+        realtimePlayback.windowStartEpoch,
+        realtimePlayback.windowEndEpoch,
+      );
+    }
+    return clipState.clipUrl;
+  }, [isRealtime, realtimePlayback, clipState]);
+
+  /** Absolute Unix epoch under the playhead: live edge in `live` mode, window start + player time in `window` mode. */
+  const playheadEpoch = useCallback((): number => {
+    if (!isRealtime) return 0;
+    if (realtimePlayback.mode === "window") {
+      const t = playerRef.current?.getCurrentTime() ?? 0;
+      return realtimePlayback.windowStartEpoch + Math.floor(t);
+    }
+    return Math.floor(Date.now() / 1000);
+  }, [isRealtime, realtimePlayback]);
+
+  /** Playhead epoch for display/slider (recomputed each tick and on currentTime change). */
+  const playheadEpochValue = useMemo(() => {
+    if (!isRealtime) return 0;
+    if (realtimePlayback.mode === "window") {
+      return realtimePlayback.windowStartEpoch + Math.floor(currentTime);
+    }
+    return liveEpoch;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isRealtime, realtimePlayback, currentTime, liveEpoch]);
+
+  const handleRealtimeGoLive = useCallback(() => {
+    setRealtimePlayback((prev) => (prev.mode === "live" ? prev : { ...prev, mode: "live" }));
+  }, []);
+
+  const handleRealtimeScrub = useCallback(
+    (targetEpoch: number) => {
+      const live = Math.floor(Date.now() / 1000);
+      const minEpoch = live - REALTIME_SEEK_BACK_SEC;
+      // Scrubbing to (or past) the live edge returns to live playback.
+      if (targetEpoch >= live - 2) {
+        setRealtimePlayback({ mode: "live", windowStartEpoch: 0, windowEndEpoch: 0 });
+        return;
+      }
+      const start = Math.min(Math.max(targetEpoch, minEpoch), live);
+      setRealtimePlayback({ mode: "window", windowStartEpoch: start, windowEndEpoch: live });
+    },
+    [],
+  );
 
   useEffect(() => {
     if (!clipState?.clipUrl) return;
@@ -1018,17 +1108,18 @@ export function EditorPage() {
 
   const handleRealtimeRec = useCallback(() => {
     if (!clipState || clipState.selectionMode !== "realtime") return;
-    const offset = Math.floor(Date.now() / 1000) - clipState.startTime;
     const nowUnix = Date.now() / 1000;
+    // Mark In/Out track the playhead, which may be in the past (scrubbed window).
+    // Offsets are relative to the session t0 and can be negative (down to -REALTIME_SEEK_BACK_SEC).
+    const liveHeadOffset = Math.floor(nowUnix) - clipState.startTime;
+    const offset = playheadEpoch() - clipState.startTime;
 
     if (realtimeRecordingClipId === null) {
       setSelectedAdId(null);
-      const eff = getEditorEffectiveDuration(clipState, clips, duration, isRealtime, nowUnix);
       const windowSec = (ZOOM_LEVELS_MS[zoomIndex] ?? ZOOM_LEVELS_MS[0]) / 1000;
-      // At the live timeline head, `getEditorEffectiveDuration` often yields `eff === offset`, so
-      // `min(offset + windowSec, eff)` becomes `offset` and we bail — REC / Space appear dead after a clip.
-      const effForEnd = Math.max(eff, offset + FRAME_DURATION_SEC);
-      const end = Math.min(offset + windowSec, effForEnd);
+      // Placeholder Mark Out = playhead + zoom window, capped at the live head (never past live).
+      const cap = Math.max(liveHeadOffset, offset + FRAME_DURATION_SEC);
+      const end = Math.min(offset + windowSec, cap);
       if (end <= offset) return;
       const id = crypto.randomUUID();
       setClips((prev) => {
@@ -1073,6 +1164,7 @@ export function EditorPage() {
     duration,
     isRealtime,
     zoomIndex,
+    playheadEpoch,
     tenantSubtitlesEnabled,
     subtitlesDefaultEnabled,
     defaultClipSyndication,
@@ -1137,7 +1229,11 @@ export function EditorPage() {
         isRealtime,
         Date.now() / 1000,
       );
-      const r = clampClipTimeRange(startTime, endTime, maxT, FRAME_DURATION_SEC);
+      // Realtime allows a negative lower bound (up to the 1h seek-back window before t0).
+      const minT = isRealtime
+        ? Math.floor(Date.now() / 1000) - REALTIME_SEEK_BACK_SEC - clipState.startTime
+        : 0;
+      const r = clampClipTimeRange(startTime, endTime, maxT, FRAME_DURATION_SEC, minT);
       if (!r) return null;
       const cur = clips.find((c) => c.id === clipId);
       if (!cur) return null;
@@ -1162,7 +1258,10 @@ export function EditorPage() {
         isRealtime,
         Date.now() / 1000,
       );
-      const r = clampClipTimeRange(startTime, endTime, maxT, FRAME_DURATION_SEC);
+      const minT = isRealtime
+        ? Math.floor(Date.now() / 1000) - REALTIME_SEEK_BACK_SEC - clipState.startTime
+        : 0;
+      const r = clampClipTimeRange(startTime, endTime, maxT, FRAME_DURATION_SEC, minT);
       if (!r) return null;
       const cur = ads.find((a) => a.id === adId);
       if (!cur) return null;
@@ -1449,7 +1548,8 @@ export function EditorPage() {
       void playerRef.current?.play();
     }, 500);
     return () => clearTimeout(id);
-  }, [clipState?.clipUrl, clipState?.selectionMode]);
+    // Replays after every realtime source swap (live <-> past window).
+  }, [playerClipUrl, clipState?.clipUrl, clipState?.selectionMode]);
 
   if (!clipState?.clipUrl) {
     return (
@@ -1653,7 +1753,7 @@ export function EditorPage() {
           <div className="flex min-h-0 min-w-0 flex-1 flex-col self-start">
             <EditorPlayer
               ref={playerRef}
-              clipUrl={clipState.clipUrl}
+              clipUrl={playerClipUrl}
               muted={muted}
               onMutedChange={setMuted}
               onTimeUpdate={setCurrentTime}
@@ -1750,13 +1850,24 @@ export function EditorPage() {
         {/* Row 2: timeline full width below player + preview + clips */}
         <section className="flex w-full min-w-0 shrink-0 flex-col border-t border-dashed border-secondary px-4 py-2">
           {isRealtime ? (
-            <EditorRealtimeRecBar
-              clips={clips}
-              awaitingMarkOut={realtimeRecordingClipId !== null}
-              onRecPress={handleRealtimeRec}
-              timeZone={clientTimeZone}
-              clockTick={realtimeTick}
-            />
+            <div className="flex flex-col gap-2">
+              <EditorRealtimeSeekBar
+                liveEpoch={liveEpoch}
+                minEpoch={realtimeMinEpoch}
+                playheadEpoch={playheadEpochValue}
+                mode={realtimePlayback.mode}
+                onScrub={handleRealtimeScrub}
+                onGoLive={handleRealtimeGoLive}
+                timeZone={clientTimeZone}
+              />
+              <EditorRealtimeRecBar
+                clips={clips}
+                awaitingMarkOut={realtimeRecordingClipId !== null}
+                onRecPress={handleRealtimeRec}
+                timeZone={clientTimeZone}
+                clockTick={realtimeTick}
+              />
+            </div>
           ) : (
             <EditorTimeline
               ref={timelineRef}

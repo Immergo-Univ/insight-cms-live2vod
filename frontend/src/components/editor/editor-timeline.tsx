@@ -101,16 +101,22 @@ export function filterRelativeTimeTyping(raw: string): string {
   return raw.replace(/[^\d:]/g, "").slice(0, 32);
 }
 
-/** Clamp sub-clip [start,end] to [0,maxDuration] with minimum length; swap if start > end. */
+/**
+ * Clamp sub-clip [start,end] to [minTime,maxDuration] with minimum length; swap if start > end.
+ * `minTime` may be negative (realtime seek-back window, where offsets are relative to session t0).
+ */
 export function clampClipTimeRange(
   start: number,
   end: number,
   maxDuration: number,
   minDuration: number = FRAME_DURATION_SEC,
+  minTime: number = 0,
 ): { startTime: number; endTime: number } | null {
-  const maxT = Math.max(0, maxDuration);
-  if (maxT <= 0) return null;
-  const minLen = Math.min(Math.max(minDuration, 1e-6), maxT);
+  const lowT = Math.min(minTime, maxDuration);
+  const maxT = Math.max(lowT, maxDuration);
+  if (maxT <= lowT) return null;
+  const span = maxT - lowT;
+  const minLen = Math.min(Math.max(minDuration, 1e-6), span);
   let s = start;
   let e = end;
   if (s > e) {
@@ -118,11 +124,11 @@ export function clampClipTimeRange(
     s = e;
     e = tmp;
   }
-  s = Math.max(0, Math.min(s, maxT));
-  e = Math.max(0, Math.min(e, maxT));
+  s = Math.max(lowT, Math.min(s, maxT));
+  e = Math.max(lowT, Math.min(e, maxT));
   if (e - s < minLen) {
     e = Math.min(maxT, s + minLen);
-    s = Math.max(0, e - minLen);
+    s = Math.max(lowT, e - minLen);
   }
   if (e <= s) return null;
   return { startTime: s, endTime: e };

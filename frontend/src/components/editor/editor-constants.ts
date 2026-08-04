@@ -35,6 +35,9 @@ export const COLUMN_WIDTH_PX = 120;
 /** Duration of one frame in seconds (30 fps). Used for arrow-key step. */
 export const FRAME_DURATION_SEC = 1 / 30;
 
+/** Realtime seek-back buffer: how far behind the live edge the seek bar can scrub (seconds). */
+export const REALTIME_SEEK_BACK_SEC = 3600;
+
 /**
  * Build thumbnail URL for a given time (seconds from clip start).
  */
