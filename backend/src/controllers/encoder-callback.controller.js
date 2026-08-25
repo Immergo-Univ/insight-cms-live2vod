@@ -81,6 +81,21 @@ encoderCallbackRouter.patch("/jobs/:jobId", requireEncoderSecret, async (req, re
     if (patch.transcriptText || patch.status === "completed") {
       void trySyncInsightVodWhisperSubtitleLabels(updatedJob);
     }
+    // Async STT/news arrive AFTER the encode "completed" (post-publish leader flow) via a late
+    // PATCH that does NOT carry status="completed". The one-shot completed sync below already ran
+    // (empty) by then, so push transcript/news to insight-api here too whenever a non-completed
+    // patch actually carries transcript/news content. syncInsightVodTranscriptAndNews is a no-op
+    // when both arrays are empty, so partial progress patches never spam insight-api.
+    const carriesTranscriptOrNews =
+      patch.transcriptText != null ||
+      patch.transcriptNewsBundle != null ||
+      patch.transcriptNewsEn != null ||
+      patch.transcriptNewsEs != null ||
+      patch.transcriptNewsHe != null ||
+      patch.transcriptDiarization != null;
+    if (patch.status !== "completed" && carriesTranscriptOrNews) {
+      void trySyncInsightVodTranscriptAndNews(updatedJob);
+    }
     // Wait for the immergo encode to finish, then push transcript/news to insight-api.
     // Mid-encode STT patches are stored on the job; Insight is updated once on completed.
     if (patch.status === "completed") {
