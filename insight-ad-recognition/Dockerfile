@@ -40,6 +40,12 @@ ENV VIRTUAL_ENV=/opt/venv
 RUN python3 -m venv "$VIRTUAL_ENV"
 ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 
+# Upgrade the pip toolchain first: Debian bookworm ships pip 23.0.1, which mis-normalizes wheel
+# names (e.g. "typing_extensions" vs "typing-extensions"), discards valid wheels and falls back to
+# building the sdist — which then fails because its build backend (flit_core) is not on the CPU
+# wheel index that `--index-url` pins. Modern pip accepts the wheel and skips the sdist build.
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel
+
 # CPU-only torch first (from the dedicated CPU wheel index to avoid CUDA payloads).
 RUN pip install --no-cache-dir torch==2.5.1 --index-url https://download.pytorch.org/whl/cpu
 
