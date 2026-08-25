@@ -69,7 +69,6 @@ import {
   buildDefaultNewsLocales,
   mergeSubtitleLocalesWithTenantPool,
   selectedSubtitleLanguageCodes,
-  tenantAvailableLanguages,
 } from "@/utils/tenant-subtitle-defaults";
 import {
   applyTranscriptNewsGenerateOff,
@@ -293,38 +292,17 @@ function buildSingleClipEditorStateJson(
 
   const transcribeSettings = loadRealtimeTranscribeSettings();
   const rootFromClip = transcribeRootFromClip(target, tenantForSpec);
-  let rootTranscribe: {
-    transcribeSpeakerDiarization?: boolean;
-    transcribeGenerateNews?: boolean;
-    transcribeNewsLocales?: Record<string, boolean>;
-    transcribeInferSpeakerNames?: boolean;
-  };
-  if (clipSubtitleGenerateEnabled(target)) {
-    // News for a subtitle-ON clip is driven by the per-clip "Generate transcript / news" toggle.
-    // Fallback: also honor the session "News tabs" switch, so enabling it there drafts news for the
-    // whole tenant language pool even when the per-clip news toggle was left off (they used to be
-    // two disconnected controls, which silently produced transcript-only encodes).
-    let transcribeGenerateNews = rootFromClip.transcribeGenerateNews === true;
-    let transcribeNewsLocales = rootFromClip.transcribeNewsLocales;
-    if (!transcribeGenerateNews && transcribeSettings.generateNews) {
-      const langs = tenantAvailableLanguages(tenantForSpec);
-      if (langs.length > 0) {
-        transcribeGenerateNews = true;
-        transcribeNewsLocales = Object.fromEntries(langs.map((code) => [code, true]));
+  const rootTranscribe = clipSubtitleGenerateEnabled(target)
+    ? {
+        transcribeSpeakerDiarization: rootFromClip.transcribeSpeakerDiarization,
+        transcribeGenerateNews: rootFromClip.transcribeGenerateNews,
+        transcribeNewsLocales: rootFromClip.transcribeNewsLocales,
+        transcribeInferSpeakerNames: rootFromClip.transcribeInferSpeakerNames,
       }
-    }
-    rootTranscribe = {
-      transcribeSpeakerDiarization: rootFromClip.transcribeSpeakerDiarization,
-      transcribeGenerateNews,
-      transcribeNewsLocales,
-      transcribeInferSpeakerNames: rootFromClip.transcribeInferSpeakerNames,
-    };
-  } else {
-    rootTranscribe = {
-      transcribeSpeakerDiarization: transcribeSettings.speakerDiarization,
-      transcribeGenerateNews: transcribeSettings.generateNews,
-    };
-  }
+    : {
+        transcribeSpeakerDiarization: transcribeSettings.speakerDiarization,
+        transcribeGenerateNews: transcribeSettings.generateNews,
+      };
 
   return {
     clipUrl: parentClipUrl,
