@@ -99,6 +99,7 @@ async function whisperArtifactUrlsForJob(job) {
     provider: s3.provider,
     bucket: s3.bucket,
     customerFolder: s3.customerFolder,
+    pathStyle: s3.pathStyle,
     renditions,
   });
   const spec = job.editorSpec && typeof job.editorSpec === "object" ? job.editorSpec : null;

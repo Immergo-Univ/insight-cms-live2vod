@@ -257,7 +257,11 @@ export async function startBackgroundVodJob(opts) {
         await mergeJobEditorSpec(jobId, (prev) => ({
           ...(prev || {}),
           ...(encoderS3.cdnBase ? { __cdnBase: encoderS3.cdnBase } : {}),
-          ...(encoderS3.customerFolder ? { __customerFolder: encoderS3.customerFolder } : {}),
+          ...(s3?.provider === "s3" && !s3?.pathStyle
+            ? {}
+            : encoderS3.customerFolder
+              ? { __customerFolder: encoderS3.customerFolder }
+              : {}),
         })).catch(() => {});
       }
       const { vodGuid, insightWebhook } = await createInsightVodForJob({
