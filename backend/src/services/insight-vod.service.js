@@ -841,6 +841,7 @@ export async function createInsightVod({
     provider: s3?.provider,
     bucket: s3?.bucket,
     customerFolder: folder,
+    pathStyle: s3?.pathStyle,
     renditions,
   });
 

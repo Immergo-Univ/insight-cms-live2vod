@@ -25,8 +25,10 @@ function masterUrlFromEditorSpec(spec: EditorStateJson | null | undefined): stri
   const folder =
     typeof spec.__customerFolder === "string" ? spec.__customerFolder.trim().replace(/^\/+|\/+$/g, "") : "";
   const guid = typeof spec.__vodGuid === "string" ? spec.__vodGuid.trim() : "";
-  if (!cdnBase || !folder || !guid) return null;
-  return `${cdnBase}/${folder}/transcoded/${guid}/hls/master.m3u8`;
+  if (!cdnBase || !guid) return null;
+  return folder
+    ? `${cdnBase}/${folder}/transcoded/${guid}/hls/master.m3u8`
+    : `${cdnBase}/transcoded/${guid}/hls/master.m3u8`;
 }
 
 /**

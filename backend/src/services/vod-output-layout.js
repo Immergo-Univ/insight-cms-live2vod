@@ -82,6 +82,7 @@ export function encoderOutputPrefix(s3, tenantId) {
  * @param {string} [opts.provider]
  * @param {string} [opts.bucket]
  * @param {string} [opts.customerFolder]
+ * @param {boolean} [opts.pathStyle] true for DigitalOcean Spaces (incl. DO registered as "s3")
  * @param {Array<{ res?: string, resolution?: string, notGenerateMp4?: boolean }>} [opts.renditions]
  */
 export function vodOutputUrls({
@@ -91,11 +92,16 @@ export function vodOutputUrls({
   provider,
   bucket,
   customerFolder,
+  pathStyle = false,
   renditions = [],
 }) {
   const { urlFolder } = vodLayout({ tenantId, provider, bucket, customerFolder });
   const cdn = String(cdnBase || "").replace(/\/+$/, "");
-  const base = `${cdn}/${urlFolder}/${VOD_TRANSCODED_FOLDER}/${guid}`;
+  // S3 plano: URL = {cdn}/transcoded/{guid}/... (no tenant/bucket segment).
+  // Wasabi, DigitalOcean, and DO-as-s3 (pathStyle) keep {cdn}/{urlFolder}/transcoded/...
+  const accountFolder =
+    provider === "s3" && !pathStyle ? "" : `/${urlFolder}`;
+  const base = `${cdn}${accountFolder}/${VOD_TRANSCODED_FOLDER}/${guid}`;
   const mp4Entries = renditions
     .filter((r) => !r?.notGenerateMp4)
     .map((r) => {

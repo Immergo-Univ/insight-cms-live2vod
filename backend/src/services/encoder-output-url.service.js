@@ -41,6 +41,7 @@ export async function resolveJobMasterOutputUrl(job) {
       provider: s3.provider,
       bucket: s3.bucket,
       customerFolder: s3.customerFolder,
+      pathStyle: s3.pathStyle,
       renditions,
     });
     return urls.masterUrl || null;
