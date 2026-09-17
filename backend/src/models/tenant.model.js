@@ -32,6 +32,16 @@ export function registerTenantModel(sequelize) {
         allowNull: false,
         defaultValue: ["en", "es", "he"],
       },
+      /** Opt-in: show AI dubbing (Inworld) controls in the editor. */
+      dubbingEnabled: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
+      /** When true, new clips start with dubbing enabled by default. */
+      dubbingDefaultEnabled: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
+      /** Pool of dubbing target language codes (admin Dubbing tab). Null → fall back to availableLanguages. */
+      availableDubbingLanguages: {
+        type: DataTypes.JSONB,
+        allowNull: true,
+        defaultValue: null,
+      },
       /** Show View transcript & news button in editor clip rows. */
       newsButtonEnabled: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
       /** Pre-encode: news locale toggles ON by default in transcript modal. */

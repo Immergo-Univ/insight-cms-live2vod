@@ -522,6 +522,20 @@ export interface EditorSubtitlesConfig {
   transcribeNewsLocales?: Record<string, boolean>;
 }
 
+/** AI dubbing (Inworld voice clone + TTS) per output clip. */
+export interface EditorDubbingConfig {
+  enabled: true;
+  /** Spoken language hint for translation / cloning (`auto` allowed). */
+  sourceLanguage: WhisperLanguageCode;
+  /** Target languages to generate as extra audio tracks. */
+  targetLocales: Record<string, boolean>;
+  /** Keep original audio as track 0 (multi-audio MP4). Always true in v1. */
+  preserveOriginalAudio: true;
+  provider: "inworld";
+  /** Prefer speakingRate + atempo to match original segment durations. */
+  timeFit?: boolean;
+}
+
 /** Default subtitle / whisper options for a new sub-clip or when fields are missing (clipping / timeline encode). */
 export const DEFAULT_EDITOR_SUBTITLE_SETTINGS: EditorSubtitleSettings = {
   burnIn: false,
@@ -645,6 +659,12 @@ export interface EditorSubClipEncodeOptions {
   /** Per-locale news generation flags for transcript modal. */
   newsLocales?: Record<string, boolean>;
   subtitleSettings?: EditorSubtitleSettings;
+  /** When true, encode generates AI-dubbed audio tracks (Inworld). */
+  dubbingEnabled?: boolean;
+  /** Source speech language for dubbing (`auto` = detect via STT). */
+  dubbingSourceLanguage?: WhisperLanguageCode;
+  /** Per-locale dubbing target flags (subset of tenant availableDubbingLanguages). */
+  dubbingLocales?: Record<string, boolean>;
   /** Over-video widgets (text / image) for this output clip; positions are relative to the widget viewport (see docs on `EditorClipWidgetLayout`). */
   widgets?: EditorClipWidget[];
 }
@@ -689,6 +709,8 @@ export interface EditorStateJsonClip {
   verticalCropPanSettings?: EditorVerticalCropPanSettings;
   /** Per-output-clip burned-in subtitles (whisper). */
   subtitles?: EditorSubtitlesConfig;
+  /** Per-output-clip AI dubbing (Inworld). */
+  dubbing?: EditorDubbingConfig;
   /** Over-video widgets for this clip (layout relative to full frame or 9:16 strip when crop is on). */
   widgets?: EditorClipWidget[];
   syndication?: EditorClipSyndication;
@@ -740,6 +762,10 @@ export interface EditorStateJson {
   availableLanguages?: string[];
   /** Selected subtitle language codes for this encode. */
   subtitleLanguages?: string[];
+  /** Tenant dubbing language pool (admin Dubbing tab). */
+  availableDubbingLanguages?: string[];
+  /** Selected dubbing target language codes for this encode. */
+  dubbingLanguages?: string[];
   /** insight-api VOD guid (= encoder originId); set by backend at job dispatch. */
   __vodGuid?: string;
   /** Public HLS master URL precomputed at job dispatch ({cdn}/{tenant}/transcoded/{guid}/hls/master.m3u8). */
@@ -750,6 +776,20 @@ export interface EditorStateJson {
   __customerFolder?: string;
   /** Default poster CDN URL for transcript news share pages. */
   __vodPosterUrl?: string;
+  /**
+   * Encoded output assets for the playback preview (one tab per asset in the UI).
+   * Set by the backend from the encoder callback (currently encoder-lite dubbing jobs).
+   * `hls` assets expose selectable audio-language tracks; `mp4` are progressive downloads.
+   */
+  __outputAssets?: EncodedOutputAsset[];
+}
+
+/** One playable encoded output (rendered as a tab in the encoded-output preview). */
+export interface EncodedOutputAsset {
+  kind: "hls" | "mp4";
+  /** Human label for the tab (e.g. "HLS · multi-audio", "MP4 1280x720"). */
+  label: string;
+  url: string;
 }
 
 /** Defaults for encode-related fields when creating or hydrating a sub-clip. */

@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { config } from "../config.js";
-import { getJob, updateJob } from "../services/vod-jobs.store.js";
+import { getJob, updateJob, mergeJobEditorSpec } from "../services/vod-jobs.store.js";
 import { trySyncInsightVodWhisperSubtitleLabels, trySyncInsightVodTranscriptAndNews } from "../services/insight-vod.service.js";
 import { tryBackfillWhisperTranscriptForJob } from "../services/whisper-transcript-backfill.service.js";
 import { tryYoutubeSyndicationAfterJobCompleted } from "../services/youtube-syndication-runner.service.js";
@@ -9,6 +9,7 @@ import { tryFacebookSyndicationAfterJobCompleted } from "../services/facebook-sy
 import { tryInstagramSyndicationAfterJobCompleted } from "../services/instagram-syndication-runner.service.js";
 import { tryTiktokSyndicationAfterJobCompleted } from "../services/tiktok-syndication-runner.service.js";
 import { resolveJobMasterOutputUrl } from "../services/encoder-output-url.service.js";
+import { anyDubbingEnabled } from "../services/vod-encode-runner.service.js";
 
 /** Fields the encoder service may update on a job (defense in depth). */
 const ENCODER_PATCH_KEYS = new Set([
@@ -30,6 +31,30 @@ const ENCODER_PATCH_KEYS = new Set([
   "openaiClipUsage",
   "transcriptNewsBundle",
 ]);
+
+/**
+ * Validate the encoder-reported output asset list before persisting it on editorSpec.
+ * Keeps only `{ kind: "hls"|"mp4", label, url }` entries with an absolute http(s) URL.
+ *
+ * @param {unknown} raw
+ * @returns {Array<{ kind: "hls" | "mp4", label: string, url: string }>}
+ */
+function sanitizeOutputAssets(raw) {
+  if (!Array.isArray(raw)) return [];
+  const out = [];
+  const seen = new Set();
+  for (const entry of raw) {
+    if (!entry || typeof entry !== "object") continue;
+    const url = typeof entry.url === "string" ? entry.url.trim() : "";
+    if (!/^https?:\/\//i.test(url) || seen.has(url)) continue;
+    const kind = entry.kind === "mp4" ? "mp4" : "hls";
+    const label = typeof entry.label === "string" && entry.label.trim() ? entry.label.trim() : url;
+    seen.add(url);
+    out.push({ kind, label: label.slice(0, 120), url });
+    if (out.length >= 24) break;
+  }
+  return out;
+}
 
 export const encoderCallbackRouter = Router();
 
@@ -68,12 +93,33 @@ encoderCallbackRouter.patch("/jobs/:jobId", requireEncoderSecret, async (req, re
     return res.status(400).json({ error: "No valid fields to patch" });
   }
   if (patch.status === "completed") {
-    const masterUrl = await resolveJobMasterOutputUrl(job);
-    if (masterUrl) {
-      patch.outputUrl = masterUrl;
-      if (!Array.isArray(patch.outputUrls) || patch.outputUrls.length === 0) {
-        patch.outputUrls = [masterUrl];
+    // Dubbing jobs run on encoder-lite, which already reports its own multi-audio HLS master
+    // (with selectable audio languages). Do NOT override it with the immergo VOD master URL,
+    // which would drop the dubbed audio tracks.
+    const isDubbingJob = anyDubbingEnabled(job.editorSpec);
+    const encoderProvidedOutput =
+      typeof body.outputUrl === "string" && body.outputUrl.trim().length > 0;
+    if (!(isDubbingJob && encoderProvidedOutput)) {
+      const masterUrl = await resolveJobMasterOutputUrl(job);
+      if (masterUrl) {
+        patch.outputUrl = masterUrl;
+        if (!Array.isArray(patch.outputUrls) || patch.outputUrls.length === 0) {
+          patch.outputUrls = [masterUrl];
+        }
       }
+    }
+
+    // Persist the per-asset playback list (MP4 renditions + HLS master) on editorSpec so the CMS
+    // can render one preview tab per asset. Stored in JSONB (no schema migration needed).
+    const assets = sanitizeOutputAssets(body.outputAssets);
+    if (assets.length > 0) {
+      await mergeJobEditorSpec(jobId, (prev) => ({
+        ...(prev || {}),
+        __outputAssets: assets,
+      })).catch((e) => {
+        const m = e instanceof Error ? e.message : String(e);
+        console.error(`[encoder-callback] persist outputAssets job=${jobId}`, m);
+      });
     }
   }
   const updatedJob = await updateJob(jobId, patch);

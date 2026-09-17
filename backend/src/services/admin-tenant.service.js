@@ -152,6 +152,11 @@ export async function adminUpdateTenant(tenantId, body) {
   if (body.availableLanguages !== undefined) {
     row.availableLanguages = normalizeAvailableLanguages(body.availableLanguages);
   }
+  if (body.dubbingEnabled !== undefined) row.dubbingEnabled = Boolean(body.dubbingEnabled);
+  if (body.dubbingDefaultEnabled !== undefined) row.dubbingDefaultEnabled = Boolean(body.dubbingDefaultEnabled);
+  if (body.availableDubbingLanguages !== undefined) {
+    row.availableDubbingLanguages = normalizeAvailableLanguages(body.availableDubbingLanguages);
+  }
   if (body.subtitlesDefaultBurnInLanguage !== undefined || body.availableLanguages !== undefined) {
     row.subtitlesDefaultBurnInLanguage = normalizeDefaultBurnInLanguage(
       body.subtitlesDefaultBurnInLanguage !== undefined

@@ -2,6 +2,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter, Route, Routes } from "react-router";
 import { EditorPage } from "@/pages/editor";
+import { VodEditorPage } from "@/pages/vod-editor";
 import { Live2VodPage } from "@/pages/live2vod";
 import { NotFound } from "@/pages/not-found";
 import { ProcessingClipsPage } from "@/pages/processing-clips";
@@ -30,6 +31,7 @@ createRoot(document.getElementById("root")!).render(
                             <Routes>
                                 <Route path="/" element={<Live2VodPage />} />
                                 <Route path="/editor" element={<EditorPage />} />
+                                <Route path="/vod-editor" element={<VodEditorPage />} />
                                 <Route path="/vod/:vod_guid" element={<VodByGuidPage />} />
                                 <Route path="/processing-clips" element={<ProcessingClipsPage />} />
                                 <Route path="/admin/*" element={<AdminApp />} />

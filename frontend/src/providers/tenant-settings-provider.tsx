@@ -8,6 +8,10 @@ import {
   tenantNewsButtonEnabled,
   tenantSubtitlesTranscriptNewsUiEnabled,
 } from "@/utils/tenant-subtitle-defaults";
+import {
+  tenantAvailableDubbingLanguages,
+  tenantDubbingEnabled,
+} from "@/utils/tenant-dubbing-defaults";
 import type { EditorSubtitleSettings } from "@/types/editor";
 
 type TenantSettingsContextValue = {
@@ -23,6 +27,10 @@ type TenantSettingsContextValue = {
   newsButtonEnabled: boolean;
   newsDefaultGenerate: boolean;
   availableLanguages: string[];
+  /** When true, show AI dubbing controls in the editor. */
+  dubbingEnabled: boolean;
+  /** Pool of dubbing target languages from tenant admin. */
+  availableDubbingLanguages: string[];
   /** Default subtitle modal options for new clips (from tenant admin). */
   tenantDefaultSubtitleSettings: EditorSubtitleSettings & {
     transcribeSpeakerDiarization: boolean;
@@ -169,6 +177,8 @@ export function TenantSettingsProvider({ children }: { children: ReactNode }) {
   const newsButtonEnabled = tenantNewsButtonEnabled(tenant);
   const newsDefaultGenerate = tenant?.newsDefaultGenerate !== false;
   const availableLanguages = tenantAvailableLanguages(tenant);
+  const dubbingEnabled = Boolean(tenantId && tenantDubbingEnabled(tenant));
+  const availableDubbingLanguages = tenantAvailableDubbingLanguages(tenant);
   const tenantDefaultSubtitleSettings = useMemo(
     () => buildTenantDefaultSubtitleSettings(tenant),
     [tenant],
@@ -195,6 +205,8 @@ export function TenantSettingsProvider({ children }: { children: ReactNode }) {
       newsButtonEnabled,
       newsDefaultGenerate,
       availableLanguages,
+      dubbingEnabled,
+      availableDubbingLanguages,
       tenantDefaultSubtitleSettings,
       syndicationYoutubeEnabled,
       syndicationYoutubeDefaultEnabled,
@@ -218,6 +230,8 @@ export function TenantSettingsProvider({ children }: { children: ReactNode }) {
       newsButtonEnabled,
       newsDefaultGenerate,
       availableLanguages,
+      dubbingEnabled,
+      availableDubbingLanguages,
       tenantDefaultSubtitleSettings,
       syndicationYoutubeEnabled,
       syndicationYoutubeDefaultEnabled,

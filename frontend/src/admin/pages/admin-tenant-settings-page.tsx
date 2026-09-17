@@ -21,6 +21,9 @@ type TenantDetail = {
   subtitlesDefaultEnabled?: boolean;
   subtitlesTranscriptNewsUiEnabled?: boolean;
   availableLanguages?: string[];
+  dubbingEnabled?: boolean;
+  dubbingDefaultEnabled?: boolean;
+  availableDubbingLanguages?: string[];
   newsButtonEnabled?: boolean;
   newsDefaultGenerate?: boolean;
   subtitlesDefaultBurnIn?: boolean;
@@ -59,6 +62,9 @@ type FormShape = {
   subtitlesEnabled: boolean;
   subtitlesDefaultEnabled: boolean;
   availableLanguages: string[];
+  dubbingEnabled: boolean;
+  dubbingDefaultEnabled: boolean;
+  availableDubbingLanguages: string[];
   newsButtonEnabled: boolean;
   newsDefaultGenerate: boolean;
   subtitlesDefaultBurnIn: boolean;
@@ -188,6 +194,12 @@ export function AdminTenantSettingsPage() {
         subtitlesEnabled: data.subtitlesEnabled !== false,
         subtitlesDefaultEnabled: data.subtitlesDefaultEnabled === true,
         availableLanguages: pool,
+        dubbingEnabled: data.dubbingEnabled === true,
+        dubbingDefaultEnabled: data.dubbingDefaultEnabled === true,
+        availableDubbingLanguages:
+          Array.isArray(data.availableDubbingLanguages) && data.availableDubbingLanguages.length
+            ? data.availableDubbingLanguages
+            : pool,
         newsButtonEnabled:
           data.newsButtonEnabled !== false && data.subtitlesTranscriptNewsUiEnabled !== false,
         newsDefaultGenerate: data.newsDefaultGenerate !== false,
@@ -344,6 +356,11 @@ export function AdminTenantSettingsPage() {
       subtitlesEnabled: Boolean(form.getFieldValue("subtitlesEnabled")),
       subtitlesDefaultEnabled: Boolean(form.getFieldValue("subtitlesDefaultEnabled")),
       availableLanguages: (form.getFieldValue("availableLanguages") ?? []).filter(
+        (c: unknown) => typeof c === "string" && c.trim(),
+      ),
+      dubbingEnabled: Boolean(form.getFieldValue("dubbingEnabled")),
+      dubbingDefaultEnabled: Boolean(form.getFieldValue("dubbingDefaultEnabled")),
+      availableDubbingLanguages: (form.getFieldValue("availableDubbingLanguages") ?? []).filter(
         (c: unknown) => typeof c === "string" && c.trim(),
       ),
       newsButtonEnabled: Boolean(form.getFieldValue("newsButtonEnabled")),
@@ -994,6 +1011,52 @@ export function AdminTenantSettingsPage() {
                         disabled={!can("tenants", "edit")}
                         options={languageOptions}
                         placeholder={t("tenants.availableLanguagesPlaceholder")}
+                      />
+                    </Form.Item>
+                  </div>
+                ),
+              },
+              {
+                key: "dubbing",
+                label: t("tenants.tabDubbing"),
+                children: (
+                  <div style={{ maxWidth: 900 }}>
+                    <Form.Item style={{ marginBottom: 14 }}>
+                      <Space align="start" size={10}>
+                        <Form.Item name="dubbingEnabled" valuePropName="checked" noStyle>
+                          <Switch disabled={!can("tenants", "edit")} />
+                        </Form.Item>
+                        <div>
+                          <Typography.Text>{t("tenants.dubbingEnabledLabel")}</Typography.Text>
+                          <Typography.Paragraph type="secondary" style={{ marginBottom: 0, marginTop: 4 }}>
+                            {t("tenants.dubbingEnabledHint")}
+                          </Typography.Paragraph>
+                        </div>
+                      </Space>
+                    </Form.Item>
+                    <Form.Item style={{ marginBottom: 14 }}>
+                      <Space align="start" size={10}>
+                        <Form.Item name="dubbingDefaultEnabled" valuePropName="checked" noStyle>
+                          <Switch disabled={!can("tenants", "edit")} />
+                        </Form.Item>
+                        <div>
+                          <Typography.Text>{t("tenants.dubbingDefaultEnabledLabel")}</Typography.Text>
+                          <Typography.Paragraph type="secondary" style={{ marginBottom: 0, marginTop: 4 }}>
+                            {t("tenants.dubbingDefaultEnabledHint")}
+                          </Typography.Paragraph>
+                        </div>
+                      </Space>
+                    </Form.Item>
+                    <Form.Item
+                      name="availableDubbingLanguages"
+                      label={t("tenants.availableDubbingLanguagesLabel")}
+                      extra={t("tenants.availableDubbingLanguagesHint")}
+                    >
+                      <Select
+                        mode="multiple"
+                        disabled={!can("tenants", "edit")}
+                        options={languageOptions}
+                        placeholder={t("tenants.availableDubbingLanguagesPlaceholder")}
                       />
                     </Form.Item>
                   </div>

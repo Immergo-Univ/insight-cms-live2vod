@@ -142,6 +142,16 @@ function anySubtitlesEnabled(spec) {
 }
 
 /**
+ * @param {object} [spec]
+ * @returns {boolean}
+ */
+export function anyDubbingEnabled(spec) {
+  if (Array.isArray(spec?.clips) && spec.clips.some((c) => c?.dubbing?.enabled === true)) return true;
+  const langs = spec?.dubbingLanguages;
+  return Array.isArray(langs) && langs.length > 0;
+}
+
+/**
  * @param {string} tenantId
  * @returns {Promise<boolean>}
  */
@@ -152,6 +162,19 @@ async function tenantAllowsSubtitles(tenantId) {
   const row = await Tenant.findOne({ where: { tenantId: String(tenantId || "").trim() } });
   if (!row) return true;
   return row.subtitlesEnabled !== false;
+}
+
+/**
+ * @param {string} tenantId
+ * @returns {Promise<boolean>}
+ */
+async function tenantAllowsDubbing(tenantId) {
+  const sequelize = getSequelize();
+  if (!sequelize) return true;
+  const { Tenant } = sequelize.models;
+  const row = await Tenant.findOne({ where: { tenantId: String(tenantId || "").trim() } });
+  if (!row) return false;
+  return row.dubbingEnabled === true;
 }
 
 /**
@@ -203,6 +226,25 @@ export async function startBackgroundVodJob(opts) {
     return jobId;
   }
 
+  const dub = anyDubbingEnabled(spec);
+  if (dub && !(await tenantAllowsDubbing(tenantId))) {
+    await createJob({
+      id: jobId,
+      tenantId,
+      status: "failed",
+      progress: 0,
+      phase: "failed",
+      error: "AI dubbing is disabled for this tenant",
+      message: "AI dubbing is disabled for this tenant",
+      clipUrl: clipUrlPreview || spec.clipUrl,
+      jobKind: spec?.realtimeTranscribeOnly === true ? "realtime_transcribe" : "vod_encode",
+      ...(editorClipId ? { editorClipId } : {}),
+      editorSpec: spec && typeof spec === "object" ? JSON.parse(JSON.stringify(spec)) : null,
+    });
+    vodEncodeStdout(`rejected job=${jobId} tenant=${tenantId} dubbing=disabled_by_tenant`);
+    return jobId;
+  }
+
   await createJob({
     id: jobId,
     tenantId,
@@ -216,10 +258,10 @@ export async function startBackgroundVodJob(opts) {
     editorSpec: spec && typeof spec === "object" ? JSON.parse(JSON.stringify(spec)) : null,
   });
   vodEncodeStdout(
-    `queued job=${jobId} tenant=${tenantId} subtitles=${subs ? "yes" : "no"}${editorClipId ? ` editorClipId=${editorClipId}` : ""}`,
+    `queued job=${jobId} tenant=${tenantId} subtitles=${subs ? "yes" : "no"} dubbing=${dub ? "yes" : "no"}${editorClipId ? ` editorClipId=${editorClipId}` : ""}`,
   );
 
-  const { serviceUrl, secret } = config.encoder;
+  const { serviceUrl, secret, liteServiceUrl } = config.encoder;
   if (!serviceUrl || !secret) {
     await updateJob(jobId, {
       status: "failed",
@@ -229,6 +271,16 @@ export async function startBackgroundVodJob(opts) {
       message: "Set ENCODER_SERVICE_URL and SECRET on the backend",
     });
     return jobId;
+  }
+
+  // Dubbing jobs are routed to encoder-lite when a dedicated URL is configured: encoder-lite
+  // produces a multi-audio HLS (original + dubs), which the default (immergo) pipeline cannot.
+  // In that case we skip creating the immergo Insight VOD asset (no __masterUrl override), so the
+  // HLS master reported by encoder-lite stays as the job's output URL.
+  const useLiteForDubbing = dub && Boolean(liteServiceUrl);
+  const dispatchUrl = useLiteForDubbing ? liteServiceUrl : serviceUrl;
+  if (useLiteForDubbing) {
+    vodEncodeStdout(`routing job=${jobId} tenant=${tenantId} dubbing=yes -> encoder-lite ${dispatchUrl}`);
   }
 
   // Diagnostic: news is generated on the encoder only when spec.transcribeGenerateNews !== false.
@@ -260,16 +312,18 @@ export async function startBackgroundVodJob(opts) {
           ...(encoderS3.customerFolder ? { __customerFolder: encoderS3.customerFolder } : {}),
         })).catch(() => {});
       }
-      const { vodGuid, insightWebhook } = await createInsightVodForJob({
-        tenantId,
-        spec,
-        accountId,
-        s3,
-        renditions,
-        jobId,
-        editorClipId,
-      });
-      const res = await fetch(`${serviceUrl}/encoder/jobs`, {
+      const { vodGuid, insightWebhook } = useLiteForDubbing
+        ? {}
+        : await createInsightVodForJob({
+            tenantId,
+            spec,
+            accountId,
+            s3,
+            renditions,
+            jobId,
+            editorClipId,
+          });
+      const res = await fetch(`${dispatchUrl}/encoder/jobs`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

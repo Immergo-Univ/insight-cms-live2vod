@@ -1,0 +1,8 @@
+{
+  "title": "VOD Editor",
+  "goBack": "Go back",
+  "noSource": "No source assets. Open this editor from the CMS.",
+  "sourceMp4": "Source MP4",
+  "download": "Download",
+  "clipsEmptyHint": "Use Mark In / Mark Out to add ranges."
+}

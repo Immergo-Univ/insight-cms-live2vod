@@ -3,6 +3,9 @@
  */
 
 import { S3Client, PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
+import fs from "fs/promises";
+import { createReadStream } from "fs";
+import path from "path";
 import { config } from "../config.js";
 
 /** @type {S3Client | null} */
@@ -127,6 +130,87 @@ export async function putVodMp4(tenantId, fileName, body) {
     }),
   );
   return { key, publicUrl: publicUrlForVodKey(key) };
+}
+
+/**
+ * Bucket-relative base key for a job's HLS tree.
+ * @param {string} tenantId
+ * @param {string} jobId
+ * @param {string} [clipTag] e.g. "clip1" for multi-clip jobs; omitted for single-clip.
+ * @returns {string}
+ */
+export function vodHlsBaseKey(tenantId, jobId, clipTag) {
+  const seg = sanitizeTenantSegment(tenantId);
+  const j = String(jobId).replace(/[^a-zA-Z0-9_-]/g, "_");
+  const tag = clipTag ? `/${String(clipTag).replace(/[^a-zA-Z0-9_-]/g, "_")}` : "";
+  return objectKeySuffix(`generated-vods/${seg}/${j}${tag}/hls`);
+}
+
+/**
+ * @param {string} fileName
+ * @returns {string}
+ */
+function hlsContentType(fileName) {
+  const lower = fileName.toLowerCase();
+  if (lower.endsWith(".m3u8")) return "application/vnd.apple.mpegurl";
+  if (lower.endsWith(".m4s")) return "video/mp4";
+  if (lower.endsWith(".mp4")) return "video/mp4";
+  if (lower.endsWith(".ts")) return "video/MP2T";
+  return "application/octet-stream";
+}
+
+/**
+ * Recursively collect files (absolute paths + posix-relative keys) under `dir`.
+ * @param {string} dir
+ * @param {string} [rel]
+ * @returns {Promise<Array<{ abs: string, rel: string }>>}
+ */
+async function walkFiles(dir, rel = "") {
+  const entries = await fs.readdir(dir, { withFileTypes: true });
+  /** @type {Array<{ abs: string, rel: string }>} */
+  const out = [];
+  for (const entry of entries) {
+    const abs = path.join(dir, entry.name);
+    const childRel = rel ? `${rel}/${entry.name}` : entry.name;
+    if (entry.isDirectory()) {
+      out.push(...(await walkFiles(abs, childRel)));
+    } else if (entry.isFile()) {
+      out.push({ abs, rel: childRel });
+    }
+  }
+  return out;
+}
+
+/**
+ * Upload a local HLS directory tree (master + variant playlists + segments) with public-read.
+ *
+ * @param {string} tenantId
+ * @param {string} jobId
+ * @param {string | undefined} clipTag
+ * @param {string} localDir Directory containing master.m3u8 and stream_N subfolders.
+ * @param {string} [masterFileName]
+ * @returns {Promise<{ baseKey: string, masterKey: string, masterUrl: string | null }>}
+ */
+export async function putVodHlsDir(tenantId, jobId, clipTag, localDir, masterFileName = "master.m3u8") {
+  const c = getClient();
+  if (!c) throw new Error("S3 not configured (need S3_* credentials, bucket, endpoint)");
+  const baseKey = vodHlsBaseKey(tenantId, jobId, clipTag);
+  const files = await walkFiles(localDir);
+  for (const f of files) {
+    const key = `${baseKey}/${f.rel}`;
+    await c.send(
+      new PutObjectCommand({
+        Bucket: config.s3Logos.bucket,
+        Key: key,
+        Body: createReadStream(f.abs),
+        ContentType: hlsContentType(f.rel),
+        ACL: "public-read",
+        CacheControl: "public, max-age=31536000, immutable",
+      }),
+    );
+  }
+  const masterKey = `${baseKey}/${masterFileName}`;
+  return { baseKey, masterKey, masterUrl: publicUrlForVodKey(masterKey) };
 }
 
 /**

@@ -60,6 +60,8 @@ interface EditorRightPanelProps {
   onAddHorizontalClip: () => void;
   onAddAdSlot?: () => void;
   addAdSlotDisabled?: boolean;
+  /** When false, hide all ads UI (ads list + "Add Ad Slot" + with-ads encode). Defaults to true. */
+  adsEnabled?: boolean;
   vodJobs: VodJobRecord[];
   clipVodEncodeErrors: Record<string, string>;
   onClipStartVodEncode: (clipId: string, includeAds: boolean) => void | Promise<void>;
@@ -82,6 +84,8 @@ interface EditorRightPanelProps {
   onOpenClipSubtitleGenerate?: (clipId: string) => void;
   onOpenClipSubtitleBurn?: (clipId: string) => void;
   subtitlesControlsEnabled?: boolean;
+  onOpenClipDubbing?: (clipId: string) => void;
+  dubbingControlsEnabled?: boolean;
   availableLanguages?: string[];
   /** Tenant slug from URL; required for syndication API. */
   syndicationTenantId?: string;
@@ -146,6 +150,7 @@ export function EditorRightPanel({
   onAddHorizontalClip,
   onAddAdSlot,
   addAdSlotDisabled = false,
+  adsEnabled = true,
   vodJobs,
   clipVodEncodeErrors,
   onClipStartVodEncode,
@@ -159,6 +164,8 @@ export function EditorRightPanel({
   onOpenClipSubtitleGenerate,
   onOpenClipSubtitleBurn,
   subtitlesControlsEnabled = false,
+  onOpenClipDubbing,
+  dubbingControlsEnabled = false,
   availableLanguages = ["en", "es", "he"],
   syndicationTenantId = "",
   syndicationYoutubeEnabled = false,
@@ -299,6 +306,8 @@ export function EditorRightPanel({
               onOpenClipSubtitleGenerate={onOpenClipSubtitleGenerate}
               onOpenClipSubtitleBurn={onOpenClipSubtitleBurn}
               subtitlesControlsEnabled={subtitlesControlsEnabled}
+              onOpenClipDubbing={onOpenClipDubbing}
+              dubbingControlsEnabled={dubbingControlsEnabled}
               availableLanguages={availableLanguages}
               onOpenSyndication={
                 (syndicationYoutubeEnabled ||
@@ -322,9 +331,11 @@ export function EditorRightPanel({
               clipVodEncodeErrors={clipVodEncodeErrors}
               onClipStartVodEncode={onClipStartVodEncode}
               onClipCancelVodEncode={onClipCancelVodEncode}
+              adsEnabled={adsEnabled}
               onVodJobsRefresh={onVodJobsRefresh}
             />
-            {selectionMode !== "realtime" &&
+            {adsEnabled &&
+            selectionMode !== "realtime" &&
             onSelectAd &&
             onRemoveAd &&
             onAdOrderChange &&
@@ -394,13 +405,15 @@ export function EditorRightPanel({
                 >
                   Add Horizontal Clip
                 </MenuItem>
-                <MenuItem
-                  id="add-ad"
-                  isDisabled={addAdSlotDisabled || !onAddAdSlot}
-                  className="cursor-pointer rounded-md px-3 py-2 text-left text-sm text-primary outline-none data-[focused]:bg-secondary"
-                >
-                  Add Ad Slot
-                </MenuItem>
+                {adsEnabled ? (
+                  <MenuItem
+                    id="add-ad"
+                    isDisabled={addAdSlotDisabled || !onAddAdSlot}
+                    className="cursor-pointer rounded-md px-3 py-2 text-left text-sm text-primary outline-none data-[focused]:bg-secondary"
+                  >
+                    Add Ad Slot
+                  </MenuItem>
+                ) : null}
               </Menu>
             </AriaPopover>
           </MenuTrigger>
