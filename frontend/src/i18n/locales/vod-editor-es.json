@@ -4,5 +4,6 @@
   "noSource": "No hay assets de origen. Abri este editor desde el CMS.",
   "sourceMp4": "MP4 de origen",
   "download": "Descargar",
-  "clipsEmptyHint": "Usa Mark In / Mark Out para agregar rangos."
+  "clipsEmptyHint": "Usa Mark In / Mark Out para agregar rangos.",
+  "createClips": "Crear clips"
 }

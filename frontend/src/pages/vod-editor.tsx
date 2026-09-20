@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, Download01 } from "@untitledui/icons";
+import { Clapperboard, Download01 } from "@untitledui/icons";
 import { I18nextProvider, useTranslation } from "react-i18next";
-import { useLocation, useNavigate } from "react-router";
+import { useLocation } from "react-router";
 import { useTimezone } from "@/hooks/use-timezone";
 import {
   EditorPlayer,
@@ -317,7 +317,6 @@ function applySubClipBoundsWithVerticalCrop(
 /** Embeddable VOD editor (replacement for the Angular VIDEO_EDITOR), without ADs markers. */
 function VodEditorInner() {
   const { t } = useTranslation("vodEditor");
-  const navigate = useNavigate();
   const location = useLocation();
   const clientTimeZone = useTimezone();
 
@@ -536,8 +535,6 @@ function VodEditorInner() {
   const subtitleSettingsForPlayer = normalizeEditorSubtitleSettings(
     selectedEncodeClip?.subtitleSettings ?? tenantDefaultSubtitleSettings,
   );
-
-  const handleBack = () => navigate(-1);
 
   useEffect(() => {
     if (!isPlaying || playUntilTime === null) return;
@@ -1125,6 +1122,17 @@ function VodEditorInner() {
     [clipStateForSpec, clips, refreshVodJobs, tenant],
   );
 
+  /**
+   * Encode every clip in the list (VOD source is transparent: same encode flow
+   * as live2vod). Per-clip validation / errors are handled by
+   * `handleClipStartVodEncode`.
+   */
+  const handleCreateAllClips = useCallback(async () => {
+    for (const c of clips) {
+      await handleClipStartVodEncode(c.id);
+    }
+  }, [clips, handleClipStartVodEncode]);
+
   const handleClipCancelVodEncode = useCallback(
     async (clipId: string) => {
       const j = pickLatestVodEncodeJobForEditorClip(vodJobsRef.current, clipId);
@@ -1197,15 +1205,7 @@ function VodEditorInner() {
   if (!clipState) {
     return (
       <div className="flex h-full flex-col bg-primary">
-        <header className="flex items-center gap-3 border-b border-secondary px-4 py-3">
-          <button
-            onClick={handleBack}
-            className="flex size-8 cursor-pointer items-center justify-center rounded-md transition-colors hover:bg-secondary"
-          >
-            <ArrowLeft className="size-4 text-fg-quaternary" />
-          </button>
-          <h1 className="text-lg font-semibold text-primary">{t("title")}</h1>
-        </header>
+        {/* Embedded as an iframe in insight: no header (title / back / separator). */}
         <main className="flex flex-1 flex-col items-center justify-center gap-2">
           <p className="text-sm text-tertiary">{t("noSource")}</p>
         </main>
@@ -1217,20 +1217,12 @@ function VodEditorInner() {
 
   return (
     <div className="flex h-full flex-col bg-primary">
-      <header className="flex shrink-0 items-center gap-3 border-b border-secondary px-4 py-2">
-        <button
-          onClick={handleBack}
-          className="flex size-8 cursor-pointer items-center justify-center rounded-md transition-colors hover:bg-secondary"
-          aria-label={t("goBack")}
-        >
-          <ArrowLeft className="size-4 text-fg-quaternary" />
-        </button>
-        <h1 className="text-lg font-semibold text-primary">{t("title")}</h1>
-      </header>
-
+      {/* Embedded as an iframe in insight: no header (title / back / separator). */}
       <main className="flex min-h-0 flex-1 flex-col overflow-hidden">
-        <div className="flex min-h-0 flex-1 flex-row items-stretch gap-1.5 overflow-hidden px-4 py-2 sm:gap-2">
-          <div className="flex min-h-0 min-w-0 flex-1 flex-col self-start">
+        {/* VOD clipping tool (iframe): size to content and top-align so the timeline stays visible without scrolling. */}
+        <div className="flex min-h-0 shrink-0 flex-row items-start gap-1.5 overflow-hidden px-4 py-2 sm:gap-2">
+          {/* Give the clips panel more room than live2vod (aside wider than the player). Scoped to this page only. */}
+          <div className="flex min-h-0 min-w-0 flex-[3] basis-0 flex-col self-start">
             <EditorPlayer
               ref={playerRef}
               clipUrl={clipState.clipUrl}
@@ -1275,8 +1267,10 @@ function VodEditorInner() {
               </div>
             ) : null}
           </div>
-          <aside className="flex min-h-0 min-w-0 flex-1 basis-0 flex-col border-l border-secondary py-0 pl-2">
+          <aside className="flex min-h-0 min-w-0 flex-[4] basis-0 flex-col border-l border-secondary py-0 pl-2">
             <EditorRightPanel
+              fillAvailableHeight={false}
+              clipsListHeightClassName="min-h-[45vh] max-h-[65vh]"
               selectionMode={selectionMode}
               clips={clips}
               clipUrl={clipState.clipUrl}
@@ -1357,6 +1351,19 @@ function VodEditorInner() {
             onMarkOut={handleMarkOut}
           />
         </section>
+
+        {/* Primary action for the VOD clipping tool: send all clips to encode. */}
+        <div className="flex w-full shrink-0 items-center justify-end border-t border-secondary px-4 py-3">
+          <button
+            type="button"
+            onClick={() => void handleCreateAllClips()}
+            disabled={clips.length === 0}
+            className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-lg border-2 border-brand bg-brand-solid px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-solid-hover disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <Clapperboard className="size-4" aria-hidden />
+            {t("createClips")}
+          </button>
+        </div>
       </main>
 
       {editorJsonDebug ? (
