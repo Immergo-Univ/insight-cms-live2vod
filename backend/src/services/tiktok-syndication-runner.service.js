@@ -4,6 +4,7 @@ import { getJob, mergeJobEditorSpec } from "./vod-jobs.store.js";
 import { uploadVideoToTiktok } from "./tenant-syndication.service.js";
 import { getTiktokSyndicationDefaults } from "./admin-settings.service.js";
 import { getActiveAccountsForPublish } from "./tenant-syndication-accounts.service.js";
+import { resolveJobSyndicationMp4Url } from "./encoder-output-url.service.js";
 import { vodEncodeStdout } from "../utils/vod-encode-log.js";
 
 function pickClipFromSpec(spec, editorClipId) {
@@ -74,14 +75,11 @@ export async function tryTiktokSyndicationAfterJobCompleted(jobId) {
   const tt = synd.tiktok && typeof synd.tiktok === "object" && !Array.isArray(synd.tiktok) ? synd.tiktok : {};
   if (tt.enabled !== true) return;
 
-  const videoUrl =
-    typeof job.outputUrl === "string" && /^https?:\/\//i.test(job.outputUrl.trim())
-      ? job.outputUrl.trim()
-      : Array.isArray(job.outputUrls) && job.outputUrls.length > 0 && typeof job.outputUrls[0] === "string"
-        ? String(job.outputUrls[0]).trim()
-        : "";
+  // Social upload APIs need a real MP4, not the HLS master (job.outputUrl). Derive the MP4 from
+  // the generated content (at least one MP4 rendition is always produced).
+  const videoUrl = await resolveJobSyndicationMp4Url(job);
   if (!videoUrl) {
-    vodEncodeStdout(`tiktok-syndication skip job=${jobId} reason=no_output_url`);
+    vodEncodeStdout(`tiktok-syndication skip job=${jobId} reason=no_mp4_output`);
     return;
   }
 

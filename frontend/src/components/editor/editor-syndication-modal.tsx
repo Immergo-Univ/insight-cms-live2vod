@@ -410,6 +410,11 @@ interface EditorSyndicationModalProps {
   onOpenChange: (open: boolean) => void;
   tenantId: string;
   clip: EditorSubClip | null;
+  /**
+   * Read-only syndication upload results from the latest encode job's editorSpec. Drives the
+   * per-network result feedback without mutating the editable clip configuration drafts.
+   */
+  syndicationResults?: EditorClipSyndication | null;
   clipUrl: string;
   channelId: string;
   readOnly?: boolean;
@@ -431,6 +436,7 @@ export function EditorSyndicationModal({
   onOpenChange,
   tenantId,
   clip,
+  syndicationResults,
   clipUrl,
   channelId,
   readOnly = false,
@@ -985,21 +991,27 @@ export function EditorSyndicationModal({
   const hasFacebookAccounts = facebookAccounts.length > 0;
   const hasInstagramAccounts = instagramAccounts.length > 0;
   const hasTiktokAccounts = tiktokAccounts.length > 0;
+  // Upload results come from the completed job's editorSpec (read-only), not the editable drafts.
+  const ytResultBranch: SyndicationUploadBranch = syndicationResults?.youtube ?? {};
+  const twResultBranch: SyndicationUploadBranch = syndicationResults?.twitter ?? {};
+  const fbResultBranch: SyndicationUploadBranch = syndicationResults?.facebook ?? {};
+  const igResultBranch: SyndicationUploadBranch = syndicationResults?.instagram ?? {};
+  const ttResultBranch: SyndicationUploadBranch = syndicationResults?.tiktok ?? {};
   const tabItems = [
     enabledNetworks.youtube
-      ? { id: "youtube", label: `YouTube${syndicationUploadTabSuffix(ytDraft, youtubeAccounts.length)}`, children: "YouTube" }
+      ? { id: "youtube", label: `YouTube${syndicationUploadTabSuffix(ytResultBranch, youtubeAccounts.length)}`, children: "YouTube" }
       : null,
     enabledNetworks.twitter
-      ? { id: "twitter", label: `Twitter / X${syndicationUploadTabSuffix(twDraft, twitterAccounts.length)}`, children: "Twitter / X" }
+      ? { id: "twitter", label: `Twitter / X${syndicationUploadTabSuffix(twResultBranch, twitterAccounts.length)}`, children: "Twitter / X" }
       : null,
     enabledNetworks.facebook
-      ? { id: "facebook", label: `Facebook${syndicationUploadTabSuffix(fbDraft, facebookAccounts.length)}`, children: "Facebook" }
+      ? { id: "facebook", label: `Facebook${syndicationUploadTabSuffix(fbResultBranch, facebookAccounts.length)}`, children: "Facebook" }
       : null,
     enabledNetworks.instagram
-      ? { id: "instagram", label: `Instagram${syndicationUploadTabSuffix(igDraft, instagramAccounts.length)}`, children: "Instagram" }
+      ? { id: "instagram", label: `Instagram${syndicationUploadTabSuffix(igResultBranch, instagramAccounts.length)}`, children: "Instagram" }
       : null,
     enabledNetworks.tiktok
-      ? { id: "tiktok", label: `TikTok${syndicationUploadTabSuffix(ttDraft, tiktokAccounts.length)}`, children: "TikTok" }
+      ? { id: "tiktok", label: `TikTok${syndicationUploadTabSuffix(ttResultBranch, tiktokAccounts.length)}`, children: "TikTok" }
       : null,
   ].filter(Boolean) as Array<{ id: string; label: string; children: string }>;
   const defaultTabId = tabItems[0]?.id || "youtube";
@@ -1275,7 +1287,7 @@ export function EditorSyndicationModal({
                     </div>
 
                     <SyndicationUploadStatusBlock
-                      branch={ytDraft}
+                      branch={ytResultBranch}
                       accounts={youtubeAccounts}
                       linkLabel="Open video"
                       linkUrlKey="watchUrl"
@@ -1290,7 +1302,7 @@ export function EditorSyndicationModal({
                       accountCount={platformLimits.youtube?.accountCount}
                     />
                     <SyndicationResultFeedback
-                      branch={ytDraft}
+                      branch={ytResultBranch}
                       accounts={youtubeAccounts}
                       linkLabel="Open video"
                       linkUrlKey="watchUrl"
@@ -1345,7 +1357,7 @@ export function EditorSyndicationModal({
                       limits per your developer plan.
                     </p>
                     <SyndicationUploadStatusBlock
-                      branch={twDraft}
+                      branch={twResultBranch}
                       accounts={twitterAccounts}
                       linkLabel="Open post"
                       linkUrlKey="tweetUrl"
@@ -1360,7 +1372,7 @@ export function EditorSyndicationModal({
                       accountCount={platformLimits.twitter?.accountCount}
                     />
                     <SyndicationResultFeedback
-                      branch={twDraft}
+                      branch={twResultBranch}
                       accounts={twitterAccounts}
                       linkLabel="Open post"
                       linkUrlKey="tweetUrl"
@@ -1463,7 +1475,7 @@ export function EditorSyndicationModal({
                       />
                     </label>
                     <SyndicationUploadStatusBlock
-                      branch={fbDraft}
+                      branch={fbResultBranch}
                       accounts={facebookAccounts}
                       linkLabel="Open post"
                       linkUrlKey="permalinkUrl"
@@ -1478,7 +1490,7 @@ export function EditorSyndicationModal({
                       accountCount={platformLimits.facebook?.accountCount}
                     />
                     <SyndicationResultFeedback
-                      branch={fbDraft}
+                      branch={fbResultBranch}
                       accounts={facebookAccounts}
                       linkLabel="Open post"
                       linkUrlKey="permalinkUrl"
@@ -1588,7 +1600,7 @@ export function EditorSyndicationModal({
                       />
                     </label>
                     <SyndicationUploadStatusBlock
-                      branch={igDraft}
+                      branch={igResultBranch}
                       accounts={instagramAccounts}
                       linkLabel="Open post"
                       linkUrlKey="permalinkUrl"
@@ -1603,7 +1615,7 @@ export function EditorSyndicationModal({
                       accountCount={platformLimits.instagram?.accountCount}
                     />
                     <SyndicationResultFeedback
-                      branch={igDraft}
+                      branch={igResultBranch}
                       accounts={instagramAccounts}
                       linkLabel="Open post"
                       linkUrlKey="permalinkUrl"
@@ -1725,7 +1737,7 @@ export function EditorSyndicationModal({
                       />
                     </div>
                     <SyndicationUploadStatusBlock
-                      branch={ttDraft}
+                      branch={ttResultBranch}
                       accounts={tiktokAccounts}
                       linkLabel="Open post"
                       linkUrlKey="shareUrl"
@@ -1740,7 +1752,7 @@ export function EditorSyndicationModal({
                       accountCount={platformLimits.tiktok?.accountCount}
                     />
                     <SyndicationResultFeedback
-                      branch={ttDraft}
+                      branch={ttResultBranch}
                       accounts={tiktokAccounts}
                       linkLabel="Open post"
                       linkUrlKey="shareUrl"
