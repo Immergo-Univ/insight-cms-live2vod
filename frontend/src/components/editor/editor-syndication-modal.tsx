@@ -57,6 +57,7 @@ type SyndicationUploadEntry = {
   tweetUrl?: string;
   permalinkUrl?: string;
   shareUrl?: string;
+  updatedAt?: string;
 };
 
 type SyndicationUploadBranch = {
