@@ -39,6 +39,7 @@ import { buildMarkOutThumbnailUrl, buildThumbnailUrl, FRAME_DURATION_SEC } from 
 import { TranscriptNewsLocalePanel } from "./transcript-news-locale-panel";
 import { EditorSubtitleGenerateButton } from "./editor-subtitle-generate-button";
 import { EditorSubtitleBurnButton } from "./editor-subtitle-burn-button";
+import { EditorDubbingButton } from "./editor-dubbing-button";
 import { EditorVerticalCropButton } from "./editor-vertical-crop-button";
 import {
   clipBurnInEnabled,
@@ -46,6 +47,7 @@ import {
   clipSubtitleGenerateEnabled,
   clipTranscriptNewsGenerateEnabled,
 } from "@/utils/editor-subclip-subtitles";
+import { clipDubbingEnabled } from "@/utils/editor-subclip-dubbing";
 import { whisperLanguageLabel } from "@/types/editor-whisper-languages";
 import { Checkbox } from "@/components/base/checkbox/checkbox";
 import {
@@ -55,7 +57,8 @@ import {
   formatTime,
   parseRelativeTimeInput,
 } from "./editor-timeline";
-import { resolveEncodedPlaybackUrl } from "@/utils/encoded-playback-url";
+import { resolveEncodedPlaybackUrl, resolveEncodedOutputAssets } from "@/utils/encoded-playback-url";
+import type { EncodedOutputAsset } from "@/types/editor";
 import { EncodedOutputPreviewPlayer } from "./encoded-output-preview-player";
 
 const THUMB_HEIGHT_DEFAULT = 36;
@@ -392,11 +395,11 @@ function TranscriptAndNewsTabs({
   );
 }
 
-/** Latest completed encode for this editor clip row with a public playback URL (HLS master preferred). */
-function pickLatestCompletedOutputUrlForEditorClip(
+/** Latest completed encode job for this editor clip row that has a public playback URL. */
+function pickLatestCompletedJobForEditorClip(
   jobs: VodJobRecord[],
   clipId: string,
-): string | null {
+): VodJobRecord | null {
   const completed = jobs.filter(
     (j) =>
       j.editorClipId === clipId &&
@@ -405,8 +408,7 @@ function pickLatestCompletedOutputUrlForEditorClip(
   );
   completed.sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
   for (const j of completed) {
-    const url = resolveEncodedPlaybackUrl(j);
-    if (url) return url;
+    if (resolveEncodedPlaybackUrl(j)) return j;
   }
   return null;
 }
@@ -612,6 +614,8 @@ interface EditorClipsListProps {
   onOpenClipSubtitleGenerate?: (clipId: string) => void;
   onOpenClipSubtitleBurn?: (clipId: string) => void;
   subtitlesControlsEnabled?: boolean;
+  onOpenClipDubbing?: (clipId: string) => void;
+  dubbingControlsEnabled?: boolean;
   availableLanguages?: string[];
   /** Max time (seconds) in the parent window; used to clamp edited in/out. */
   parentWindowDurationSec: number;
@@ -637,6 +641,8 @@ interface EditorClipsListProps {
   clipVodEncodeErrors: Record<string, string>;
   onClipStartVodEncode: (clipId: string, includeAds: boolean) => void | Promise<void>;
   onClipCancelVodEncode: (clipId: string) => void | Promise<void>;
+  /** When false, hide ads-related encode options (single "Create" action). Defaults to true. */
+  adsEnabled?: boolean;
   /** After PATCH transcript speakers; keeps job list in sync (optional). */
   onVodJobsRefresh?: () => Promise<void>;
 }
@@ -662,6 +668,8 @@ export function EditorClipsList({
   onOpenClipSubtitleGenerate,
   onOpenClipSubtitleBurn,
   subtitlesControlsEnabled = false,
+  onOpenClipDubbing,
+  dubbingControlsEnabled = false,
   availableLanguages = ["en", "es", "he"],
   parentWindowDurationSec,
   onClipTimesCommit,
@@ -677,6 +685,7 @@ export function EditorClipsList({
   clipVodEncodeErrors,
   onClipStartVodEncode,
   onClipCancelVodEncode,
+  adsEnabled = true,
   onVodJobsRefresh,
 }: EditorClipsListProps) {
   const thumbHeight = compact ? THUMB_HEIGHT_COMPACT : THUMB_HEIGHT_DEFAULT;
@@ -686,9 +695,10 @@ export function EditorClipsList({
   const [titleDraft, setTitleDraft] = useState("");
   const titleInputRef = useRef<HTMLInputElement>(null);
   const [encodedOutputPreview, setEncodedOutputPreview] = useState<{
-    url: string;
     label: string;
+    assets: EncodedOutputAsset[];
   } | null>(null);
+  const [encodedOutputTabIdx, setEncodedOutputTabIdx] = useState(0);
   const [imageWidgetClipId, setImageWidgetClipId] = useState<string | null>(null);
   const [imageWidgetErr, setImageWidgetErr] = useState<string | null>(null);
   const [imageWidgetBusy, setImageWidgetBusy] = useState(false);
@@ -871,7 +881,47 @@ export function EditorClipsList({
                   {encodedOutputPreview.label}
                 </h3>
                 <p className="mt-0.5 text-xs text-tertiary">Encoded output preview</p>
-                <EncodedOutputPreviewPlayer key={encodedOutputPreview.url} url={encodedOutputPreview.url} />
+                {encodedOutputPreview.assets.length > 1 ? (
+                  <div className="mt-3 flex flex-wrap gap-1.5" role="tablist" aria-label="Encoded assets">
+                    {encodedOutputPreview.assets.map((asset, idx) => {
+                      const active = idx === encodedOutputTabIdx;
+                      return (
+                        <button
+                          key={asset.url}
+                          type="button"
+                          role="tab"
+                          aria-selected={active}
+                          onClick={() => setEncodedOutputTabIdx(idx)}
+                          className={cx(
+                            "rounded-md border px-2.5 py-1 text-xs font-medium transition-colors",
+                            active
+                              ? "border-brand-solid bg-brand-solid text-white"
+                              : "border-secondary bg-primary text-secondary hover:bg-tertiary/50",
+                          )}
+                        >
+                          {asset.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : null}
+                {(() => {
+                  const asset =
+                    encodedOutputPreview.assets[encodedOutputTabIdx] ?? encodedOutputPreview.assets[0];
+                  if (!asset) return null;
+                  return <EncodedOutputPreviewPlayer key={asset.url} url={asset.url} />;
+                })()}
+                {(() => {
+                  const asset =
+                    encodedOutputPreview.assets[encodedOutputTabIdx] ?? encodedOutputPreview.assets[0];
+                  if (asset?.kind !== "mp4") return null;
+                  return (
+                    <p className="mt-2 text-[11px] text-tertiary">
+                      Tip: switching the audio language track for progressive MP4 depends on the browser
+                      (Safari supports it; Chrome does not). Use the HLS tab for reliable audio switching.
+                    </p>
+                  );
+                })()}
               </div>
             </Dialog>
           </Modal>
@@ -1066,7 +1116,8 @@ export function EditorClipsList({
           const encodeFailed = vodJob?.status === "failed";
           const rowEncodeError =
             clipVodEncodeErrors[c.id] ?? (encodeFailed ? vodJob?.error ?? "Encode failed" : undefined);
-          const encodedOutputUrl = pickLatestCompletedOutputUrlForEditorClip(vodJobs, c.id);
+          const encodedJob = pickLatestCompletedJobForEditorClip(vodJobs, c.id);
+          const encodedOutputUrl = encodedJob ? resolveEncodedPlaybackUrl(encodedJob) : null;
           const encodedPreviewLabel = c.title?.trim() || `Clip ${c.order}`;
           const syndicationCount = [
             c.syndication?.youtube?.enabled === true,
@@ -1215,12 +1266,15 @@ export function EditorClipsList({
                     >
                       <button
                         type="button"
-                        onClick={() =>
+                        onClick={() => {
+                          setEncodedOutputTabIdx(0);
                           setEncodedOutputPreview({
-                            url: encodedOutputUrl,
                             label: encodedPreviewLabel,
-                          })
-                        }
+                            assets: encodedJob
+                              ? resolveEncodedOutputAssets(encodedJob)
+                              : [{ kind: "hls", label: "HLS", url: encodedOutputUrl }],
+                          });
+                        }}
                         title="Play encoded output"
                         aria-label="Play encoded output in a dialog"
                         className="flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-full border-2 border-utility-success-300 bg-utility-success-100 text-utility-success-800 shadow-sm transition-colors hover:bg-utility-success-200 hover:border-utility-success-400"
@@ -1303,6 +1357,16 @@ export function EditorClipsList({
                           active={clipBurnInEnabled(c)}
                           disabled={encodeActive}
                           onClick={() => onOpenClipSubtitleBurn(c.id)}
+                        />
+                      </span>
+                    ) : null}
+                    {onOpenClipDubbing && dubbingControlsEnabled ? (
+                      <span onClick={(e) => e.stopPropagation()} className="inline-flex">
+                        <EditorDubbingButton
+                          variant="inline"
+                          active={clipDubbingEnabled(c)}
+                          disabled={encodeActive}
+                          onClick={() => onOpenClipDubbing(c.id)}
                         />
                       </span>
                     ) : null}
@@ -1470,24 +1534,37 @@ export function EditorClipsList({
                         <Menu
                           className="min-w-56 rounded-lg border border-secondary_alt bg-primary p-1 shadow-lg outline-none"
                           onAction={(key) => {
-                            if (key === "create-no-ads") void onClipStartVodEncode(c.id, false);
+                            if (key === "create" || key === "create-no-ads")
+                              void onClipStartVodEncode(c.id, false);
                             if (key === "create-with-ads") void onClipStartVodEncode(c.id, true);
                           }}
                         >
-                          <MenuItem
-                            id="create-no-ads"
-                            isDisabled={encodeActive}
-                            className="cursor-pointer rounded-md px-3 py-2 text-left text-sm text-primary outline-none data-[focused]:bg-secondary"
-                          >
-                            Create without ads
-                          </MenuItem>
-                          <MenuItem
-                            id="create-with-ads"
-                            isDisabled={encodeActive}
-                            className="cursor-pointer rounded-md px-3 py-2 text-left text-sm text-primary outline-none data-[focused]:bg-secondary"
-                          >
-                            Create with ads
-                          </MenuItem>
+                          {adsEnabled ? (
+                            <>
+                              <MenuItem
+                                id="create-no-ads"
+                                isDisabled={encodeActive}
+                                className="cursor-pointer rounded-md px-3 py-2 text-left text-sm text-primary outline-none data-[focused]:bg-secondary"
+                              >
+                                Create without ads
+                              </MenuItem>
+                              <MenuItem
+                                id="create-with-ads"
+                                isDisabled={encodeActive}
+                                className="cursor-pointer rounded-md px-3 py-2 text-left text-sm text-primary outline-none data-[focused]:bg-secondary"
+                              >
+                                Create with ads
+                              </MenuItem>
+                            </>
+                          ) : (
+                            <MenuItem
+                              id="create"
+                              isDisabled={encodeActive}
+                              className="cursor-pointer rounded-md px-3 py-2 text-left text-sm text-primary outline-none data-[focused]:bg-secondary"
+                            >
+                              Create clip
+                            </MenuItem>
+                          )}
                         </Menu>
                       </AriaPopover>
                     </MenuTrigger>

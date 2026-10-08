@@ -60,6 +60,8 @@ interface EditorRightPanelProps {
   onAddHorizontalClip: () => void;
   onAddAdSlot?: () => void;
   addAdSlotDisabled?: boolean;
+  /** When false, hide all ads UI (ads list + "Add Ad Slot" + with-ads encode). Defaults to true. */
+  adsEnabled?: boolean;
   vodJobs: VodJobRecord[];
   clipVodEncodeErrors: Record<string, string>;
   onClipStartVodEncode: (clipId: string, includeAds: boolean) => void | Promise<void>;
@@ -82,6 +84,8 @@ interface EditorRightPanelProps {
   onOpenClipSubtitleGenerate?: (clipId: string) => void;
   onOpenClipSubtitleBurn?: (clipId: string) => void;
   subtitlesControlsEnabled?: boolean;
+  onOpenClipDubbing?: (clipId: string) => void;
+  dubbingControlsEnabled?: boolean;
   availableLanguages?: string[];
   /** Tenant slug from URL; required for syndication API. */
   syndicationTenantId?: string;
@@ -117,6 +121,20 @@ interface EditorRightPanelProps {
   onSetClipTranscriptNewsGenerate?: (clipId: string, enabled: boolean) => void;
   /** Refetch VOD jobs after transcript speaker PATCH (realtime modal). */
   onVodJobsRefresh?: () => Promise<void>;
+  /**
+   * When true (default), the panel fills the available height and the clips
+   * list scrolls inside it (live2vod editor). When false, the panel sizes to
+   * its content so it stays compact initially (VOD clipping tool iframe), and
+   * the clips list scroll area is capped by `clipsListMaxHeightClassName`.
+   */
+  fillAvailableHeight?: boolean;
+  /**
+   * Height Tailwind classes for the clips scroll area when
+   * `fillAvailableHeight` is false (e.g. "min-h-[45vh] max-h-[65vh]"). Gives an
+   * intermediate minimum so the timeline sits lower without being pushed
+   * off-screen. Defaults to "min-h-[45vh] max-h-[65vh]".
+   */
+  clipsListHeightClassName?: string;
 }
 
 /**
@@ -146,6 +164,7 @@ export function EditorRightPanel({
   onAddHorizontalClip,
   onAddAdSlot,
   addAdSlotDisabled = false,
+  adsEnabled = true,
   vodJobs,
   clipVodEncodeErrors,
   onClipStartVodEncode,
@@ -159,6 +178,8 @@ export function EditorRightPanel({
   onOpenClipSubtitleGenerate,
   onOpenClipSubtitleBurn,
   subtitlesControlsEnabled = false,
+  onOpenClipDubbing,
+  dubbingControlsEnabled = false,
   availableLanguages = ["en", "es", "he"],
   syndicationTenantId = "",
   syndicationYoutubeEnabled = false,
@@ -179,6 +200,8 @@ export function EditorRightPanel({
   onUpdateClipNewsLocales,
   onSetClipTranscriptNewsGenerate,
   onVodJobsRefresh,
+  fillAvailableHeight = true,
+  clipsListHeightClassName = "min-h-[45vh] max-h-[65vh]",
 }: EditorRightPanelProps) {
   const [clipMetadataId, setClipMetadataId] = useState<string | null>(null);
   const [syndicationClipId, setSyndicationClipId] = useState<string | null>(null);
@@ -270,9 +293,24 @@ export function EditorRightPanel({
   }, [verticalCropModalClipId, vodJobs]);
 
   return (
-    <div className="flex h-full min-h-0 w-full flex-col gap-4 bg-primary">
-      <section className="flex min-h-0 flex-1 flex-col gap-2 overflow-hidden">
-        <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
+    <div
+      className={cx(
+        "flex min-h-0 w-full flex-col gap-4 bg-primary",
+        fillAvailableHeight && "h-full",
+      )}
+    >
+      <section
+        className={cx(
+          "flex min-h-0 flex-col gap-2 overflow-hidden",
+          fillAvailableHeight && "flex-1",
+        )}
+      >
+        <div
+          className={cx(
+            "overflow-y-auto overflow-x-hidden",
+            fillAvailableHeight ? "min-h-0 flex-1" : clipsListHeightClassName,
+          )}
+        >
           <div className="flex flex-col gap-4">
             <EditorClipsList
               clips={clips}
@@ -299,6 +337,8 @@ export function EditorRightPanel({
               onOpenClipSubtitleGenerate={onOpenClipSubtitleGenerate}
               onOpenClipSubtitleBurn={onOpenClipSubtitleBurn}
               subtitlesControlsEnabled={subtitlesControlsEnabled}
+              onOpenClipDubbing={onOpenClipDubbing}
+              dubbingControlsEnabled={dubbingControlsEnabled}
               availableLanguages={availableLanguages}
               onOpenSyndication={
                 (syndicationYoutubeEnabled ||
@@ -322,9 +362,11 @@ export function EditorRightPanel({
               clipVodEncodeErrors={clipVodEncodeErrors}
               onClipStartVodEncode={onClipStartVodEncode}
               onClipCancelVodEncode={onClipCancelVodEncode}
+              adsEnabled={adsEnabled}
               onVodJobsRefresh={onVodJobsRefresh}
             />
-            {selectionMode !== "realtime" &&
+            {adsEnabled &&
+            selectionMode !== "realtime" &&
             onSelectAd &&
             onRemoveAd &&
             onAdOrderChange &&
@@ -394,13 +436,15 @@ export function EditorRightPanel({
                 >
                   Add Horizontal Clip
                 </MenuItem>
-                <MenuItem
-                  id="add-ad"
-                  isDisabled={addAdSlotDisabled || !onAddAdSlot}
-                  className="cursor-pointer rounded-md px-3 py-2 text-left text-sm text-primary outline-none data-[focused]:bg-secondary"
-                >
-                  Add Ad Slot
-                </MenuItem>
+                {adsEnabled ? (
+                  <MenuItem
+                    id="add-ad"
+                    isDisabled={addAdSlotDisabled || !onAddAdSlot}
+                    className="cursor-pointer rounded-md px-3 py-2 text-left text-sm text-primary outline-none data-[focused]:bg-secondary"
+                  >
+                    Add Ad Slot
+                  </MenuItem>
+                ) : null}
               </Menu>
             </AriaPopover>
           </MenuTrigger>

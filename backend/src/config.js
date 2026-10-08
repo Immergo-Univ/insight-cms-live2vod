@@ -174,6 +174,13 @@ export const config = {
     secret: (process.env.SECRET || process.env.ENCODER_SECRET || "").trim(),
     /** immergo | lite — informational; dispatch uses ENCODER_SERVICE_URL only */
     backend: (process.env.ENCODER_BACKEND || "lite").trim().toLowerCase(),
+    /**
+     * Optional encoder-lite URL used ONLY for jobs that request AI dubbing. When set, dubbing
+     * jobs are dispatched here (encoder-lite generates multi-audio HLS) instead of the default
+     * ENCODER_SERVICE_URL (which may be the immergo pipeline that drops extra audio tracks).
+     * Env: ENCODER_LITE_SERVICE_URL. Defaults to ENCODER_SERVICE_URL when unset.
+     */
+    liteServiceUrl: (process.env.ENCODER_LITE_SERVICE_URL || "").trim().replace(/\/+$/, ""),
   },
 
   /**

@@ -3,6 +3,9 @@ export type TenantDto = {
   subtitlesEnabled: boolean;
   subtitlesDefaultEnabled?: boolean;
   availableLanguages?: string[];
+  dubbingEnabled?: boolean;
+  dubbingDefaultEnabled?: boolean;
+  availableDubbingLanguages?: string[];
   newsButtonEnabled?: boolean;
   newsDefaultGenerate?: boolean;
   subtitlesTranscriptNewsUiEnabled?: boolean;

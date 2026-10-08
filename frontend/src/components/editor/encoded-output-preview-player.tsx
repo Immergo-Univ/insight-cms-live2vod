@@ -29,6 +29,10 @@ export function EncodedOutputPreviewPlayer({ url }: Props) {
       autoplay: false,
       preload: "auto",
       fluid: true,
+      // Route HLS through VHS (not native) so alternate audio renditions (EXT-X-MEDIA) are
+      // exposed as switchable audio tracks and the audio-track button appears in the control bar.
+      html5: { vhs: { overrideNative: true }, nativeAudioTracks: false, nativeVideoTracks: false },
+      controlBar: { audioTrackButton: true },
       sources: [{ src: url, type: playbackMimeType(url) }],
     });
     playerRef.current = player;

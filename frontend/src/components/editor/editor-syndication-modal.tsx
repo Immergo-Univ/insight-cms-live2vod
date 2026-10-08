@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
-import { Image01 } from "@untitledui/icons";
+import { Image01, CheckCircle, XCircle, RefreshCcw01, InfoCircle } from "@untitledui/icons";
 import { ModalOverlay, Modal, Dialog } from "@/components/application/modals/modal";
 import { Tabs } from "@/components/application/tabs/tabs";
 import { CloseButton } from "@/components/base/buttons/close-button";
@@ -144,6 +144,153 @@ function SyndicationUploadStatusBlock({
           </p>
         );
       })}
+    </div>
+  );
+}
+
+type SyndicationResultTone = "success" | "error" | "progress" | "idle";
+
+// Derive an overall, human-readable verdict for a network from its per-account upload entries.
+function summarizeSyndicationResult(
+  branch: SyndicationUploadBranch,
+  accountCount: number,
+): {
+  tone: SyndicationResultTone;
+  title: string;
+  detail: string;
+  entries: Array<{ accountId: string | null; upload: SyndicationUploadEntry }>;
+} {
+  const entries = collectSyndicationUploadEntries(branch);
+  const total = Math.max(accountCount, entries.length, 1);
+  const published = entries.filter((e) => e.upload.state === "published").length;
+  const failed = entries.filter((e) => e.upload.state === "failed").length;
+  const active = entries.filter((e) => e.upload.state === "uploading" || e.upload.state === "pending").length;
+
+  if (entries.length === 0) {
+    return {
+      tone: "idle",
+      title: "No syndication result yet",
+      detail: "This clip has not been published to this network. Results appear here once the encode job runs.",
+      entries,
+    };
+  }
+  if (failed > 0) {
+    return {
+      tone: "error",
+      title: published > 0 ? "Published with errors" : "Publication failed",
+      detail: `${published}/${total} published · ${failed} failed`,
+      entries,
+    };
+  }
+  if (active > 0) {
+    return {
+      tone: "progress",
+      title: "Publishing in progress",
+      detail: `${published}/${total} published · ${active} in progress`,
+      entries,
+    };
+  }
+  if (published > 0) {
+    return {
+      tone: "success",
+      title: published >= total ? "Published successfully" : "Partially published",
+      detail: `${published}/${total} published`,
+      entries,
+    };
+  }
+  return {
+    tone: "idle",
+    title: "No syndication result yet",
+    detail: "Awaiting publication.",
+    entries,
+  };
+}
+
+function formatSyndicationTimestamp(iso?: string): string | null {
+  if (!iso) return null;
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toLocaleString();
+}
+
+const SYNDICATION_RESULT_TONE_STYLES: Record<
+  SyndicationResultTone,
+  { container: string; accent: string; Icon: typeof CheckCircle }
+> = {
+  success: { container: "border-success_subtle bg-success-primary/40", accent: "text-success-primary", Icon: CheckCircle },
+  error: { container: "border-error_subtle bg-error-primary/40", accent: "text-error-primary", Icon: XCircle },
+  progress: { container: "border-brand bg-secondary/40", accent: "text-brand-secondary", Icon: RefreshCcw01 },
+  idle: { container: "border-secondary bg-secondary/40", accent: "text-tertiary", Icon: InfoCircle },
+};
+
+// Final feedback banner shown at the bottom of each network tab summarizing the syndication outcome.
+function SyndicationResultFeedback({
+  branch,
+  accounts,
+  linkLabel,
+  linkUrlKey,
+}: {
+  branch: SyndicationUploadBranch;
+  accounts: SyndicationAccountSummary[];
+  linkLabel: string;
+  linkUrlKey: "watchUrl" | "tweetUrl" | "permalinkUrl" | "shareUrl";
+}) {
+  const result = summarizeSyndicationResult(branch, accounts.length);
+  const tone = SYNDICATION_RESULT_TONE_STYLES[result.tone];
+  const ToneIcon = tone.Icon;
+
+  const accountLabel = (accountId: string | null) => {
+    if (!accountId) return "Account";
+    const match = accounts.find((a) => a.id === accountId);
+    return match?.displayName || accountId.slice(0, 8);
+  };
+
+  return (
+    <div className={cx("mt-1 flex flex-col gap-3 rounded-lg border p-3", tone.container)}>
+      <div className="flex items-start gap-2">
+        <ToneIcon className={cx("mt-0.5 size-5 shrink-0", tone.accent)} aria-hidden />
+        <div className="flex flex-col gap-0.5">
+          <p className="text-sm font-semibold text-primary">Syndication result</p>
+          <p className={cx("text-xs font-medium", tone.accent)}>{result.title}</p>
+          <p className="text-xs text-tertiary">{result.detail}</p>
+        </div>
+      </div>
+      {result.entries.length > 0 ? (
+        <ul className="flex flex-col gap-1.5">
+          {result.entries.map(({ accountId, upload }) => {
+            const linkUrl = upload[linkUrlKey];
+            const timestamp = formatSyndicationTimestamp(upload.updatedAt);
+            return (
+              <li
+                key={accountId || "legacy"}
+                className="rounded-md border border-secondary bg-primary/60 px-2 py-1.5 text-xs text-secondary"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-medium text-primary">{accountLabel(accountId)}</span>
+                  <span className="font-medium text-primary">{upload.state || "idle"}</span>
+                </div>
+                {upload.message ? <p className="mt-0.5 text-tertiary">{upload.message}</p> : null}
+                {upload.error ? <p className="mt-0.5 text-error-primary">{upload.error}</p> : null}
+                {linkUrl || timestamp ? (
+                  <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5">
+                    {linkUrl ? (
+                      <a
+                        href={linkUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-brand-secondary underline"
+                      >
+                        {linkLabel}
+                      </a>
+                    ) : null}
+                    {timestamp ? <span className="text-tertiary">Updated {timestamp}</span> : null}
+                  </div>
+                ) : null}
+              </li>
+            );
+          })}
+        </ul>
+      ) : null}
     </div>
   );
 }
@@ -1141,6 +1288,12 @@ export function EditorSyndicationModal({
                       maxAccounts={platformLimits.youtube?.maxAccounts ?? 5}
                       accountCount={platformLimits.youtube?.accountCount}
                     />
+                    <SyndicationResultFeedback
+                      branch={ytDraft}
+                      accounts={youtubeAccounts}
+                      linkLabel="Open video"
+                      linkUrlKey="watchUrl"
+                    />
                   </div>
                 )}
               </Tabs.Panel>
@@ -1204,6 +1357,12 @@ export function EditorSyndicationModal({
                       canAddAccount={platformLimits.twitter?.canAddAccount !== false}
                       maxAccounts={platformLimits.twitter?.maxAccounts ?? 5}
                       accountCount={platformLimits.twitter?.accountCount}
+                    />
+                    <SyndicationResultFeedback
+                      branch={twDraft}
+                      accounts={twitterAccounts}
+                      linkLabel="Open post"
+                      linkUrlKey="tweetUrl"
                     />
                   </div>
                 )}
@@ -1316,6 +1475,12 @@ export function EditorSyndicationModal({
                       canAddAccount={platformLimits.facebook?.canAddAccount !== false}
                       maxAccounts={platformLimits.facebook?.maxAccounts ?? 5}
                       accountCount={platformLimits.facebook?.accountCount}
+                    />
+                    <SyndicationResultFeedback
+                      branch={fbDraft}
+                      accounts={facebookAccounts}
+                      linkLabel="Open post"
+                      linkUrlKey="permalinkUrl"
                     />
                   </div>
                 )}
@@ -1435,6 +1600,12 @@ export function EditorSyndicationModal({
                       canAddAccount={platformLimits.instagram?.canAddAccount !== false}
                       maxAccounts={platformLimits.instagram?.maxAccounts ?? 5}
                       accountCount={platformLimits.instagram?.accountCount}
+                    />
+                    <SyndicationResultFeedback
+                      branch={igDraft}
+                      accounts={instagramAccounts}
+                      linkLabel="Open post"
+                      linkUrlKey="permalinkUrl"
                     />
                   </div>
                 )}
@@ -1566,6 +1737,12 @@ export function EditorSyndicationModal({
                       canAddAccount={platformLimits.tiktok?.canAddAccount !== false}
                       maxAccounts={platformLimits.tiktok?.maxAccounts ?? 5}
                       accountCount={platformLimits.tiktok?.accountCount}
+                    />
+                    <SyndicationResultFeedback
+                      branch={ttDraft}
+                      accounts={tiktokAccounts}
+                      linkLabel="Open post"
+                      linkUrlKey="shareUrl"
                     />
                   </div>
                 )}

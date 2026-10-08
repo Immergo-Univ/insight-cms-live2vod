@@ -93,6 +93,11 @@ export function tenantRowToApi(plain) {
     subtitlesDefaultNewsEs: plain.subtitlesDefaultNewsEs !== false,
     subtitlesDefaultNewsHe: plain.subtitlesDefaultNewsHe !== false,
     availableLanguages: normalizeAvailableLanguages(plain.availableLanguages),
+    dubbingEnabled: plain.dubbingEnabled === true,
+    dubbingDefaultEnabled: plain.dubbingDefaultEnabled === true,
+    availableDubbingLanguages: Array.isArray(plain.availableDubbingLanguages)
+      ? normalizeAvailableLanguages(plain.availableDubbingLanguages)
+      : normalizeAvailableLanguages(plain.availableLanguages),
     newsButtonEnabled: plain.newsButtonEnabled !== false && plain.subtitlesTranscriptNewsUiEnabled !== false,
     newsDefaultGenerate: plain.newsDefaultGenerate !== false,
     syndicationYoutubeEnabled: plain.syndicationYoutubeEnabled === true,

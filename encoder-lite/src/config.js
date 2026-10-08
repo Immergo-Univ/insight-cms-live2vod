@@ -61,4 +61,14 @@ export const config = {
   openaiNewsModel: (process.env.OPENAI_NEWS_MODEL || "gpt-4o-mini").trim(),
   /** Request timeout for OpenAI news step (ms). Env: OPENAI_NEWS_TIMEOUT_MS */
   openaiNewsTimeoutMs: Math.max(30_000, parseInt(process.env.OPENAI_NEWS_TIMEOUT_MS || "120000", 10) || 120_000),
+  /** Inworld API key (Basic auth). Env: INWORLD_API_KEY */
+  inworldApiKey: (process.env.INWORLD_API_KEY || "").trim(),
+  /** Inworld API base URL. Env: INWORLD_BASE_URL */
+  inworldBaseUrl: (process.env.INWORLD_BASE_URL || "https://api.inworld.ai").trim().replace(/\/+$/, ""),
+  /** Inworld TTS model id. Env: INWORLD_TTS_MODEL */
+  inworldTtsModel: (process.env.INWORLD_TTS_MODEL || "inworld-tts-2").trim(),
+  /** Inworld LLM Router model for segment translation. Env: INWORLD_LLM_MODEL */
+  inworldLlmModel: (process.env.INWORLD_LLM_MODEL || "gpt-4o-mini").trim(),
+  /** Inworld OpenAI-compatible chat completions path. Env: INWORLD_LLM_CHAT_PATH */
+  inworldLlmChatPath: (process.env.INWORLD_LLM_CHAT_PATH || "/v1/chat/completions").trim(),
 };

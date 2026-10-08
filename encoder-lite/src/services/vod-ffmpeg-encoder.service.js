@@ -410,7 +410,7 @@ function parseFfprobeWxH(stdout) {
  * @param {string} inputUrl
  * @returns {Promise<{ width: number, height: number }>}
  */
-async function runFfprobeVideoSize(inputUrl) {
+export async function runFfprobeVideoSize(inputUrl) {
   const common = [
     "-hide_banner",
     "-v",
