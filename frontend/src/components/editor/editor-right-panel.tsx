@@ -17,6 +17,7 @@ import type {
   EditorVerticalCropPanSettings,
 } from "@/types/editor";
 import type { VodJobRecord } from "@/types/vod-job";
+import { pickLatestVodEncodeJobForEditorClip } from "@/types/vod-job";
 import { cx } from "@/utils/cx";
 import { EditorAdsList } from "./editor-ads-list";
 import { EditorClipMetadataModal } from "./editor-clip-metadata-modal";
@@ -216,6 +217,20 @@ export function EditorRightPanel({
     () => (syndicationClipId ? clips.find((c) => c.id === syndicationClipId) ?? null : null),
     [clips, syndicationClipId],
   );
+
+  // Syndication upload results live on the latest job's editorSpec (written by the backend runners
+  // after encode completes, pushed here via the WS job_update). Surface them read-only to the modal
+  // so the result feedback reflects the real outcome without mutating the editable clip drafts.
+  const syndicationResults = useMemo<EditorClipSyndication | null>(() => {
+    if (!syndicationClipId) return null;
+    const job = pickLatestVodEncodeJobForEditorClip(vodJobs, syndicationClipId);
+    const specClips = job?.editorSpec?.clips;
+    if (!Array.isArray(specClips) || specClips.length === 0) return null;
+    const jobClip =
+      specClips.find((c) => c.editorClientClipId === syndicationClipId) ??
+      (specClips.length === 1 ? specClips[0] : undefined);
+    return jobClip?.syndication ?? null;
+  }, [syndicationClipId, vodJobs]);
 
   const clipForVerticalCropModal = useMemo(
     () =>
@@ -471,6 +486,7 @@ export function EditorRightPanel({
         }}
         tenantId={syndicationTenantId.trim()}
         clip={clipForSyndication}
+        syndicationResults={syndicationResults}
         clipUrl={clipUrl}
         channelId={channelId}
         readOnly={syndicationReadOnly}
