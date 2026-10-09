@@ -294,6 +294,36 @@ export async function getTenantYoutubeRefreshToken(tenantId) {
 }
 
 /**
+ * Detect an expired/revoked Google OAuth refresh token (invalid_grant) from a googleapis error.
+ *
+ * @param {unknown} err
+ * @returns {boolean}
+ */
+function isYoutubeInvalidGrant(err) {
+  const e = /** @type {{ response?: { data?: { error?: unknown } }, message?: unknown }} */ (err || {});
+  const dataError = e?.response?.data?.error;
+  if (typeof dataError === "string" && /invalid_grant/i.test(dataError)) return true;
+  const msg = err instanceof Error ? err.message : String(err ?? "");
+  return /invalid_grant/i.test(msg);
+}
+
+/**
+ * Best-effort removal of a YouTube account whose refresh token is no longer valid, so the UI
+ * surfaces "reconnect" instead of silently failing on every future encode (mirrors the X flow).
+ *
+ * @param {string} accountId
+ */
+async function markYoutubeAccountDisconnected(accountId) {
+  const id = String(accountId || "").trim();
+  if (!id) return;
+  try {
+    await deleteSyndicationAccount(id);
+  } catch {
+    // ignore — best-effort cleanup so the UI surfaces "reconnect"
+  }
+}
+
+/**
  * Upload encoded MP4 to YouTube using tenant refresh token.
  *
  * @param {object} opts
@@ -324,39 +354,50 @@ export async function uploadVideoToYoutube(opts) {
   // @ts-ignore — Readable.fromWeb exists in Node 18+
   const body = Readable.fromWeb(resVideo.body);
 
-  const insert = await yt.videos.insert(
-    {
-      part: ["snippet", "status"],
-      requestBody: {
-        snippet: {
-          title: String(snippet?.title || "Untitled").slice(0, 100),
-          description: String(snippet?.description || "").slice(0, 5000),
-          tags: Array.isArray(snippet?.tags)
-            ? snippet.tags.map((/** @type {unknown} */ t) => String(t).slice(0, 30)).slice(0, 30)
-            : undefined,
-          categoryId: snippet?.categoryId ? String(snippet.categoryId) : "22",
-          defaultLanguage: snippet?.defaultLanguage ? String(snippet.defaultLanguage) : undefined,
-          defaultAudioLanguage: snippet?.defaultAudioLanguage ? String(snippet.defaultAudioLanguage) : undefined,
+  let insert;
+  try {
+    insert = await yt.videos.insert(
+      {
+        part: ["snippet", "status"],
+        requestBody: {
+          snippet: {
+            title: String(snippet?.title || "Untitled").slice(0, 100),
+            description: String(snippet?.description || "").slice(0, 5000),
+            tags: Array.isArray(snippet?.tags)
+              ? snippet.tags.map((/** @type {unknown} */ t) => String(t).slice(0, 30)).slice(0, 30)
+              : undefined,
+            categoryId: snippet?.categoryId ? String(snippet.categoryId) : "22",
+            defaultLanguage: snippet?.defaultLanguage ? String(snippet.defaultLanguage) : undefined,
+            defaultAudioLanguage: snippet?.defaultAudioLanguage ? String(snippet.defaultAudioLanguage) : undefined,
+          },
+          status: {
+            privacyStatus:
+              status?.privacyStatus === "public" ||
+              status?.privacyStatus === "private" ||
+              status?.privacyStatus === "unlisted"
+                ? status.privacyStatus
+                : "private",
+            embeddable: status?.embeddable !== false,
+            license: status?.license === "creativeCommon" ? "creativeCommon" : "youtube",
+            publicStatsViewable: status?.publicStatsViewable !== false,
+            selfDeclaredMadeForKids: Boolean(status?.selfDeclaredMadeForKids),
+          },
         },
-        status: {
-          privacyStatus:
-            status?.privacyStatus === "public" ||
-            status?.privacyStatus === "private" ||
-            status?.privacyStatus === "unlisted"
-              ? status.privacyStatus
-              : "private",
-          embeddable: status?.embeddable !== false,
-          license: status?.license === "creativeCommon" ? "creativeCommon" : "youtube",
-          publicStatsViewable: status?.publicStatsViewable !== false,
-          selfDeclaredMadeForKids: Boolean(status?.selfDeclaredMadeForKids),
+        media: {
+          body,
         },
       },
-      media: {
-        body,
-      },
-    },
-    { params: { notifySubscribers: notifySubscribers ? "true" : "false" } },
-  );
+      { params: { notifySubscribers: notifySubscribers ? "true" : "false" } },
+    );
+  } catch (e) {
+    if (isYoutubeInvalidGrant(e)) {
+      await markYoutubeAccountDisconnected(aid);
+      throw new Error(
+        "YouTube refresh token is invalid or revoked — reconnect YouTube in Tenant settings (Syndication → Connect YouTube).",
+      );
+    }
+    throw e;
+  }
 
   const id = insert?.data?.id;
   if (!id) throw new Error("YouTube API returned no video id");
