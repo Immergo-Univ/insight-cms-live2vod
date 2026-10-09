@@ -55,6 +55,55 @@ function anyWhisperSubtitlesEnabled(spec) {
   return Array.isArray(spec?.clips) && spec.clips.some((c) => c?.subtitles?.enabled === true);
 }
 
+/**
+ * Best public MP4 download URL from the Insight VOD `content[]` — the same URL the app/player
+ * serves. Mirrors insight-api's `getBestMp4Url`: filter content by `assetTypes` including "mp4",
+ * prefer an uploaded MP4, else the highest-resolution one.
+ *
+ * Social syndication must download THIS URL: the raw, CMS-derived S3 path can point at a private
+ * origin (403), whereas insight-api stores the resolved public CDN URL.
+ *
+ * @param {{ tenantId: string, vodGuid: string }} opts
+ * @returns {Promise<string | null>}
+ */
+export async function fetchInsightVodBestMp4Url({ tenantId, vodGuid }) {
+  const tid = String(tenantId || "").trim();
+  const guid = String(vodGuid || "").trim();
+  if (!tid || !guid) return null;
+
+  try {
+    const token = await getAuthToken();
+    const headers = { Authorization: `Bearer ${token}`, "x-tenant-id": tid };
+    const findRes = await axios.get(`${config.insightApiBase}/cms/entity/vods/find`, {
+      params: { filter: `guid||$eq||${guid}` },
+      headers,
+    });
+    const rows = normalizeInsightEntityFindResults(findRes.data);
+    const content = Array.isArray(rows[0]?.content) ? rows[0].content : [];
+    const mp4s = content.filter(
+      (item) => Array.isArray(item?.assetTypes) && item.assetTypes.includes("mp4"),
+    );
+    if (!mp4s.length) return null;
+
+    let best = mp4s.find((item) => item?.typeName === "uploadedMp4");
+    if (!best) {
+      let bestWidth = -1;
+      for (const item of mp4s) {
+        const width = parseInt(String(item?.resolution ?? "").split("x")[0], 10);
+        const w = Number.isFinite(width) ? width : 0;
+        if (w > bestWidth) {
+          bestWidth = w;
+          best = item;
+        }
+      }
+    }
+    const url = best && typeof best.downloadUrl === "string" ? best.downloadUrl.trim() : "";
+    return /^https?:\/\//i.test(url) ? url : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Legacy-style clipInfo content entry. Times in ms, duration in seconds (placeholder until finish). */
 function buildClipInfo(spec) {
   const clips = Array.isArray(spec?.clips) ? spec.clips : [];
