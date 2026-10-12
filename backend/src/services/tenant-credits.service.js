@@ -3,6 +3,7 @@ import { getSequelize } from "../db/sequelize.js";
 import { getJob } from "./vod-jobs.store.js";
 import {
   aggregateUsageRows,
+  ceilCredits,
   summarizeAiUsageByModel,
   usdPerCredit,
 } from "./credits-pricing.service.js";
@@ -16,10 +17,6 @@ function models() {
 function safeNumber(v) {
   const n = Number(v);
   return Number.isFinite(n) ? n : 0;
-}
-
-function roundCredits(n) {
-  return Math.round(safeNumber(n) * 1e6) / 1e6;
 }
 
 /**
@@ -47,7 +44,7 @@ async function sumFreeUsedForPeriod(tenantId, periodMonth) {
   for (const r of rows) {
     sum += safeNumber(r.get("creditsFromFree"));
   }
-  return roundCredits(sum);
+  return ceilCredits(sum);
 }
 
 /**
@@ -72,10 +69,10 @@ export async function getTenantCreditState(tenantId) {
 
   const periodMonth = currentPeriodMonth();
   const monthlyFreeCredits = Math.max(0, Math.floor(safeNumber(row.get("monthlyFreeCredits"))));
-  const purchasedCredits = Math.max(0, roundCredits(safeNumber(row.get("purchasedCredits"))));
+  const purchasedCredits = Math.max(0, ceilCredits(safeNumber(row.get("purchasedCredits"))));
   const freeUsedThisMonth = await sumFreeUsedForPeriod(id, periodMonth);
-  const freeRemaining = Math.max(0, roundCredits(monthlyFreeCredits - freeUsedThisMonth));
-  const totalRemaining = roundCredits(freeRemaining + purchasedCredits);
+  const freeRemaining = Math.max(0, monthlyFreeCredits - freeUsedThisMonth);
+  const totalRemaining = Math.max(0, freeRemaining + purchasedCredits);
   // Limiter is inactive when both pools are 0 (legacy / not configured) so we don't block all tenants.
   const limiterActive = monthlyFreeCredits > 0 || purchasedCredits > 0;
 
@@ -117,10 +114,10 @@ export async function assertTenantHasCredits(tenantId) {
  * @returns {{ fromFree: number, fromPurchased: number }}
  */
 function allocateCredits(totalCredits, freeRemaining) {
-  const total = Math.max(0, roundCredits(totalCredits));
-  const freeCap = Math.max(0, roundCredits(freeRemaining));
+  const total = Math.max(0, ceilCredits(totalCredits));
+  const freeCap = Math.max(0, ceilCredits(freeRemaining));
   const fromFree = Math.min(total, freeCap);
-  const fromPurchased = Math.max(0, roundCredits(total - fromFree));
+  const fromPurchased = Math.max(0, total - fromFree);
   return { fromFree, fromPurchased };
 }
 
@@ -165,7 +162,7 @@ export async function reconcileJobCredits(jobId) {
     for (const r of existing) {
       previousPurchased += safeNumber(r.get("creditsFromPurchased"));
     }
-    previousPurchased = roundCredits(previousPurchased);
+    previousPurchased = ceilCredits(previousPurchased);
 
     if (existing.length) {
       await TenantCreditLedger.destroy({ where: { jobId: id }, transaction });
@@ -181,7 +178,7 @@ export async function reconcileJobCredits(jobId) {
     for (const r of otherFreeRows) {
       freeUsedOthers += safeNumber(r.get("creditsFromFree"));
     }
-    freeUsedOthers = roundCredits(freeUsedOthers);
+    freeUsedOthers = ceilCredits(freeUsedOthers);
 
     const tenantRow = await Tenant.findByPk(tenantId, {
       transaction,
@@ -190,14 +187,14 @@ export async function reconcileJobCredits(jobId) {
     if (!tenantRow) return;
 
     const monthlyFree = Math.max(0, Math.floor(safeNumber(tenantRow.get("monthlyFreeCredits"))));
-    const freeRemaining = Math.max(0, roundCredits(monthlyFree - freeUsedOthers));
+    const freeRemaining = Math.max(0, monthlyFree - freeUsedOthers);
     const { fromFree, fromPurchased } = allocateCredits(agg.totalCredits, freeRemaining);
 
     // Adjust purchased balance by delta vs previous reconciliation for this job.
-    const purchasedDelta = roundCredits(fromPurchased - previousPurchased);
+    const purchasedDelta = fromPurchased - previousPurchased;
     if (purchasedDelta !== 0) {
-      const currentPurchased = Math.max(0, roundCredits(safeNumber(tenantRow.get("purchasedCredits"))));
-      const nextPurchased = Math.max(0, roundCredits(currentPurchased - purchasedDelta));
+      const currentPurchased = Math.max(0, ceilCredits(safeNumber(tenantRow.get("purchasedCredits"))));
+      const nextPurchased = Math.max(0, currentPurchased - purchasedDelta);
       tenantRow.purchasedCredits = nextPurchased;
       await tenantRow.save({ transaction });
     }
@@ -220,10 +217,13 @@ export async function reconcileJobCredits(jobId) {
         rowFromPurchased = remainingPurchased;
       } else {
         const share = agg.totalCredits > 0 ? safeNumber(row.credits) / agg.totalCredits : 0;
-        rowFromFree = roundCredits(fromFree * share);
-        rowFromPurchased = roundCredits(fromPurchased * share);
-        remainingFree = roundCredits(remainingFree - rowFromFree);
-        remainingPurchased = roundCredits(remainingPurchased - rowFromPurchased);
+        rowFromFree = ceilCredits(fromFree * share);
+        rowFromPurchased = ceilCredits(fromPurchased * share);
+        // Keep remainder non-negative; last row absorbs leftovers.
+        if (rowFromFree > remainingFree) rowFromFree = remainingFree;
+        if (rowFromPurchased > remainingPurchased) rowFromPurchased = remainingPurchased;
+        remainingFree = Math.max(0, remainingFree - rowFromFree);
+        remainingPurchased = Math.max(0, remainingPurchased - rowFromPurchased);
       }
 
       await TenantCreditLedger.create(
@@ -291,7 +291,7 @@ export async function getLedgerUsageByModelForPeriod(tenantId, periodMonth) {
   return Array.from(map.values()).map((row) => {
     const units = Math.round(row.units * 10000) / 10000;
     const totalUsd = Math.round(row.totalUsd * 1e6) / 1e6;
-    const credits = roundCredits(row.credits);
+    const credits = ceilCredits(row.credits);
     return {
       category: row.category,
       model: row.model,
@@ -337,7 +337,7 @@ export function summarizeJobsAiUsage(jobs) {
   return Array.from(map.values()).map((row) => {
     const units = Math.round(row.units * 10000) / 10000;
     const totalUsd = Math.round(row.totalUsd * 1e6) / 1e6;
-    const credits = roundCredits(row.credits);
+    const credits = ceilCredits(row.credits);
     return {
       category: row.category,
       model: row.model,

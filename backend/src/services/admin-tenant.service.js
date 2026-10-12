@@ -15,7 +15,11 @@ import {
   summarizeJobsAiUsage,
   currentPeriodMonth,
 } from "./tenant-credits.service.js";
-import { aggregateUsageRows, usdPerCredit } from "./credits-pricing.service.js";
+import {
+  aggregateUsageRows,
+  buildCreditMinutesByUseTable,
+  usdPerCredit,
+} from "./credits-pricing.service.js";
 import { Op } from "sequelize";
 
 function models() {
@@ -237,10 +241,10 @@ export async function adminUpdateTenant(tenantId, body) {
   }
   if (body.purchasedCredits !== undefined) {
     const n = Number(body.purchasedCredits);
-    if (!Number.isFinite(n) || n < 0) {
-      throw new Error("purchasedCredits must be a number >= 0");
+    if (!Number.isFinite(n) || n < 0 || !Number.isInteger(n)) {
+      throw new Error("purchasedCredits must be an integer >= 0");
     }
-    row.purchasedCredits = Math.round(n * 10000) / 10000;
+    row.purchasedCredits = n;
   }
   await row.save();
   return tenantRowToApi(row.get({ plain: true }));
@@ -508,6 +512,16 @@ export async function adminGetTenantDashboard(tenantId) {
 
   const creditState = await getTenantCreditState(id);
 
+  const tenantPlain = tenant.get({ plain: true });
+  const vttLanguages = normalizeAvailableLanguages(tenantPlain.availableLanguages);
+  const dubbingLanguages = Array.isArray(tenantPlain.availableDubbingLanguages)
+    ? normalizeAvailableLanguages(tenantPlain.availableDubbingLanguages)
+    : vttLanguages;
+  const creditMinutesByUse = buildCreditMinutesByUseTable({
+    vttLanguageCount: vttLanguages.length,
+    dubbingLanguageCount: dubbingLanguages.length > 0 ? dubbingLanguages.length : vttLanguages.length,
+  });
+
   const encodeCostPerMinute = parseUsdEnv("ADMIN_ENCODE_COST_USD_PER_MINUTE", 0);
   const encodeEstimatedCostUsd = Number((encodeMinutesCurrent * encodeCostPerMinute).toFixed(6));
 
@@ -544,6 +558,12 @@ export async function adminGetTenantDashboard(tenantId) {
       byCategory: aiCreditsAgg.byCategory,
       totalCredits: aiCreditsAgg.totalCredits,
       usdPerCredit: usdPerCredit(),
+      approxVideoMinutes: aiCreditsAgg.approxVideoMinutes,
+      usdPerVideoMinute: aiCreditsAgg.usdPerVideoMinute,
+      approxMinutesPerCredit: aiCreditsAgg.approxMinutesPerCredit,
+      creditMinutesByUse,
+      vttLanguageCount: vttLanguages.length,
+      dubbingLanguageCount: dubbingLanguages.length > 0 ? dubbingLanguages.length : vttLanguages.length,
     },
     credits: creditState,
     encodeUsage: {

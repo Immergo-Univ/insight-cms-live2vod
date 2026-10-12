@@ -166,6 +166,18 @@ type TenantDashboard = {
     byCategory: { whisper: number; llm: number; tts: number };
     totalCredits: number;
     usdPerCredit: number;
+    approxVideoMinutes?: number;
+    usdPerVideoMinute?: number;
+    approxMinutesPerCredit?: number;
+    creditMinutesByUse?: Array<{
+      use: "stt" | "llm_news" | "vtt_translate" | "dubbing" | string;
+      languageCount: number | null;
+      usdPerMinute: number;
+      usdPerMinutePerLanguage: number | null;
+      minutesPerCredit: number;
+    }>;
+    vttLanguageCount?: number;
+    dubbingLanguageCount?: number;
   };
   credits?: TenantCreditsState | null;
   encodeUsage: {
@@ -351,7 +363,7 @@ export function AdminTenantSettingsPage() {
     try {
       const { data } = await getAdminClient().patch<TenantDetail>(`/tenants/${encodeURIComponent(tenantId)}`, {
         monthlyFreeCredits: Math.max(0, Math.floor(freeCreditsDraft)),
-        purchasedCredits: Math.max(0, Number(purchasedCreditsDraft) || 0),
+        purchasedCredits: Math.max(0, Math.ceil(Number(purchasedCreditsDraft) || 0)),
       });
       setDetail(data);
       message.success(t("tenants.dashboardCreditsSaved"));
@@ -571,7 +583,14 @@ export function AdminTenantSettingsPage() {
 
   const formatUsd = (value: number) => `$${Number(value || 0).toFixed(4)}`;
   const formatTrend = (value: number) => `${value >= 0 ? "+" : ""}${Number(value || 0).toFixed(2)}%`;
-  const formatCredits = (value: number) => Number(value || 0).toFixed(4);
+  const formatCredits = (value: number) => {
+    const n = Number(value) || 0;
+    return String(n <= 0 ? 0 : Math.ceil(n));
+  };
+  const formatApproxMinutes = (value: number) => {
+    const n = Number(value) || 0;
+    return n.toFixed(1);
+  };
 
   const aiUsageRows = useMemo(() => {
     const rows = dashboard?.aiUsageByModel || [];
@@ -581,11 +600,27 @@ export function AdminTenantSettingsPage() {
     }));
   }, [dashboard?.aiUsageByModel]);
 
+  const creditMinutesByUseRows = useMemo(() => {
+    const rows = dashboard?.aiCreditsSummary?.creditMinutesByUse || [];
+    return rows.map((row, index) => ({
+      key: `${row.use}-${index}`,
+      ...row,
+    }));
+  }, [dashboard?.aiCreditsSummary?.creditMinutesByUse]);
+
   const categoryLabel = (category: string) => {
     if (category === "whisper") return t("tenants.dashboardCategoryWhisper");
     if (category === "llm") return t("tenants.dashboardCategoryLlm");
     if (category === "tts") return t("tenants.dashboardCategoryTts");
     return category;
+  };
+
+  const creditUseLabel = (use: string) => {
+    if (use === "stt") return t("tenants.dashboardUseStt");
+    if (use === "llm_news") return t("tenants.dashboardUseLlmNews");
+    if (use === "vtt_translate") return t("tenants.dashboardUseVttTranslate");
+    if (use === "dubbing") return t("tenants.dashboardUseDubbing");
+    return use;
   };
 
   const unitKindLabel = (unitKind: string) => {
@@ -1076,11 +1111,61 @@ export function AdminTenantSettingsPage() {
                           <Typography.Title level={5} style={{ margin: 0 }}>
                             {t("tenants.dashboardCreditsEquivalence", {
                               usd: formatUsd(usdPerCreditValue),
+                              minutes: formatApproxMinutes(
+                                dashboard?.aiCreditsSummary?.approxMinutesPerCredit ?? 1,
+                              ),
                             })}
                           </Typography.Title>
                           <Typography.Paragraph type="secondary" style={{ marginBottom: 0 }}>
                             {t("tenants.dashboardCreditsExplanation")}
                           </Typography.Paragraph>
+
+                          <div>
+                            <Typography.Text strong>{t("tenants.dashboardCreditMinutesByUseTitle")}</Typography.Text>
+                            <br />
+                            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                              {t("tenants.dashboardCreditMinutesByUseHint")}
+                            </Typography.Text>
+                            <Table
+                              size="small"
+                              pagination={false}
+                              style={{ marginTop: 8 }}
+                              dataSource={creditMinutesByUseRows}
+                              columns={[
+                                {
+                                  title: t("tenants.dashboardColUse"),
+                                  dataIndex: "use",
+                                  key: "use",
+                                  render: (v: string) => creditUseLabel(v),
+                                },
+                                {
+                                  title: t("tenants.dashboardColLanguages"),
+                                  dataIndex: "languageCount",
+                                  key: "languageCount",
+                                  width: 140,
+                                  render: (v: number | null) =>
+                                    typeof v === "number" && v > 0
+                                      ? t("tenants.dashboardLanguagesN", { count: v })
+                                      : t("tenants.dashboardLanguagesNa"),
+                                },
+                                {
+                                  title: t("tenants.dashboardColUsdPerMin"),
+                                  dataIndex: "usdPerMinute",
+                                  key: "usdPerMinute",
+                                  width: 140,
+                                  render: (v: number) => formatUsd(v),
+                                },
+                                {
+                                  title: t("tenants.dashboardColMinPerCredit"),
+                                  dataIndex: "minutesPerCredit",
+                                  key: "minutesPerCredit",
+                                  width: 150,
+                                  render: (v: number) => formatApproxMinutes(v),
+                                },
+                              ]}
+                            />
+                          </div>
+
                           {aiUsageRows.length === 0 ? (
                             <Typography.Text type="secondary">{t("tenants.dashboardCreditsEmptyUsage")}</Typography.Text>
                           ) : (
@@ -1117,6 +1202,9 @@ export function AdminTenantSettingsPage() {
                           <Typography.Text>
                             {t("tenants.dashboardCreditsTotal", {
                               credits: formatCredits(dashboard?.aiCreditsSummary?.totalCredits || 0),
+                              minutes: formatApproxMinutes(
+                                dashboard?.aiCreditsSummary?.approxVideoMinutes || 0,
+                              ),
                             })}
                           </Typography.Text>
                           <Typography.Text type="secondary">
@@ -1174,7 +1262,7 @@ export function AdminTenantSettingsPage() {
                                   step={100}
                                   value={purchasedCreditsDraft}
                                   disabled={!can("tenants", "edit")}
-                                  onChange={(v) => setPurchasedCreditsDraft(Number(v) || 0)}
+                                  onChange={(v) => setPurchasedCreditsDraft(Math.max(0, Math.ceil(Number(v) || 0)))}
                                 />
                               </Col>
                               <Col xs={24} md={8}>
@@ -1185,7 +1273,7 @@ export function AdminTenantSettingsPage() {
                                   step={100}
                                   value={purchasedCreditsDraft}
                                   disabled={!can("tenants", "edit")}
-                                  onChange={(v) => setPurchasedCreditsDraft(Math.max(0, Number(v) || 0))}
+                                  onChange={(v) => setPurchasedCreditsDraft(Math.max(0, Math.ceil(Number(v) || 0)))}
                                 />
                               </Col>
                             </Row>

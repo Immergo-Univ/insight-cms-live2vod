@@ -11,10 +11,35 @@
 const DEFAULT_USD_PER_CREDIT = 0.01;
 
 /**
+ * Approximate blended AI USD cost per minute of video (conservative full-stack reference).
+ * Used only for UX equivalence ("credits ≈ X min of video"). Override with AI_USD_PER_VIDEO_MINUTE.
+ */
+const DEFAULT_AI_USD_PER_VIDEO_MINUTE = 0.05;
+
+/**
+ * Conservative USD / video-minute estimates per AI use (list-price padded, not exact billing).
+ * Override via env when rates change.
+ */
+const DEFAULT_AI_USD_PER_MIN_STT = 0.012;
+const DEFAULT_AI_USD_PER_MIN_LLM_NEWS = 0.005;
+const DEFAULT_AI_USD_PER_MIN_VTT_PER_LANG = 0.003;
+const DEFAULT_AI_USD_PER_MIN_DUBBING_PER_LANG = 0.015;
+
+/**
  * Inworld TTS approximate list price (USD per 1M characters).
  * Override with INWORLD_TTS_USD_PER_1M_CHARS.
  */
 const DEFAULT_INWORLD_TTS_USD_PER_1M_CHARS = 5;
+
+/**
+ * @param {string} name
+ * @param {number} fallback
+ */
+function parsePositiveUsdEnv(name, fallback) {
+  const raw = String(process.env[name] || "").trim();
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? n : fallback;
+}
 
 function safeNumber(v) {
   const n = Number(v);
@@ -25,8 +50,17 @@ function roundUsd(n) {
   return Math.round(safeNumber(n) * 1e6) / 1e6;
 }
 
-function roundCredits(n) {
-  return Math.round(safeNumber(n) * 1e6) / 1e6;
+/**
+ * Credits are whole integers; always round up (ceil) when there is a fractional part.
+ * Zero stays zero.
+ *
+ * @param {number} n
+ * @returns {number}
+ */
+export function ceilCredits(n) {
+  const v = safeNumber(n);
+  if (v <= 0) return 0;
+  return Math.ceil(v);
 }
 
 /**
@@ -39,13 +73,113 @@ export function usdPerCredit() {
 }
 
 /**
- * @param {number} usd
+ * Approximate AI USD cost for one minute of video (reference for minutes equivalence).
  * @returns {number}
+ */
+export function usdPerVideoMinute() {
+  const raw = String(process.env.AI_USD_PER_VIDEO_MINUTE || "").trim();
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? n : DEFAULT_AI_USD_PER_VIDEO_MINUTE;
+}
+
+/**
+ * @param {number} usd
+ * @returns {number} integer credits (ceil)
  */
 export function usdToCredits(usd) {
   const anchor = usdPerCredit();
   if (!(anchor > 0)) return 0;
-  return roundCredits(safeNumber(usd) / anchor);
+  return ceilCredits(safeNumber(usd) / anchor);
+}
+
+/**
+ * Approximate video minutes covered by an integer credit amount.
+ * Rounded to 1 decimal for display (not ceiled — minutes are an estimate).
+ *
+ * @param {number} credits
+ * @returns {number}
+ */
+export function creditsToApproxVideoMinutes(credits) {
+  const perMin = usdPerVideoMinute();
+  const creditUsd = usdPerCredit();
+  if (!(perMin > 0) || !(creditUsd > 0)) return 0;
+  const minutes = (ceilCredits(credits) * creditUsd) / perMin;
+  return Math.round(minutes * 10) / 10;
+}
+
+/**
+ * Minutes of video covered by 1 credit at a given USD/min rate.
+ *
+ * @param {number} usdPerMinute
+ * @returns {number}
+ */
+export function minutesPerCreditAtRate(usdPerMinute) {
+  const rate = safeNumber(usdPerMinute);
+  const creditUsd = usdPerCredit();
+  if (!(rate > 0) || !(creditUsd > 0)) return 0;
+  return Math.round((creditUsd / rate) * 10) / 10;
+}
+
+/**
+ * Build the admin UX table: how many video minutes 1 credit buys for each AI use.
+ * VTT and dubbing costs scale with the tenant's configured language pools.
+ *
+ * @param {object} [opts]
+ * @param {number} [opts.vttLanguageCount] availableLanguages length (VTT / news pool)
+ * @param {number} [opts.dubbingLanguageCount] availableDubbingLanguages length
+ * @returns {Array<{
+ *   use: 'stt' | 'llm_news' | 'vtt_translate' | 'dubbing',
+ *   languageCount: number | null,
+ *   usdPerMinute: number,
+ *   usdPerMinutePerLanguage: number | null,
+ *   minutesPerCredit: number,
+ * }>}
+ */
+export function buildCreditMinutesByUseTable(opts = {}) {
+  const vttLangs = Math.max(1, Math.floor(safeNumber(opts.vttLanguageCount) || 1));
+  const dubLangs = Math.max(1, Math.floor(safeNumber(opts.dubbingLanguageCount) || 1));
+
+  const sttPerMin = parsePositiveUsdEnv("AI_USD_PER_MIN_STT", DEFAULT_AI_USD_PER_MIN_STT);
+  const newsPerMin = parsePositiveUsdEnv("AI_USD_PER_MIN_LLM_NEWS", DEFAULT_AI_USD_PER_MIN_LLM_NEWS);
+  const vttPerLang = parsePositiveUsdEnv("AI_USD_PER_MIN_VTT_PER_LANG", DEFAULT_AI_USD_PER_MIN_VTT_PER_LANG);
+  const dubPerLang = parsePositiveUsdEnv(
+    "AI_USD_PER_MIN_DUBBING_PER_LANG",
+    DEFAULT_AI_USD_PER_MIN_DUBBING_PER_LANG,
+  );
+
+  const vttTotal = roundUsd(vttPerLang * vttLangs);
+  const dubTotal = roundUsd(dubPerLang * dubLangs);
+
+  return [
+    {
+      use: "stt",
+      languageCount: null,
+      usdPerMinute: sttPerMin,
+      usdPerMinutePerLanguage: null,
+      minutesPerCredit: minutesPerCreditAtRate(sttPerMin),
+    },
+    {
+      use: "llm_news",
+      languageCount: null,
+      usdPerMinute: newsPerMin,
+      usdPerMinutePerLanguage: null,
+      minutesPerCredit: minutesPerCreditAtRate(newsPerMin),
+    },
+    {
+      use: "vtt_translate",
+      languageCount: vttLangs,
+      usdPerMinute: vttTotal,
+      usdPerMinutePerLanguage: vttPerLang,
+      minutesPerCredit: minutesPerCreditAtRate(vttTotal),
+    },
+    {
+      use: "dubbing",
+      languageCount: dubLangs,
+      usdPerMinute: dubTotal,
+      usdPerMinutePerLanguage: dubPerLang,
+      minutesPerCredit: minutesPerCreditAtRate(dubTotal),
+    },
+  ];
 }
 
 /**
@@ -200,14 +334,18 @@ export function aggregateUsageRows(rows) {
       byCategory[r.category] += safeNumber(r.credits);
     }
   }
+  const whisper = ceilCredits(byCategory.whisper);
+  const llm = ceilCredits(byCategory.llm);
+  const tts = ceilCredits(byCategory.tts);
+  // Prefer sum of per-category ceil so category rows and total stay consistent integers.
+  const total = ceilCredits(whisper + llm + tts > 0 ? whisper + llm + tts : totalCredits);
   return {
-    byCategory: {
-      whisper: roundCredits(byCategory.whisper),
-      llm: roundCredits(byCategory.llm),
-      tts: roundCredits(byCategory.tts),
-    },
-    totalCredits: roundCredits(totalCredits),
+    byCategory: { whisper, llm, tts },
+    totalCredits: total,
     totalUsd: roundUsd(totalUsd),
     totalTokens: Math.round(totalTokens),
+    approxVideoMinutes: creditsToApproxVideoMinutes(total),
+    usdPerVideoMinute: usdPerVideoMinute(),
+    approxMinutesPerCredit: creditsToApproxVideoMinutes(1),
   };
 }

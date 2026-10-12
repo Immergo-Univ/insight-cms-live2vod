@@ -124,7 +124,7 @@ export function tenantRowToApi(plain) {
     tiktokUsername,
     syndicationAccountMaxByPlatform: normalizeSyndicationAccountMaxByPlatform(plain.syndicationAccountMaxByPlatform),
     monthlyFreeCredits: Math.max(0, Math.floor(Number(plain.monthlyFreeCredits) || 0)),
-    purchasedCredits: Math.max(0, Math.round((Number(plain.purchasedCredits) || 0) * 10000) / 10000),
+    purchasedCredits: Math.max(0, Math.ceil(Number(plain.purchasedCredits) || 0)),
     timezoneLastSeen: plain.timezoneLastSeen ?? null,
     metadata: plain.metadata ?? null,
     firstSeenAt: plain.firstSeenAt,
