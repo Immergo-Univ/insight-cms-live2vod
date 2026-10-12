@@ -32,6 +32,8 @@ export function registerVodJobModel(sequelize) {
       transcriptNewsError: DataTypes.TEXT,
       transcriptDiarization: DataTypes.JSONB,
       openaiClipUsage: DataTypes.JSONB,
+      /** Inworld TTS character usage rollup (encoder-lite → backend). */
+      ttsClipUsage: DataTypes.JSONB,
       transcriptNewsBundle: DataTypes.JSONB,
       jobKind: DataTypes.STRING,
       editorClipId: DataTypes.STRING,

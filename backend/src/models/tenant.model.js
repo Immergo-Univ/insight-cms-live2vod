@@ -81,6 +81,10 @@ export function registerTenantModel(sequelize) {
       tiktokUsername: { type: DataTypes.STRING(128), allowNull: true },
       /** Max authorized syndication accounts per platform (JSONB map, default 5 in app code). */
       syndicationAccountMaxByPlatform: { type: DataTypes.JSONB, allowNull: true },
+      /** Free AI credits granted each UTC calendar month (consumed before purchased). */
+      monthlyFreeCredits: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 },
+      /** Purchased AI credit balance that does not expire (rollover). */
+      purchasedCredits: { type: DataTypes.DECIMAL(14, 4), allowNull: false, defaultValue: 0 },
       timezoneLastSeen: { type: DataTypes.STRING(128), allowNull: true },
       metadata: { type: DataTypes.JSONB, allowNull: true },
       firstSeenAt: { type: DataTypes.DATE, allowNull: true },

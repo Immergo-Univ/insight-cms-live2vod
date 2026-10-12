@@ -4,6 +4,7 @@ import { registerVodJobModel } from "../models/vod-job.model.js";
 import { registerAdminModels } from "../models/register-admin-models.js";
 import { registerTenantModel } from "../models/tenant.model.js";
 import { registerTenantSyndicationAccountModel } from "../models/tenant-syndication-account.model.js";
+import { registerTenantCreditLedgerModel } from "../models/tenant-credit-ledger.model.js";
 import { registerAppSettingModel } from "../models/app-setting.model.js";
 import { registerAdRecognitionScanModel } from "../models/ad-recognition-scan.model.js";
 import { registerAdRecognitionConfigModel } from "../models/ad-recognition-config.model.js";
@@ -45,6 +46,7 @@ export function registerAllModels(sq) {
   registerAdminModels(sq);
   registerTenantModel(sq);
   registerTenantSyndicationAccountModel(sq);
+  registerTenantCreditLedgerModel(sq);
   registerAppSettingModel(sq);
   registerAdRecognitionScanModel(sq);
   registerAdRecognitionConfigModel(sq);

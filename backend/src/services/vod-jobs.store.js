@@ -41,6 +41,7 @@ import {
  * @property {string} [transcriptNewsError] when news drafting failed; transcript may still exist
  * @property {object} [transcriptDiarization] diarized segments + speakerLabels for realtime STT
  * @property {object} [openaiClipUsage] per-step OpenAI token usage + estimated USD for realtime clip STT/news
+ * @property {object} [ttsClipUsage] per-step Inworld TTS character usage + estimated USD
  * @property {object} [transcriptNewsBundle] rich news fields per locale (editor PATCH + public share page)
  * @property {'vod_encode'|'realtime_transcribe'} [jobKind]
  * @property {string} [vodGuid] insight-api Mongo VOD guid created for this job (legacy webhook media_id)
@@ -177,7 +178,7 @@ export async function mergeJobEditorSpec(jobId, fn) {
 
 /**
  * @param {string} id
- * @param {Partial<Pick<VodJob, 'status' | 'progress' | 'phase' | 'message' | 'error' | 's3Key' | 's3Keys' | 'outputUrl' | 'outputUrls' | 'transcriptText' | 'transcriptDiarization' | 'transcriptNewsEn' | 'transcriptNewsEs' | 'transcriptNewsHe' | 'transcriptNewsError' | 'openaiClipUsage' | 'transcriptNewsBundle' | 'jobKind' | 'vodGuid' | 'editorSpec'>>} patch
+ * @param {Partial<Pick<VodJob, 'status' | 'progress' | 'phase' | 'message' | 'error' | 's3Key' | 's3Keys' | 'outputUrl' | 'outputUrls' | 'transcriptText' | 'transcriptDiarization' | 'transcriptNewsEn' | 'transcriptNewsEs' | 'transcriptNewsHe' | 'transcriptNewsError' | 'openaiClipUsage' | 'ttsClipUsage' | 'transcriptNewsBundle' | 'jobKind' | 'vodGuid' | 'editorSpec'>>} patch
  * @returns {Promise<VodJob | null>}
  */
 export async function updateJob(id, patch) {

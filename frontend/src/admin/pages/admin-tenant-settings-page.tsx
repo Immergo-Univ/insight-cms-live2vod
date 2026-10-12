@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { App, Button, Card, Col, Form, Input, InputNumber, Popconfirm, Row, Select, Space, Spin, Statistic, Switch, Table, Tabs, Tag, Typography } from "antd";
+import { App, Button, Card, Col, Form, Input, InputNumber, Popconfirm, Progress, Row, Select, Slider, Space, Spin, Statistic, Switch, Table, Tabs, Tag, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { useNavigate, useParams } from "react-router";
 import { useTranslation } from "react-i18next";
@@ -54,7 +54,30 @@ type TenantDetail = {
   syndicationTiktokConnected?: boolean;
   tiktokUsername?: string | null;
   syndicationAccountMaxByPlatform?: Partial<SyndicationAccountMaxByPlatform> | null;
+  monthlyFreeCredits?: number;
+  purchasedCredits?: number;
   metadata: Record<string, unknown> | null;
+};
+
+type AiUsageByModelRow = {
+  category: string;
+  model: string;
+  units: number;
+  unitKind: string;
+  approxUsdPerUnit: number;
+  totalUsd: number;
+  credits: number;
+};
+
+type TenantCreditsState = {
+  usdPerCredit: number;
+  monthlyFreeCredits: number;
+  freeUsedThisMonth: number;
+  freeRemaining: number;
+  purchasedCredits: number;
+  totalRemaining: number;
+  periodMonth: string;
+  limiterActive: boolean;
 };
 
 type FormShape = {
@@ -138,6 +161,13 @@ type TenantDashboard = {
   syndicationVideosByNetwork: Record<NetworkName, number>;
   apiCostByNetwork: Record<NetworkName, { videos: number; unitCostUsd: number; estimatedCostUsd: number }>;
   aiTokenUsage: { totalTokens: number; estimatedCostUsd: number };
+  aiUsageByModel?: AiUsageByModelRow[];
+  aiCreditsSummary?: {
+    byCategory: { whisper: number; llm: number; tts: number };
+    totalCredits: number;
+    usdPerCredit: number;
+  };
+  credits?: TenantCreditsState | null;
   encodeUsage: {
     minutesCurrent: number;
     minutesPrevious: number;
@@ -173,6 +203,9 @@ export function AdminTenantSettingsPage() {
   const [selectedFacebookPageId, setSelectedFacebookPageId] = useState<string>("");
   const [dashboard, setDashboard] = useState<TenantDashboard | null>(null);
   const [dashboardLoading, setDashboardLoading] = useState(false);
+  const [freeCreditsDraft, setFreeCreditsDraft] = useState(0);
+  const [purchasedCreditsDraft, setPurchasedCreditsDraft] = useState(0);
+  const [creditsSaving, setCreditsSaving] = useState(false);
   const [syndicationAccounts, setSyndicationAccounts] = useState<SyndicationAccountRow[]>([]);
   const [syndicationAccountsLoading, setSyndicationAccountsLoading] = useState(false);
   const [streams, setStreams] = useState<StreamRow[]>([]);
@@ -248,6 +281,8 @@ export function AdminTenantSettingsPage() {
       const { data } = await getAdminClient().get<TenantDetail>(`/tenants/${encodeURIComponent(tenantId)}`);
       setDetail(data);
       setFormFromDetail(data);
+      setFreeCreditsDraft(Math.max(0, Math.floor(Number(data.monthlyFreeCredits) || 0)));
+      setPurchasedCreditsDraft(Math.max(0, Number(data.purchasedCredits) || 0));
     } catch (e: unknown) {
       message.error(readErrorMessage(e));
     } finally {
@@ -299,12 +334,34 @@ export function AdminTenantSettingsPage() {
     try {
       const { data } = await getAdminClient().get<TenantDashboard>(`/tenants/${encodeURIComponent(tenantId)}/dashboard`);
       setDashboard(data);
+      if (data.credits) {
+        setFreeCreditsDraft(Math.max(0, Math.floor(Number(data.credits.monthlyFreeCredits) || 0)));
+        setPurchasedCreditsDraft(Math.max(0, Number(data.credits.purchasedCredits) || 0));
+      }
     } catch (e: unknown) {
       message.error(readErrorMessage(e));
     } finally {
       setDashboardLoading(false);
     }
   }, [message, tenantId]);
+
+  const saveCreditLimits = async () => {
+    if (!tenantId || !can("tenants", "edit")) return;
+    setCreditsSaving(true);
+    try {
+      const { data } = await getAdminClient().patch<TenantDetail>(`/tenants/${encodeURIComponent(tenantId)}`, {
+        monthlyFreeCredits: Math.max(0, Math.floor(freeCreditsDraft)),
+        purchasedCredits: Math.max(0, Number(purchasedCreditsDraft) || 0),
+      });
+      setDetail(data);
+      message.success(t("tenants.dashboardCreditsSaved"));
+      await loadDashboard();
+    } catch (e: unknown) {
+      message.error(readErrorMessage(e));
+    } finally {
+      setCreditsSaving(false);
+    }
+  };
 
   useEffect(() => {
     void loadDashboard();
@@ -514,6 +571,38 @@ export function AdminTenantSettingsPage() {
 
   const formatUsd = (value: number) => `$${Number(value || 0).toFixed(4)}`;
   const formatTrend = (value: number) => `${value >= 0 ? "+" : ""}${Number(value || 0).toFixed(2)}%`;
+  const formatCredits = (value: number) => Number(value || 0).toFixed(4);
+
+  const aiUsageRows = useMemo(() => {
+    const rows = dashboard?.aiUsageByModel || [];
+    return rows.map((row, index) => ({
+      key: `${row.category}-${row.model}-${row.unitKind}-${index}`,
+      ...row,
+    }));
+  }, [dashboard?.aiUsageByModel]);
+
+  const categoryLabel = (category: string) => {
+    if (category === "whisper") return t("tenants.dashboardCategoryWhisper");
+    if (category === "llm") return t("tenants.dashboardCategoryLlm");
+    if (category === "tts") return t("tenants.dashboardCategoryTts");
+    return category;
+  };
+
+  const unitKindLabel = (unitKind: string) => {
+    if (unitKind === "characters") return t("tenants.dashboardUnitCharacters");
+    return t("tenants.dashboardUnitTokens");
+  };
+
+  const usdPerCreditValue = dashboard?.aiCreditsSummary?.usdPerCredit ?? dashboard?.credits?.usdPerCredit ?? 0.01;
+  const freeUsedPct =
+    (dashboard?.credits?.monthlyFreeCredits || 0) > 0
+      ? Math.min(
+          100,
+          Math.round(
+            ((dashboard?.credits?.freeUsedThisMonth || 0) / (dashboard?.credits?.monthlyFreeCredits || 1)) * 100,
+          ),
+        )
+      : 0;
 
   const syndicationSwitches: Array<{
     name:
@@ -872,74 +961,294 @@ export function AdminTenantSettingsPage() {
             items={[
               {
                 key: "dashboard",
-                label: "Dashboard",
+                label: t("tenants.tabDashboard"),
                 children: (
                   <Spin spinning={dashboardLoading}>
                     <Space direction="vertical" size={16} style={{ width: "100%" }}>
                       <Row gutter={[16, 16]}>
                         <Col xs={24} md={12} xl={8}>
                           <Card>
-                            <Statistic title="Monthly clips" value={dashboard?.monthlyClips?.current || 0} />
+                            <Statistic
+                              title={t("tenants.dashboardMonthlyClips")}
+                              value={dashboard?.monthlyClips?.current || 0}
+                            />
                             <Typography.Text type="secondary">
-                              Trend vs previous month: {formatTrend(dashboard?.monthlyClips?.trendPercent || 0)}
-                            </Typography.Text>
-                          </Card>
-                        </Col>
-                        <Col xs={24} md={12} xl={8}>
-                          <Card>
-                            <Statistic title="AI token usage (month)" value={dashboard?.aiTokenUsage?.totalTokens || 0} />
-                            <Typography.Text type="secondary">
-                              Estimated cost: {formatUsd(dashboard?.aiTokenUsage?.estimatedCostUsd || 0)}
+                              {t("tenants.dashboardTrendPreviousMonth", {
+                                trend: formatTrend(dashboard?.monthlyClips?.trendPercent || 0),
+                              })}
                             </Typography.Text>
                           </Card>
                         </Col>
                         <Col xs={24} md={12} xl={8}>
                           <Card>
                             <Statistic
-                              title="Encoded minutes (month)"
+                              title={t("tenants.dashboardAiTokenUsage")}
+                              value={dashboard?.aiTokenUsage?.totalTokens || 0}
+                            />
+                            <Typography.Text type="secondary">
+                              {t("tenants.dashboardEstimatedCost", {
+                                cost: formatUsd(dashboard?.aiTokenUsage?.estimatedCostUsd || 0),
+                              })}
+                            </Typography.Text>
+                          </Card>
+                        </Col>
+                        <Col xs={24} md={12} xl={8}>
+                          <Card>
+                            <Statistic
+                              title={t("tenants.dashboardEncodedMinutes")}
                               value={dashboard?.encodeUsage?.minutesCurrent || 0}
                               precision={2}
                             />
                             <Typography.Text type="secondary">
-                              Trend vs previous month: {formatTrend(dashboard?.encodeUsage?.trendPercent || 0)}
+                              {t("tenants.dashboardTrendPreviousMonth", {
+                                trend: formatTrend(dashboard?.encodeUsage?.trendPercent || 0),
+                              })}
                             </Typography.Text>
                             <br />
                             <Typography.Text type="secondary">
-                              Estimated encode cost: {formatUsd(dashboard?.encodeUsage?.estimatedCostUsd || 0)}
+                              {t("tenants.dashboardEstimatedEncodeCost", {
+                                cost: formatUsd(dashboard?.encodeUsage?.estimatedCostUsd || 0),
+                              })}
                             </Typography.Text>
                           </Card>
                         </Col>
                       </Row>
 
-                      <Card title="Syndicated videos by social network (month)">
+                      <Card
+                        title={t("tenants.dashboardAiUsageByModelTitle")}
+                        extra={
+                          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                            {t("tenants.dashboardAiUsageByModelHint")}
+                          </Typography.Text>
+                        }
+                      >
+                        {aiUsageRows.length === 0 ? (
+                          <Typography.Text type="secondary">{t("tenants.dashboardCreditsEmptyUsage")}</Typography.Text>
+                        ) : (
+                          <Table
+                            size="small"
+                            pagination={false}
+                            dataSource={aiUsageRows}
+                            columns={[
+                              {
+                                title: t("tenants.dashboardColAi"),
+                                dataIndex: "category",
+                                key: "category",
+                                width: 140,
+                                render: (v: string) => categoryLabel(v),
+                              },
+                              { title: t("tenants.dashboardColModel"), dataIndex: "model", key: "model" },
+                              {
+                                title: t("tenants.dashboardColUnits"),
+                                dataIndex: "units",
+                                key: "units",
+                                width: 120,
+                                render: (v: number) => Number(v || 0).toLocaleString(),
+                              },
+                              {
+                                title: t("tenants.dashboardColUnitKind"),
+                                dataIndex: "unitKind",
+                                key: "unitKind",
+                                width: 120,
+                                render: (v: string) => unitKindLabel(v),
+                              },
+                              {
+                                title: t("tenants.dashboardColUsdPerUnit"),
+                                dataIndex: "approxUsdPerUnit",
+                                key: "approxUsdPerUnit",
+                                width: 150,
+                                render: (v: number) => formatUsd(v),
+                              },
+                              {
+                                title: t("tenants.dashboardColTotalUsd"),
+                                dataIndex: "totalUsd",
+                                key: "totalUsd",
+                                width: 130,
+                                render: (v: number) => formatUsd(v),
+                              },
+                            ]}
+                          />
+                        )}
+                      </Card>
+
+                      <Card title={t("tenants.dashboardCreditsSummaryTitle")}>
+                        <Space direction="vertical" size={12} style={{ width: "100%" }}>
+                          <Typography.Title level={5} style={{ margin: 0 }}>
+                            {t("tenants.dashboardCreditsEquivalence", {
+                              usd: formatUsd(usdPerCreditValue),
+                            })}
+                          </Typography.Title>
+                          <Typography.Paragraph type="secondary" style={{ marginBottom: 0 }}>
+                            {t("tenants.dashboardCreditsExplanation")}
+                          </Typography.Paragraph>
+                          {aiUsageRows.length === 0 ? (
+                            <Typography.Text type="secondary">{t("tenants.dashboardCreditsEmptyUsage")}</Typography.Text>
+                          ) : (
+                            <Table
+                              size="small"
+                              pagination={false}
+                              dataSource={aiUsageRows}
+                              columns={[
+                                {
+                                  title: t("tenants.dashboardColAi"),
+                                  dataIndex: "category",
+                                  key: "category",
+                                  width: 140,
+                                  render: (v: string) => categoryLabel(v),
+                                },
+                                { title: t("tenants.dashboardColModel"), dataIndex: "model", key: "model" },
+                                {
+                                  title: t("tenants.dashboardColUnits"),
+                                  dataIndex: "units",
+                                  key: "units",
+                                  width: 120,
+                                  render: (v: number) => Number(v || 0).toLocaleString(),
+                                },
+                                {
+                                  title: t("tenants.dashboardColCredits"),
+                                  dataIndex: "credits",
+                                  key: "credits",
+                                  width: 140,
+                                  render: (v: number) => formatCredits(v),
+                                },
+                              ]}
+                            />
+                          )}
+                          <Typography.Text>
+                            {t("tenants.dashboardCreditsTotal", {
+                              credits: formatCredits(dashboard?.aiCreditsSummary?.totalCredits || 0),
+                            })}
+                          </Typography.Text>
+                          <Typography.Text type="secondary">
+                            {t("tenants.dashboardCreditsByCategory", {
+                              whisper: formatCredits(dashboard?.aiCreditsSummary?.byCategory?.whisper || 0),
+                              llm: formatCredits(dashboard?.aiCreditsSummary?.byCategory?.llm || 0),
+                              tts: formatCredits(dashboard?.aiCreditsSummary?.byCategory?.tts || 0),
+                            })}
+                          </Typography.Text>
+                        </Space>
+                      </Card>
+
+                      <Card title={t("tenants.dashboardCreditsLimiterTitle")}>
+                        <Space direction="vertical" size={16} style={{ width: "100%" }}>
+                          <Typography.Text type="secondary">{t("tenants.dashboardCreditsLimiterHint")}</Typography.Text>
+
+                          {!dashboard?.credits?.limiterActive ? (
+                            <Typography.Text type="warning">{t("tenants.dashboardLimiterInactive")}</Typography.Text>
+                          ) : null}
+
+                          <div>
+                            <Typography.Text strong>{t("tenants.dashboardFreeCreditsLabel")}</Typography.Text>
+                            <Row gutter={16} align="middle" style={{ marginTop: 8 }}>
+                              <Col xs={24} md={16}>
+                                <Slider
+                                  min={0}
+                                  max={100000}
+                                  step={100}
+                                  value={freeCreditsDraft}
+                                  disabled={!can("tenants", "edit")}
+                                  onChange={(v) => setFreeCreditsDraft(Number(v) || 0)}
+                                />
+                              </Col>
+                              <Col xs={24} md={8}>
+                                <InputNumber
+                                  style={{ width: "100%" }}
+                                  min={0}
+                                  max={1_000_000}
+                                  step={100}
+                                  value={freeCreditsDraft}
+                                  disabled={!can("tenants", "edit")}
+                                  onChange={(v) => setFreeCreditsDraft(Math.max(0, Math.floor(Number(v) || 0)))}
+                                />
+                              </Col>
+                            </Row>
+                          </div>
+
+                          <div>
+                            <Typography.Text strong>{t("tenants.dashboardPurchasedCreditsLabel")}</Typography.Text>
+                            <Row gutter={16} align="middle" style={{ marginTop: 8 }}>
+                              <Col xs={24} md={16}>
+                                <Slider
+                                  min={0}
+                                  max={100000}
+                                  step={100}
+                                  value={purchasedCreditsDraft}
+                                  disabled={!can("tenants", "edit")}
+                                  onChange={(v) => setPurchasedCreditsDraft(Number(v) || 0)}
+                                />
+                              </Col>
+                              <Col xs={24} md={8}>
+                                <InputNumber
+                                  style={{ width: "100%" }}
+                                  min={0}
+                                  max={1_000_000}
+                                  step={100}
+                                  value={purchasedCreditsDraft}
+                                  disabled={!can("tenants", "edit")}
+                                  onChange={(v) => setPurchasedCreditsDraft(Math.max(0, Number(v) || 0))}
+                                />
+                              </Col>
+                            </Row>
+                          </div>
+
+                          <div>
+                            <Typography.Text>
+                              {t("tenants.dashboardFreeUsed", {
+                                used: formatCredits(dashboard?.credits?.freeUsedThisMonth || 0),
+                                total: formatCredits(dashboard?.credits?.monthlyFreeCredits || 0),
+                              })}
+                            </Typography.Text>
+                            <Progress percent={freeUsedPct} size="small" style={{ marginTop: 4 }} />
+                            <Typography.Text>
+                              {t("tenants.dashboardPurchasedRemaining", {
+                                remaining: formatCredits(dashboard?.credits?.purchasedCredits || 0),
+                              })}
+                            </Typography.Text>
+                            <br />
+                            <Typography.Text strong>
+                              {t("tenants.dashboardTotalRemaining", {
+                                remaining: formatCredits(dashboard?.credits?.totalRemaining || 0),
+                              })}
+                            </Typography.Text>
+                          </div>
+
+                          {can("tenants", "edit") ? (
+                            <Button type="primary" loading={creditsSaving} onClick={() => void saveCreditLimits()}>
+                              {t("tenants.dashboardCreditsSave")}
+                            </Button>
+                          ) : null}
+                        </Space>
+                      </Card>
+
+                      <Card title={t("tenants.dashboardSyndicatedVideosTitle")}>
                         <Table
                           size="small"
                           pagination={false}
                           dataSource={apiCostRows}
                           columns={[
-                            { title: "Network", dataIndex: "network", key: "network" },
-                            { title: "Videos", dataIndex: "videos", key: "videos", width: 120 },
+                            { title: t("tenants.dashboardColNetwork"), dataIndex: "network", key: "network" },
+                            { title: t("tenants.dashboardColVideos"), dataIndex: "videos", key: "videos", width: 120 },
                           ]}
                         />
                       </Card>
 
-                      <Card title="API usage cost by social network (month)">
+                      <Card title={t("tenants.dashboardApiCostTitle")}>
                         <Table
                           size="small"
                           pagination={false}
                           dataSource={apiCostRows}
                           columns={[
-                            { title: "Network", dataIndex: "network", key: "network" },
-                            { title: "Videos", dataIndex: "videos", key: "videos", width: 110 },
+                            { title: t("tenants.dashboardColNetwork"), dataIndex: "network", key: "network" },
+                            { title: t("tenants.dashboardColVideos"), dataIndex: "videos", key: "videos", width: 110 },
                             {
-                              title: "Unit cost (USD/video)",
+                              title: t("tenants.dashboardColUnitCost"),
                               dataIndex: "unitCostUsd",
                               key: "unitCostUsd",
                               width: 180,
                               render: (v: number) => formatUsd(v),
                             },
                             {
-                              title: "Estimated cost (USD)",
+                              title: t("tenants.dashboardColEstimatedCost"),
                               dataIndex: "estimatedCostUsd",
                               key: "estimatedCostUsd",
                               width: 180,
@@ -949,9 +1258,9 @@ export function AdminTenantSettingsPage() {
                         />
                       </Card>
 
-                      <Card title="Daily encodes (last 30 days)">
+                      <Card title={t("tenants.dashboardDailyEncodesTitle")}>
                         {dailyEncodeChartData.length === 0 ? (
-                          <Typography.Text type="secondary">No data.</Typography.Text>
+                          <Typography.Text type="secondary">{t("tenants.dashboardNoData")}</Typography.Text>
                         ) : (
                           <div style={{ width: "100%", height: Math.max(380, dailyEncodeChartData.length * 18) }}>
                             <ResponsiveContainer width="100%" height="100%">
@@ -973,8 +1282,10 @@ export function AdminTenantSettingsPage() {
                                   tick={{ fontSize: 11 }}
                                 />
                                 <Tooltip
-                                  formatter={(value: unknown) => [Number(value || 0), "Encodes"]}
-                                  labelFormatter={(label: unknown) => `Date: ${String(label || "")}`}
+                                  formatter={(value: unknown) => [Number(value || 0), t("tenants.dashboardEncodes")]}
+                                  labelFormatter={(label: unknown) =>
+                                    t("tenants.dashboardDate", { date: String(label || "") })
+                                  }
                                 />
                                 <Bar dataKey="count" fill="#3d9f6f" radius={[0, 4, 4, 0]} />
                               </BarChart>

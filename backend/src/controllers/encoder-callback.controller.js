@@ -10,6 +10,7 @@ import { tryInstagramSyndicationAfterJobCompleted } from "../services/instagram-
 import { tryTiktokSyndicationAfterJobCompleted } from "../services/tiktok-syndication-runner.service.js";
 import { resolveJobMasterOutputUrl } from "../services/encoder-output-url.service.js";
 import { anyDubbingEnabled } from "../services/vod-encode-runner.service.js";
+import { reconcileJobCredits } from "../services/tenant-credits.service.js";
 
 /** Fields the encoder service may update on a job (defense in depth). */
 const ENCODER_PATCH_KEYS = new Set([
@@ -29,6 +30,7 @@ const ENCODER_PATCH_KEYS = new Set([
   "transcriptNewsError",
   "transcriptDiarization",
   "openaiClipUsage",
+  "ttsClipUsage",
   "transcriptNewsBundle",
 ]);
 
@@ -179,5 +181,18 @@ encoderCallbackRouter.patch("/jobs/:jobId", requireEncoderSecret, async (req, re
       console.error(`[encoder-callback] tiktok syndication job=${jobId}`, m);
     });
   }
+
+  // Reconcile AI credits whenever usage arrives (completed encode, late STT/news, or TTS).
+  if (
+    patch.status === "completed" ||
+    Object.prototype.hasOwnProperty.call(patch, "openaiClipUsage") ||
+    Object.prototype.hasOwnProperty.call(patch, "ttsClipUsage")
+  ) {
+    void reconcileJobCredits(jobId).catch((e) => {
+      const m = e instanceof Error ? e.message : String(e);
+      console.error(`[encoder-callback] reconcile credits job=${jobId}`, m);
+    });
+  }
+
   res.json({ ok: true });
 });

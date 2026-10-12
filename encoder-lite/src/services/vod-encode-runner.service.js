@@ -27,6 +27,7 @@ import {
 } from "./openai-news-agent.service.js";
 import { config } from "../config.js";
 import { mergeOpenAiClipUsageReports, logOpenAiClipUsage } from "../utils/openai-usage.js";
+import { mergeTtsClipUsageReports } from "../utils/tts-usage.js";
 import { vodEncodeStdout } from "../utils/vod-encode-log.js";
 import { patchBackendJob } from "./backend-client.service.js";
 
@@ -527,6 +528,8 @@ export async function runVodEncodeJob(opts) {
     // AI dubbing (Inworld): clone voices, translate, TTS time-fit, mux multi-audio.
     /** @type {string[]} */
     let ephemeralVoiceIds = [];
+    /** @type {Record<string, unknown> | null} */
+    let aggregatedTtsUsage = null;
     /**
      * Per-clip dubbed target languages actually muxed into pathsToUpload[i] (index-aligned).
      * Empty array = no extra audio track for that clip.
@@ -579,6 +582,9 @@ export async function runVodEncodeJob(opts) {
             },
           });
           if (Array.isArray(result.voiceIds)) ephemeralVoiceIds.push(...result.voiceIds);
+          if (result.ttsClipUsage && typeof result.ttsClipUsage === "object") {
+            aggregatedTtsUsage = mergeTtsClipUsageReports(aggregatedTtsUsage, result.ttsClipUsage);
+          }
           dubbedPaths.push(result.outputMp4);
           dubbedLangsPerClip[i] = Array.isArray(result.targetLanguages)
             ? result.targetLanguages.map((l) => String(l).toLowerCase()).filter(Boolean)
@@ -594,6 +600,10 @@ export async function runVodEncodeJob(opts) {
           ephemeralVoiceIds = [];
         }
       }
+    }
+
+    if (aggregatedTtsUsage && typeof aggregatedTtsUsage === "object") {
+      transcriptCompletion.ttsClipUsage = aggregatedTtsUsage;
     }
 
     if (shouldCancel(jobId)) {

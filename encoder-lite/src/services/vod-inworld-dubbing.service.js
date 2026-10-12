@@ -8,6 +8,7 @@ import path from "path";
 import { config } from "../config.js";
 import { ffprobeDurationSec } from "./vod-openai-audio-stt.service.js";
 import { spawnFailureMessage } from "../utils/spawn-failure-message.js";
+import { buildTtsClipUsageReport, ttsUsageStepRow } from "../utils/tts-usage.js";
 
 const CLONE_TARGET_SEC = 12;
 const CLONE_MIN_SEC = 3;
@@ -480,16 +481,29 @@ export async function translateSegments(segments, sourceLang, targetLang, should
  * @param {string} opts.outWav
  * @param {() => boolean} [opts.shouldCancel]
  */
+/**
+ * @param {object} opts
+ * @param {string | null} opts.voiceId
+ * @param {string} opts.text
+ * @param {string} opts.lang
+ * @param {string} opts.outWav
+ * @param {() => boolean} [opts.shouldCancel]
+ * @returns {Promise<{ characters: number, model: string }>}
+ */
 async function synthesizeSegment(opts) {
   const { voiceId, text, lang, outWav, shouldCancel } = opts;
   if (!voiceId) throw new Error("Missing voiceId for TTS");
   if (shouldCancel?.()) throw new Error("CANCELLED");
 
+  const modelId = config.inworldTtsModel || "inworld-tts-2";
+  const textStr = String(text || "");
+  const characters = textStr.length;
+
   const json = await inworldFetch("POST", "/tts/v1/voice", {
     body: {
-      text,
+      text: textStr,
       voiceId,
-      modelId: config.inworldTtsModel || "inworld-tts-2",
+      modelId,
       timestampType: "WORD",
       // No speakingRate override: use the natural rate (no speed modification).
       audioConfig: {
@@ -522,7 +536,7 @@ async function synthesizeSegment(opts) {
   }
 
   const durationSec = await ffprobeDurationSec(outWav);
-  return { durationSec, speakingRate: 1.0 };
+  return { durationSec, speakingRate: 1.0, characters, model: modelId };
 }
 
 /**
@@ -652,7 +666,7 @@ export function resolveDubbingTargetLanguages(clip, spec) {
  * @param {object} [opts.spec]
  * @param {(pct: number, message?: string) => void} [opts.onProgress]
  * @param {() => boolean} [opts.shouldCancel]
- * @returns {Promise<{ outputMp4: string, voiceIds: string[], targetLanguages: string[] }>}
+ * @returns {Promise<{ outputMp4: string, voiceIds: string[], targetLanguages: string[], ttsClipUsage: Record<string, unknown> | null }>}
  */
 export async function applyInworldDubbingToMp4(opts) {
   const { inputMp4, workDir, diarization, clip, spec, onProgress, shouldCancel } = opts;
@@ -660,7 +674,7 @@ export async function applyInworldDubbingToMp4(opts) {
 
   const targetLanguages = resolveDubbingTargetLanguages(clip, spec);
   if (!targetLanguages.length) {
-    return { outputMp4: inputMp4, voiceIds: [], targetLanguages: [] };
+    return { outputMp4: inputMp4, voiceIds: [], targetLanguages: [], ttsClipUsage: null };
   }
 
   const sourceLanguage = String(
@@ -694,6 +708,10 @@ export async function applyInworldDubbingToMp4(opts) {
   const clipDurationSec = await ffprobeDurationSec(inputMp4);
   /** @type {Array<{ lang: string, wavPath: string, title?: string }>} */
   const dubbedTracks = [];
+  /** @type {Array<{ step: string, model: string, characters: number, estimatedUsd: number }>} */
+  const ttsSteps = [];
+  let totalTtsCharacters = 0;
+  let ttsModel = config.inworldTtsModel || "inworld-tts-2";
 
   try {
     for (let li = 0; li < targetLanguages.length; li++) {
@@ -715,7 +733,7 @@ export async function applyInworldDubbingToMp4(opts) {
           basePct + ((si + 1) / Math.max(1, translated.length)) * (70 / targetLanguages.length);
         onProgress?.(Math.round(pct), `TTS ${lang} segment ${si + 1}/${translated.length}`);
         try {
-          await synthesizeSegment({
+          const synth = await synthesizeSegment({
             voiceId,
             text: seg.text,
             lang,
@@ -723,6 +741,9 @@ export async function applyInworldDubbingToMp4(opts) {
             shouldCancel,
           });
           pieces.push({ start: seg.start, end: seg.end, wavPath: segWav });
+          const chars = typeof synth?.characters === "number" ? synth.characters : String(seg.text || "").length;
+          if (typeof synth?.model === "string" && synth.model.trim()) ttsModel = synth.model.trim();
+          totalTtsCharacters += Math.max(0, chars);
         } catch (e) {
           console.warn(
             `[dubbing] TTS failed lang=${lang} seg=${si}:`,
@@ -752,7 +773,11 @@ export async function applyInworldDubbingToMp4(opts) {
     });
 
     onProgress?.(98, "Dubbing complete");
-    return { outputMp4: outMp4, voiceIds, targetLanguages };
+    if (totalTtsCharacters > 0) {
+      ttsSteps.push(ttsUsageStepRow({ step: "tts", model: ttsModel, characters: totalTtsCharacters }));
+    }
+    const ttsClipUsage = ttsSteps.length > 0 ? buildTtsClipUsageReport(ttsSteps) : null;
+    return { outputMp4: outMp4, voiceIds, targetLanguages, ttsClipUsage };
   } catch (e) {
     await deleteClonedVoices(voiceIds);
     throw e;

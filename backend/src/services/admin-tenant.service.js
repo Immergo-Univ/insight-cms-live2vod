@@ -9,6 +9,13 @@ import { tenantRowToApi } from "./tenant-visit.service.js";
 import { clearTenantChannelSnapshots } from "./channel-ads-disk.service.js";
 import { purgeTenantFromMemory } from "./ad-recognition.service.js";
 import { normalizeAvailableLanguages, normalizeDefaultBurnInLanguage } from "../utils/tenant-languages.js";
+import {
+  getLedgerUsageByModelForPeriod,
+  getTenantCreditState,
+  summarizeJobsAiUsage,
+  currentPeriodMonth,
+} from "./tenant-credits.service.js";
+import { aggregateUsageRows, usdPerCredit } from "./credits-pricing.service.js";
 import { Op } from "sequelize";
 
 function models() {
@@ -221,6 +228,20 @@ export async function adminUpdateTenant(tenantId, body) {
       body.syndicationAccountMaxByPlatform,
     );
   }
+  if (body.monthlyFreeCredits !== undefined) {
+    const n = Number(body.monthlyFreeCredits);
+    if (!Number.isFinite(n) || n < 0 || !Number.isInteger(n)) {
+      throw new Error("monthlyFreeCredits must be an integer >= 0");
+    }
+    row.monthlyFreeCredits = n;
+  }
+  if (body.purchasedCredits !== undefined) {
+    const n = Number(body.purchasedCredits);
+    if (!Number.isFinite(n) || n < 0) {
+      throw new Error("purchasedCredits must be a number >= 0");
+    }
+    row.purchasedCredits = Math.round(n * 10000) / 10000;
+  }
   await row.save();
   return tenantRowToApi(row.get({ plain: true }));
 }
@@ -249,6 +270,10 @@ export async function adminDeleteTenant(tenantId) {
   if (!row) return null;
 
   // DB rows scoped to this tenant (this DB only).
+  const { TenantCreditLedger } = models();
+  if (TenantCreditLedger) {
+    await TenantCreditLedger.destroy({ where: { tenantId: id } });
+  }
   const vodJobs = await VodJob.destroy({ where: { tenantId: id } });
   const syndicationAccounts = await TenantSyndicationAccount.destroy({ where: { tenantId: id } });
   await row.destroy();
@@ -456,6 +481,33 @@ export async function adminGetTenantDashboard(tenantId) {
     aiEstimatedCostUsd += agg.estimatedUsd;
   }
 
+  const periodMonth = currentPeriodMonth(now);
+  let aiUsageByModel = await getLedgerUsageByModelForPeriod(id, periodMonth);
+  // Fallback for historical months / jobs not yet reconciled into the ledger.
+  if (!aiUsageByModel.length) {
+    aiUsageByModel = summarizeJobsAiUsage(currentJobs);
+  }
+  const aiCreditsAgg = aggregateUsageRows(
+    aiUsageByModel.map((r) => ({
+      category: /** @type {'whisper'|'llm'|'tts'} */ (r.category),
+      model: r.model,
+      units: r.units,
+      unitKind: /** @type {'tokens'|'characters'} */ (r.unitKind),
+      usd: r.totalUsd,
+      credits: r.credits,
+      approxUsdPerUnit: r.approxUsdPerUnit,
+    })),
+  );
+  // Prefer job-derived token/USD totals when ledger has no openai rows yet.
+  if (aiCreditsAgg.totalUsd > 0) {
+    aiEstimatedCostUsd = aiCreditsAgg.totalUsd;
+  }
+  if (aiCreditsAgg.totalTokens > 0) {
+    aiTotalTokens = aiCreditsAgg.totalTokens;
+  }
+
+  const creditState = await getTenantCreditState(id);
+
   const encodeCostPerMinute = parseUsdEnv("ADMIN_ENCODE_COST_USD_PER_MINUTE", 0);
   const encodeEstimatedCostUsd = Number((encodeMinutesCurrent * encodeCostPerMinute).toFixed(6));
 
@@ -487,6 +539,13 @@ export async function adminGetTenantDashboard(tenantId) {
       totalTokens: aiTotalTokens,
       estimatedCostUsd: Number(aiEstimatedCostUsd.toFixed(6)),
     },
+    aiUsageByModel,
+    aiCreditsSummary: {
+      byCategory: aiCreditsAgg.byCategory,
+      totalCredits: aiCreditsAgg.totalCredits,
+      usdPerCredit: usdPerCredit(),
+    },
+    credits: creditState,
     encodeUsage: {
       minutesCurrent: Number(encodeMinutesCurrent.toFixed(2)),
       minutesPrevious: Number(encodeMinutesPrevious.toFixed(2)),

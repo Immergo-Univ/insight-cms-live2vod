@@ -7,7 +7,7 @@ import {
   resolveJobVodGuid,
   findJobByVodGuid,
 } from "../services/vod-jobs.store.js";
-import { startBackgroundVodJob, requestCancelJob } from "../services/vod-encode-runner.service.js";
+import { startBackgroundVodJob, requestCancelJob, anyDubbingEnabled } from "../services/vod-encode-runner.service.js";
 import { listTenantVodMp4s } from "../services/vod-s3.service.js";
 import { backfillWhisperTranscriptByJobId } from "../services/whisper-transcript-backfill.service.js";
 import {
@@ -17,12 +17,28 @@ import {
   mapInsightNewsToJobFields,
   mapInsightTranscriptToJobFields,
 } from "../services/insight-vod.service.js";
+import { assertTenantHasCredits } from "../services/tenant-credits.service.js";
 import { getRequestTenantId } from "../utils/tenant-cipher.js";
 
 export const vodRouter = Router();
 
 function getTenantId(req) {
   return getRequestTenantId(req);
+}
+
+/**
+ * True when the job will consume AI credits (STT / news / dubbing).
+ * @param {object} [spec]
+ */
+function specRequestsAi(spec) {
+  if (!spec || typeof spec !== "object") return false;
+  if (spec.realtimeTranscribeOnly === true) return true;
+  if (spec.transcribeGenerateNews === true) return true;
+  if (anyDubbingEnabled(spec)) return true;
+  const rootSubs = spec.subtitles;
+  if (rootSubs && typeof rootSubs === "object" && rootSubs.enabled === true) return true;
+  if (Array.isArray(spec.clips) && spec.clips.some((c) => c?.subtitles?.enabled === true)) return true;
+  return false;
 }
 
 /**
@@ -61,6 +77,25 @@ vodRouter.post("/jobs", async (req, res) => {
     const rawClipId = req.body?.editorClipId;
     const editorClipId =
       typeof rawClipId === "string" && rawClipId.trim().length > 0 ? rawClipId.trim() : undefined;
+
+    if (specRequestsAi(spec)) {
+      try {
+        await assertTenantHasCredits(tenantId);
+      } catch (creditErr) {
+        const message = creditErr instanceof Error ? creditErr.message : String(creditErr);
+        const status =
+          creditErr && typeof creditErr === "object" && "status" in creditErr
+            ? Number(/** @type {{ status?: number }} */ (creditErr).status) || 402
+            : 402;
+        return res.status(status).json({
+          error: message,
+          code:
+            creditErr && typeof creditErr === "object" && "code" in creditErr
+              ? String(/** @type {{ code?: string }} */ (creditErr).code || "NO_CREDITS")
+              : "NO_CREDITS",
+        });
+      }
+    }
 
     const jobId = await startBackgroundVodJob({
       tenantId,
