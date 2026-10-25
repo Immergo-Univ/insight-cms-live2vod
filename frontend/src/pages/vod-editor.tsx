@@ -378,6 +378,9 @@ function VodEditorInner() {
     newsButtonEnabled,
     dubbingEnabled: tenantDubbingFlag,
     availableDubbingLanguages,
+    burnInButtonEnabled: tenantBurnInButtonEnabled,
+    verticalCropButtonEnabled: tenantVerticalCropButtonEnabled,
+    widgetsButtonEnabled: tenantWidgetsButtonEnabled,
     syndicationYoutubeEnabled,
     syndicationYoutubeDefaultEnabled,
     syndicationTwitterEnabled,
@@ -793,6 +796,13 @@ function VodEditorInner() {
     if (!targetId) return;
     handleCaptureClipPoster(targetId);
   }, [selectedClipId, clips, handleCaptureClipPoster]);
+
+  /** Posters already captured on the clip the player overlay capture targets. */
+  const playerPosterCount = useMemo(() => {
+    const targetId = selectedClipId ?? (clips.length ? clips[0].id : null);
+    if (!targetId) return 0;
+    return clips.find((c) => c.id === targetId)?.posters?.length ?? 0;
+  }, [selectedClipId, clips]);
 
   const handleSeek = useCallback((timeSeconds: number) => {
     playerRef.current?.seek(timeSeconds);
@@ -1237,6 +1247,7 @@ function VodEditorInner() {
               onTransportPause={handlePause}
               onTransportStop={handleStop}
               onCapturePoster={handleCapturePosterFromPlayer}
+              posterCount={playerPosterCount}
               markRangeAwaitingOut={false}
               verticalCropActive={verticalCropActive}
               verticalCropCenterX={verticalCropCenterX}
@@ -1304,8 +1315,11 @@ function VodEditorInner() {
                 tenantSubtitlesEnabled ? (clipId) => setSubtitleBurnModalClipId(clipId) : undefined
               }
               subtitlesControlsEnabled={tenantSubtitlesEnabled}
+              burnInControlsEnabled={tenantBurnInButtonEnabled}
               onOpenClipDubbing={tenantDubbingOn ? (clipId) => setDubbingModalClipId(clipId) : undefined}
               dubbingControlsEnabled={tenantDubbingOn}
+              verticalCropControlsEnabled={tenantVerticalCropButtonEnabled}
+              widgetsControlsEnabled={tenantWidgetsButtonEnabled}
               availableLanguages={availableLanguages}
               syndicationTenantId={editorTenantId}
               syndicationYoutubeEnabled={syndicationYoutubeEnabled}
@@ -1318,7 +1332,6 @@ function VodEditorInner() {
               syndicationInstagramDefaultEnabled={syndicationInstagramDefaultEnabled}
               syndicationTiktokEnabled={syndicationTiktokEnabled}
               syndicationTiktokDefaultEnabled={syndicationTiktokDefaultEnabled}
-              onCaptureClipPoster={handleCaptureClipPoster}
               onAddTextWidget={handleAddTextWidget}
               onAddImageWidgetFromFile={handleAddImageWidgetFromFile}
               transcriptNewsUiEnabled={newsButtonEnabled}

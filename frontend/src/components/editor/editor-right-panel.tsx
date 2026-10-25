@@ -85,8 +85,14 @@ interface EditorRightPanelProps {
   onOpenClipSubtitleGenerate?: (clipId: string) => void;
   onOpenClipSubtitleBurn?: (clipId: string) => void;
   subtitlesControlsEnabled?: boolean;
+  /** Tenant flag: when false, hide the burn-in subtitles button in clip rows. */
+  burnInControlsEnabled?: boolean;
   onOpenClipDubbing?: (clipId: string) => void;
   dubbingControlsEnabled?: boolean;
+  /** Tenant flag: when false, hide the vertical crop button in clip rows. */
+  verticalCropControlsEnabled?: boolean;
+  /** Tenant flag: when false, hide the widgets (text / image) button in clip rows. */
+  widgetsControlsEnabled?: boolean;
   availableLanguages?: string[];
   /** Tenant slug from URL; required for syndication API. */
   syndicationTenantId?: string;
@@ -110,8 +116,6 @@ interface EditorRightPanelProps {
   syndicationTiktokEnabled?: boolean;
   /** When true, new clips start with TikTok syndication enabled. */
   syndicationTiktokDefaultEnabled?: boolean;
-  /** Append a frame bookmark at the current playhead for this sub-clip. */
-  onCaptureClipPoster?: (clipId: string) => void;
   onAddTextWidget?: (clipId: string) => void;
   onAddImageWidgetFromFile?: (clipId: string, file: File) => Promise<void>;
   /** Realtime mode: show per-clip transcript action + modal. */
@@ -179,8 +183,11 @@ export function EditorRightPanel({
   onOpenClipSubtitleGenerate,
   onOpenClipSubtitleBurn,
   subtitlesControlsEnabled = false,
+  burnInControlsEnabled = false,
   onOpenClipDubbing,
   dubbingControlsEnabled = false,
+  verticalCropControlsEnabled = false,
+  widgetsControlsEnabled = false,
   availableLanguages = ["en", "es", "he"],
   syndicationTenantId = "",
   syndicationYoutubeEnabled = false,
@@ -193,7 +200,6 @@ export function EditorRightPanel({
   syndicationInstagramDefaultEnabled = false,
   syndicationTiktokEnabled = false,
   syndicationTiktokDefaultEnabled = false,
-  onCaptureClipPoster,
   onAddTextWidget,
   onAddImageWidgetFromFile,
   realtimeTranscriptUi = false,
@@ -352,8 +358,11 @@ export function EditorRightPanel({
               onOpenClipSubtitleGenerate={onOpenClipSubtitleGenerate}
               onOpenClipSubtitleBurn={onOpenClipSubtitleBurn}
               subtitlesControlsEnabled={subtitlesControlsEnabled}
+              burnInControlsEnabled={burnInControlsEnabled}
               onOpenClipDubbing={onOpenClipDubbing}
               dubbingControlsEnabled={dubbingControlsEnabled}
+              verticalCropControlsEnabled={verticalCropControlsEnabled}
+              widgetsControlsEnabled={widgetsControlsEnabled}
               availableLanguages={availableLanguages}
               onOpenSyndication={
                 (syndicationYoutubeEnabled ||
@@ -366,7 +375,6 @@ export function EditorRightPanel({
                   : undefined
               }
               onUpdateClipTitle={(clipId, title) => onUpdateClipMetadata(clipId, { title })}
-              onCaptureClipPoster={onCaptureClipPoster}
               onAddTextWidget={onAddTextWidget}
               onAddImageWidgetFromFile={onAddImageWidgetFromFile}
               realtimeTranscriptUi={realtimeTranscriptUi}

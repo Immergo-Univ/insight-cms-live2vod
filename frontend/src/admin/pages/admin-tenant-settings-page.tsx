@@ -27,6 +27,9 @@ type TenantDetail = {
   newsButtonEnabled?: boolean;
   newsDefaultGenerate?: boolean;
   subtitlesDefaultBurnIn?: boolean;
+  subtitlesBurnInButtonEnabled?: boolean;
+  verticalCropButtonEnabled?: boolean;
+  widgetsButtonEnabled?: boolean;
   subtitlesDefaultBurnInLanguage?: string;
   subtitlesDefaultDiarization?: boolean;
   subtitlesDefaultInferSpeakerNames?: boolean;
@@ -91,6 +94,9 @@ type FormShape = {
   newsButtonEnabled: boolean;
   newsDefaultGenerate: boolean;
   subtitlesDefaultBurnIn: boolean;
+  subtitlesBurnInButtonEnabled: boolean;
+  verticalCropButtonEnabled: boolean;
+  widgetsButtonEnabled: boolean;
   subtitlesDefaultBurnInLanguage: string;
   subtitlesDefaultDiarization: boolean;
   subtitlesDefaultInferSpeakerNames: boolean;
@@ -249,6 +255,9 @@ export function AdminTenantSettingsPage() {
           data.newsButtonEnabled !== false && data.subtitlesTranscriptNewsUiEnabled !== false,
         newsDefaultGenerate: data.newsDefaultGenerate !== false,
         subtitlesDefaultBurnIn: data.subtitlesDefaultBurnIn === true,
+        subtitlesBurnInButtonEnabled: data.subtitlesBurnInButtonEnabled === true,
+        verticalCropButtonEnabled: data.verticalCropButtonEnabled === true,
+        widgetsButtonEnabled: data.widgetsButtonEnabled === true,
         subtitlesDefaultBurnInLanguage: (() => {
           const raw = String(data.subtitlesDefaultBurnInLanguage || "")
             .trim()
@@ -438,6 +447,9 @@ export function AdminTenantSettingsPage() {
         Boolean(form.getFieldValue("newsDefaultGenerate")),
       subtitlesTranscriptNewsUiEnabled: Boolean(form.getFieldValue("newsButtonEnabled")),
       subtitlesDefaultBurnIn: Boolean(form.getFieldValue("subtitlesDefaultBurnIn")),
+      subtitlesBurnInButtonEnabled: Boolean(form.getFieldValue("subtitlesBurnInButtonEnabled")),
+      verticalCropButtonEnabled: Boolean(form.getFieldValue("verticalCropButtonEnabled")),
+      widgetsButtonEnabled: Boolean(form.getFieldValue("widgetsButtonEnabled")),
       subtitlesDefaultBurnInLanguage: String(form.getFieldValue("subtitlesDefaultBurnInLanguage") || "en").trim(),
       subtitlesDefaultDiarization: Boolean(form.getFieldValue("subtitlesDefaultDiarization")),
       subtitlesDefaultInferSpeakerNames: Boolean(form.getFieldValue("subtitlesDefaultInferSpeakerNames")),
@@ -669,6 +681,7 @@ export function AdminTenantSettingsPage() {
     name:
       | "subtitlesEnabled"
       | "subtitlesDefaultEnabled"
+      | "subtitlesBurnInButtonEnabled"
       | "subtitlesDefaultBurnIn"
       | "subtitlesDefaultDiarization"
       | "subtitlesDefaultInferSpeakerNames";
@@ -677,6 +690,11 @@ export function AdminTenantSettingsPage() {
   }> = [
     { name: "subtitlesEnabled", label: t("tenants.subtitlesEnabledLabel") },
     { name: "subtitlesDefaultEnabled", label: t("tenants.subtitlesDefaultEnabledLabel") },
+    {
+      name: "subtitlesBurnInButtonEnabled",
+      label: t("tenants.subtitlesBurnInButtonEnabledLabel"),
+      hint: t("tenants.subtitlesBurnInButtonEnabledHint"),
+    },
     { name: "subtitlesDefaultBurnIn", label: t("tenants.subtitlesDefaultBurnInLabel") },
     { name: "subtitlesDefaultDiarization", label: t("tenants.subtitlesDefaultDiarizationLabel") },
     { name: "subtitlesDefaultInferSpeakerNames", label: t("tenants.subtitlesDefaultInferSpeakerNamesLabel") },
@@ -899,6 +917,29 @@ export function AdminTenantSettingsPage() {
           </Space>
         </Form.Item>
       ))}
+    </div>
+  );
+
+  const renderSyndicationTab = () => (
+    <div style={{ maxWidth: 900 }}>
+      {renderSwitchList(syndicationSwitches)}
+      <Card size="small" title={t("tenants.editorToolsGroupTitle")} style={{ marginTop: 8 }}>
+        <Typography.Paragraph type="secondary" style={{ marginTop: 0 }}>
+          {t("tenants.editorToolsGroupHint")}
+        </Typography.Paragraph>
+        {renderSwitchList([
+          {
+            name: "verticalCropButtonEnabled",
+            label: t("tenants.verticalCropButtonEnabledLabel"),
+            hint: t("tenants.verticalCropButtonEnabledHint"),
+          },
+          {
+            name: "widgetsButtonEnabled",
+            label: t("tenants.widgetsButtonEnabledLabel"),
+            hint: t("tenants.widgetsButtonEnabledHint"),
+          },
+        ])}
+      </Card>
     </div>
   );
 
@@ -1469,7 +1510,7 @@ export function AdminTenantSettingsPage() {
               {
                 key: "syndication",
                 label: t("tenants.tabSyndication"),
-                children: renderSwitchList(syndicationSwitches),
+                children: renderSyndicationTab(),
               },
               {
                 key: "youtube",

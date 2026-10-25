@@ -44,8 +44,10 @@ interface EditorPlayerProps {
   onTransportPlay?: () => void;
   onTransportPause?: () => void;
   onTransportStop?: () => void;
-  /** Capture a poster from the current frame (same behavior as the clip row poster button). */
+  /** Capture a poster from the current frame onto the targeted clip. */
   onCapturePoster?: () => void;
+  /** Posters already captured on the clip the capture button targets (badge on the button). */
+  posterCount?: number;
   /** True after Mark In (no clip selected): show hint until Mark Out. */
   markRangeAwaitingOut?: boolean;
   /** Realtime editor: show pulsing on-screen REC while a clip is open for Mark Out. */
@@ -95,6 +97,7 @@ export const EditorPlayer = forwardRef<EditorPlayerRef, EditorPlayerProps>(
       onTransportPause,
       onTransportStop,
       onCapturePoster,
+      posterCount = 0,
       markRangeAwaitingOut = false,
       realtimeRecordingActive = false,
       verticalCropActive = false,
@@ -412,11 +415,24 @@ export const EditorPlayer = forwardRef<EditorPlayerRef, EditorPlayerProps>(
                 type="button"
                 data-editor-keyboard-seek
                 onClick={onCapturePoster}
-                className={overlayButtonClass}
-                title="Capture poster at playhead"
-                aria-label="Capture poster at playhead"
+                className={`relative ${overlayButtonClass}`}
+                title={
+                  posterCount > 0
+                    ? `Capture poster at playhead (${posterCount} captured)`
+                    : "Capture poster at playhead"
+                }
+                aria-label={
+                  posterCount > 0
+                    ? `Capture poster at playhead, ${posterCount} captured`
+                    : "Capture poster at playhead"
+                }
               >
                 <Camera01 className="size-5" />
+                {posterCount > 0 ? (
+                  <span className="pointer-events-none absolute -top-1 -right-1 flex min-h-4 min-w-4 items-center justify-center rounded-full bg-brand-solid px-0.5 text-[9px] font-bold leading-none text-white ring-2 ring-black/60">
+                    {posterCount > 99 ? "99+" : posterCount}
+                  </span>
+                ) : null}
               </button>
             ) : null}
           </div>

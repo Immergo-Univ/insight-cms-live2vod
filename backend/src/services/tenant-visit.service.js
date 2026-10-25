@@ -83,6 +83,9 @@ export function tenantRowToApi(plain) {
     subtitlesTranscriptNewsUiEnabled:
       plain.newsButtonEnabled !== false && plain.subtitlesTranscriptNewsUiEnabled !== false,
     subtitlesDefaultBurnIn: plain.subtitlesDefaultBurnIn === true,
+    subtitlesBurnInButtonEnabled: plain.subtitlesBurnInButtonEnabled === true,
+    verticalCropButtonEnabled: plain.verticalCropButtonEnabled === true,
+    widgetsButtonEnabled: plain.widgetsButtonEnabled === true,
     subtitlesDefaultBurnInLanguage: normalizeDefaultBurnInLanguage(
       plain.subtitlesDefaultBurnInLanguage,
       plain.availableLanguages,

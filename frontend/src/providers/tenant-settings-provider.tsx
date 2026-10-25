@@ -31,6 +31,12 @@ type TenantSettingsContextValue = {
   dubbingEnabled: boolean;
   /** Pool of dubbing target languages from tenant admin. */
   availableDubbingLanguages: string[];
+  /** When true, show the burn-in subtitles button in clip rows. */
+  burnInButtonEnabled: boolean;
+  /** When true, show the vertical crop button in clip rows. */
+  verticalCropButtonEnabled: boolean;
+  /** When true, show the widgets (text / image) button in clip rows. */
+  widgetsButtonEnabled: boolean;
   /** Default subtitle modal options for new clips (from tenant admin). */
   tenantDefaultSubtitleSettings: EditorSubtitleSettings & {
     transcribeSpeakerDiarization: boolean;
@@ -179,6 +185,9 @@ export function TenantSettingsProvider({ children }: { children: ReactNode }) {
   const availableLanguages = tenantAvailableLanguages(tenant);
   const dubbingEnabled = Boolean(tenantId && tenantDubbingEnabled(tenant));
   const availableDubbingLanguages = tenantAvailableDubbingLanguages(tenant);
+  const burnInButtonEnabled = Boolean(tenantId && tenant?.subtitlesBurnInButtonEnabled === true);
+  const verticalCropButtonEnabled = Boolean(tenantId && tenant?.verticalCropButtonEnabled === true);
+  const widgetsButtonEnabled = Boolean(tenantId && tenant?.widgetsButtonEnabled === true);
   const tenantDefaultSubtitleSettings = useMemo(
     () => buildTenantDefaultSubtitleSettings(tenant),
     [tenant],
@@ -207,6 +216,9 @@ export function TenantSettingsProvider({ children }: { children: ReactNode }) {
       availableLanguages,
       dubbingEnabled,
       availableDubbingLanguages,
+      burnInButtonEnabled,
+      verticalCropButtonEnabled,
+      widgetsButtonEnabled,
       tenantDefaultSubtitleSettings,
       syndicationYoutubeEnabled,
       syndicationYoutubeDefaultEnabled,
@@ -232,6 +244,9 @@ export function TenantSettingsProvider({ children }: { children: ReactNode }) {
       availableLanguages,
       dubbingEnabled,
       availableDubbingLanguages,
+      burnInButtonEnabled,
+      verticalCropButtonEnabled,
+      widgetsButtonEnabled,
       tenantDefaultSubtitleSettings,
       syndicationYoutubeEnabled,
       syndicationYoutubeDefaultEnabled,

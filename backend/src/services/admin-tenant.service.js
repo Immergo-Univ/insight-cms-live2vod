@@ -151,6 +151,15 @@ export async function adminUpdateTenant(tenantId, body) {
     row.subtitlesTranscriptNewsUiEnabled = Boolean(body.subtitlesTranscriptNewsUiEnabled);
   }
   if (body.subtitlesDefaultBurnIn !== undefined) row.subtitlesDefaultBurnIn = Boolean(body.subtitlesDefaultBurnIn);
+  if (body.subtitlesBurnInButtonEnabled !== undefined) {
+    row.subtitlesBurnInButtonEnabled = Boolean(body.subtitlesBurnInButtonEnabled);
+  }
+  if (body.verticalCropButtonEnabled !== undefined) {
+    row.verticalCropButtonEnabled = Boolean(body.verticalCropButtonEnabled);
+  }
+  if (body.widgetsButtonEnabled !== undefined) {
+    row.widgetsButtonEnabled = Boolean(body.widgetsButtonEnabled);
+  }
   if (body.subtitlesDefaultDiarization !== undefined) {
     row.subtitlesDefaultDiarization = Boolean(body.subtitlesDefaultDiarization);
   }

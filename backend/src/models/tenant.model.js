@@ -19,6 +19,8 @@ export function registerTenantModel(sequelize) {
       /** Show transcript & news viewer on completed VOD encode rows. */
       subtitlesTranscriptNewsUiEnabled: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
       subtitlesDefaultBurnIn: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
+      /** Show the burn-in subtitles button in editor clip rows (Subtitles tab). */
+      subtitlesBurnInButtonEnabled: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
       /** Default burn-in language code when subtitlesDefaultBurnIn is true (must be in availableLanguages). */
       subtitlesDefaultBurnInLanguage: { type: DataTypes.STRING(8), allowNull: false, defaultValue: "en" },
       subtitlesDefaultDiarization: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
@@ -46,6 +48,10 @@ export function registerTenantModel(sequelize) {
       newsButtonEnabled: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
       /** Pre-encode: news locale toggles ON by default in transcript modal. */
       newsDefaultGenerate: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
+      /** Show the vertical crop button in editor clip rows (Syndication tab). */
+      verticalCropButtonEnabled: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
+      /** Show the widgets (text / image overlays) button in editor clip rows (Syndication tab). */
+      widgetsButtonEnabled: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
       syndicationYoutubeEnabled: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
       syndicationYoutubeDefaultEnabled: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
       syndicationYoutubeConnected: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },

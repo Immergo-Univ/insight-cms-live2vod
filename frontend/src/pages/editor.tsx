@@ -592,6 +592,9 @@ export function EditorPage() {
     newsDefaultGenerate,
     dubbingEnabled: tenantDubbingFlag,
     availableDubbingLanguages,
+    burnInButtonEnabled: tenantBurnInButtonEnabled,
+    verticalCropButtonEnabled: tenantVerticalCropButtonEnabled,
+    widgetsButtonEnabled: tenantWidgetsButtonEnabled,
     syndicationYoutubeEnabled,
     syndicationYoutubeDefaultEnabled,
     syndicationTwitterEnabled,
@@ -1352,6 +1355,13 @@ export function EditorPage() {
     handleCaptureClipPoster(targetId);
   }, [selectedClipId, clips, handleCaptureClipPoster]);
 
+  /** Posters already captured on the clip the player overlay capture targets. */
+  const playerPosterCount = useMemo(() => {
+    const targetId = selectedClipId ?? (clips.length ? clips[0].id : null);
+    if (!targetId) return 0;
+    return clips.find((c) => c.id === targetId)?.posters?.length ?? 0;
+  }, [selectedClipId, clips]);
+
   const handleSeek = useCallback((timeSeconds: number) => {
     playerRef.current?.seek(timeSeconds);
   }, []);
@@ -1857,6 +1867,7 @@ export function EditorPage() {
               onTransportPause={handlePause}
               onTransportStop={handleStop}
               onCapturePoster={handleCapturePosterFromPlayer}
+              posterCount={playerPosterCount}
               markRangeAwaitingOut={false}
               realtimeRecordingActive={isRealtime && realtimeRecordingClipId !== null}
                 verticalCropActive={verticalCropActive}
@@ -1931,8 +1942,11 @@ export function EditorPage() {
                 tenantSubtitlesEnabled ? (clipId) => setSubtitleBurnModalClipId(clipId) : undefined
               }
               subtitlesControlsEnabled={tenantSubtitlesEnabled}
+              burnInControlsEnabled={tenantBurnInButtonEnabled}
               onOpenClipDubbing={tenantDubbingOn ? (clipId) => setDubbingModalClipId(clipId) : undefined}
               dubbingControlsEnabled={tenantDubbingOn}
+              verticalCropControlsEnabled={tenantVerticalCropButtonEnabled}
+              widgetsControlsEnabled={tenantWidgetsButtonEnabled}
               availableLanguages={availableLanguages}
               syndicationTenantId={editorTenantId}
               syndicationYoutubeEnabled={syndicationYoutubeEnabled}
@@ -1945,7 +1959,6 @@ export function EditorPage() {
               syndicationInstagramDefaultEnabled={syndicationInstagramDefaultEnabled}
               syndicationTiktokEnabled={syndicationTiktokEnabled}
               syndicationTiktokDefaultEnabled={syndicationTiktokDefaultEnabled}
-              onCaptureClipPoster={handleCaptureClipPoster}
               onAddTextWidget={handleAddTextWidget}
               onAddImageWidgetFromFile={handleAddImageWidgetFromFile}
               transcriptNewsUiEnabled={newsButtonEnabled}

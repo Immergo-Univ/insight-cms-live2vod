@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   Brush01,
-  Camera01,
   Clapperboard,
   Clipboard,
   Edit01,
@@ -12,6 +11,7 @@ import {
 } from "@untitledui/icons";
 import { ModalOverlay, Modal, Dialog } from "@/components/application/modals/modal";
 import { Tabs } from "@/components/application/tabs/tabs";
+import { Tooltip } from "@/components/base/tooltip/tooltip";
 import { CloseButton } from "@/components/base/buttons/close-button";
 import {
   Button as AriaButton,
@@ -614,8 +614,14 @@ interface EditorClipsListProps {
   onOpenClipSubtitleGenerate?: (clipId: string) => void;
   onOpenClipSubtitleBurn?: (clipId: string) => void;
   subtitlesControlsEnabled?: boolean;
+  /** Tenant flag: when false, hide the burn-in subtitles button in clip rows. */
+  burnInControlsEnabled?: boolean;
   onOpenClipDubbing?: (clipId: string) => void;
   dubbingControlsEnabled?: boolean;
+  /** Tenant flag: when false, hide the vertical crop button in clip rows. */
+  verticalCropControlsEnabled?: boolean;
+  /** Tenant flag: when false, hide the widgets (text / image) button in clip rows. */
+  widgetsControlsEnabled?: boolean;
   availableLanguages?: string[];
   /** Max time (seconds) in the parent window; used to clamp edited in/out. */
   parentWindowDurationSec: number;
@@ -627,8 +633,6 @@ interface EditorClipsListProps {
   ) => { startTime: number; endTime: number } | null;
   /** Persist clip title from inline edit (row). */
   onUpdateClipTitle: (clipId: string, title: string) => void;
-  /** Bookmark current playhead time as a poster capture on this clip. */
-  onCaptureClipPoster?: (clipId: string) => void;
   onAddTextWidget?: (clipId: string) => void;
   onAddImageWidgetFromFile?: (clipId: string, file: File) => Promise<void>;
   /** Realtime session: show transcript viewer control on each clip row. */
@@ -668,13 +672,15 @@ export function EditorClipsList({
   onOpenClipSubtitleGenerate,
   onOpenClipSubtitleBurn,
   subtitlesControlsEnabled = false,
+  burnInControlsEnabled = false,
   onOpenClipDubbing,
   dubbingControlsEnabled = false,
+  verticalCropControlsEnabled = false,
+  widgetsControlsEnabled = false,
   availableLanguages = ["en", "es", "he"],
   parentWindowDurationSec,
   onClipTimesCommit,
   onUpdateClipTitle,
-  onCaptureClipPoster,
   onAddTextWidget,
   onAddImageWidgetFromFile,
   realtimeTranscriptUi = false,
@@ -1109,7 +1115,6 @@ export function EditorClipsList({
           const thumbOutUrl = buildMarkOutThumbnailUrl(clipUrl, c.startTime, c.endTime, channelId);
           const tw = thumbWidth;
           const th = thumbHeight;
-          const posterCount = c.posters?.length ?? 0;
           const vodJob = pickLatestVodEncodeJobForEditorClip(vodJobs, c.id);
           const transcribeJob = pickLatestRealtimeTranscribeJobForEditorClip(vodJobs, c.id);
           const encodeActive = !!(vodJob && vodJobIsActive(vodJob.status));
@@ -1283,35 +1288,8 @@ export function EditorClipsList({
                       </button>
                     </span>
                   ) : null}
-                  {realtimeTranscriptUi ||
-                  transcriptNewsUiEnabled ||
-                  vodEncodeJobSupportsTranscriptModal(vodJob, transcriptNewsUiEnabled) ? (
-                    <span data-no-row-select onClick={(e) => e.stopPropagation()} className="inline-flex shrink-0">
-                      <button
-                        type="button"
-                        disabled={encodeActive}
-                        onClick={() => setTranscriptModalClipId(c.id)}
-                        title="View transcript"
-                        aria-label="View transcript"
-                        className={cx(
-                          "flex size-8 shrink-0 items-center justify-center rounded-full border border-secondary bg-primary text-fg-quaternary transition-colors",
-                          encodeActive && "cursor-not-allowed opacity-45 hover:bg-primary",
-                          !encodeActive && "cursor-pointer hover:bg-secondary hover:text-fg-secondary",
-                          ((realtimeTranscriptUi &&
-                            transcribeJob &&
-                            vodJobIsActive(transcribeJob.status)) ||
-                            (!realtimeTranscriptUi &&
-                              vodJob &&
-                              vodJobIsActive(vodJob.status) &&
-                              (vodJob.phase === "transcribing" || vodJob.phase === "generating_news"))) &&
-                            "border-amber-500/80 text-amber-700 dark:text-amber-400",
-                        )}
-                      >
-                        <Clipboard className="size-3.5" aria-hidden />
-                      </button>
-                    </span>
-                  ) : null}
                   <div className="flex min-w-0 flex-row flex-wrap items-center gap-1.5">
+                    {/* 1. Edit clip metadata */}
                     {onEditMetadata ? (
                       <button
                         type="button"
@@ -1337,6 +1315,36 @@ export function EditorClipsList({
                         <Edit01 className="size-3.5" />
                       </button>
                     ) : null}
+                    {/* 2. Transcript & news */}
+                    {realtimeTranscriptUi ||
+                    transcriptNewsUiEnabled ||
+                    vodEncodeJobSupportsTranscriptModal(vodJob, transcriptNewsUiEnabled) ? (
+                      <span data-no-row-select onClick={(e) => e.stopPropagation()} className="inline-flex shrink-0">
+                        <button
+                          type="button"
+                          disabled={encodeActive}
+                          onClick={() => setTranscriptModalClipId(c.id)}
+                          title="View transcript"
+                          aria-label="View transcript"
+                          className={cx(
+                            "flex size-8 shrink-0 items-center justify-center rounded-full border border-secondary bg-primary text-fg-quaternary transition-colors",
+                            encodeActive && "cursor-not-allowed opacity-45 hover:bg-primary",
+                            !encodeActive && "cursor-pointer hover:bg-secondary hover:text-fg-secondary",
+                            ((realtimeTranscriptUi &&
+                              transcribeJob &&
+                              vodJobIsActive(transcribeJob.status)) ||
+                              (!realtimeTranscriptUi &&
+                                vodJob &&
+                                vodJobIsActive(vodJob.status) &&
+                                (vodJob.phase === "transcribing" || vodJob.phase === "generating_news"))) &&
+                              "border-amber-500/80 text-amber-700 dark:text-amber-400",
+                          )}
+                        >
+                          <Clipboard className="size-3.5" aria-hidden />
+                        </button>
+                      </span>
+                    ) : null}
+                    {/* 3. Subtitles */}
                     {onOpenClipSubtitleGenerate ? (
                       <span onClick={(e) => e.stopPropagation()} className="inline-flex">
                         <EditorSubtitleGenerateButton
@@ -1349,6 +1357,7 @@ export function EditorClipsList({
                     ) : null}
                     {onOpenClipSubtitleBurn &&
                     subtitlesControlsEnabled &&
+                    burnInControlsEnabled &&
                     clipSubtitleGenerateEnabled(c) &&
                     clipHasSelectedSubtitleLocales(c) ? (
                       <span onClick={(e) => e.stopPropagation()} className="inline-flex">
@@ -1370,7 +1379,7 @@ export function EditorClipsList({
                         />
                       </span>
                     ) : null}
-                    {onOpenVerticalCropModal ? (
+                    {onOpenVerticalCropModal && verticalCropControlsEnabled ? (
                       <span onClick={(e) => e.stopPropagation()} className="inline-flex">
                         <EditorVerticalCropButton
                           variant="inline"
@@ -1380,61 +1389,7 @@ export function EditorClipsList({
                         />
                       </span>
                     ) : null}
-                    {onCaptureClipPoster ? (
-                      <span className="relative inline-flex shrink-0" data-no-row-select onClick={(e) => e.stopPropagation()}>
-                        <MenuTrigger>
-                          <AriaButton
-                            aria-label="Poster capture at playhead"
-                            isDisabled={encodeActive}
-                            className={({ isPressed, isFocusVisible }) =>
-                              cx(
-                                "relative flex size-8 items-center justify-center rounded-full border border-secondary bg-primary text-fg-quaternary transition-colors",
-                                encodeActive
-                                  ? "cursor-not-allowed opacity-45"
-                                  : "cursor-pointer hover:bg-secondary hover:text-fg-secondary",
-                                (isPressed || isFocusVisible) && !encodeActive && "outline-2 outline-offset-2 outline-focus-ring",
-                              )
-                            }
-                          >
-                            <Camera01 className="size-3.5" aria-hidden />
-                            {posterCount > 0 ? (
-                              <span className="pointer-events-none absolute -top-1 -right-1 flex min-h-4 min-w-4 items-center justify-center rounded-full bg-brand-solid px-0.5 text-[9px] font-bold leading-none text-white ring-2 ring-primary">
-                                {posterCount > 99 ? "99+" : posterCount}
-                              </span>
-                            ) : null}
-                          </AriaButton>
-                          <AriaPopover
-                            placement="bottom start"
-                            offset={6}
-                            className={({ isEntering, isExiting }) =>
-                              cx(
-                                "will-change-transform",
-                                isEntering &&
-                                  "duration-200 ease-out animate-in fade-in placement-bottom:slide-in-from-top-2 placement-top:slide-in-from-bottom-2",
-                                isExiting &&
-                                  "duration-150 ease-in animate-out fade-out placement-bottom:slide-out-to-top-2 placement-top:slide-out-to-bottom-2",
-                              )
-                            }
-                          >
-                            <Menu
-                              className="min-w-56 rounded-lg border border-secondary_alt bg-primary p-1 shadow-lg outline-none"
-                              onAction={(key) => {
-                                if (key === "poster-capture") onCaptureClipPoster(c.id);
-                              }}
-                            >
-                              <MenuItem
-                                id="poster-capture"
-                                isDisabled={encodeActive}
-                                className="cursor-pointer rounded-md px-3 py-2 text-left text-sm text-primary outline-none data-[focused]:bg-secondary"
-                              >
-                                Capture poster at playhead
-                              </MenuItem>
-                            </Menu>
-                          </AriaPopover>
-                        </MenuTrigger>
-                      </span>
-                    ) : null}
-                    {onAddTextWidget && onAddImageWidgetFromFile ? (
+                    {widgetsControlsEnabled && onAddTextWidget && onAddImageWidgetFromFile ? (
                       <span
                         className="relative inline-flex shrink-0"
                         data-no-row-select
@@ -1503,21 +1458,34 @@ export function EditorClipsList({
                   </div>
                   <div className="ml-auto flex shrink-0 flex-row items-center gap-1.5" data-no-row-select onClick={(e) => e.stopPropagation()}>
                     <MenuTrigger>
-                      <AriaButton
-                        aria-label="Encode clip: create with or without ads"
-                        isDisabled={encodeActive}
-                        className={({ isPressed, isFocusVisible }) =>
-                          cx(
-                            "flex size-8 items-center justify-center rounded-full border border-secondary bg-primary text-fg-quaternary transition-colors",
-                            encodeActive
-                              ? "cursor-not-allowed opacity-45"
-                              : "cursor-pointer hover:bg-secondary hover:text-fg-secondary",
-                            (isPressed || isFocusVisible) && !encodeActive && "outline-2 outline-offset-2 outline-focus-ring",
-                          )
+                      {/* Hover shows a styled tooltip; click opens the encode menu below. */}
+                      <Tooltip
+                        title={encodeActive ? "Encoding…" : "Encode clip"}
+                        description={
+                          encodeActive
+                            ? "Use Stop to cancel."
+                            : adsEnabled
+                              ? "Create with or without ads"
+                              : "Create clip"
                         }
+                        placement="top"
                       >
-                        <Clapperboard className="size-3.5" aria-hidden />
-                      </AriaButton>
+                        <AriaButton
+                          aria-label="Encode clip: create with or without ads"
+                          isDisabled={encodeActive}
+                          className={({ isPressed, isFocusVisible }) =>
+                            cx(
+                              "flex size-8 items-center justify-center rounded-full border border-secondary bg-primary text-fg-quaternary transition-colors",
+                              encodeActive
+                                ? "cursor-not-allowed opacity-45"
+                                : "cursor-pointer hover:bg-secondary hover:text-fg-secondary",
+                              (isPressed || isFocusVisible) && !encodeActive && "outline-2 outline-offset-2 outline-focus-ring",
+                            )
+                          }
+                        >
+                          <Clapperboard className="size-3.5" aria-hidden />
+                        </AriaButton>
+                      </Tooltip>
                       <AriaPopover
                         placement="bottom end"
                         offset={6}
@@ -1544,6 +1512,7 @@ export function EditorClipsList({
                               <MenuItem
                                 id="create-no-ads"
                                 isDisabled={encodeActive}
+                                title="Encode the clip without inserting any ad breaks"
                                 className="cursor-pointer rounded-md px-3 py-2 text-left text-sm text-primary outline-none data-[focused]:bg-secondary"
                               >
                                 Create without ads
@@ -1551,6 +1520,7 @@ export function EditorClipsList({
                               <MenuItem
                                 id="create-with-ads"
                                 isDisabled={encodeActive}
+                                title="Encode the clip and insert the configured ad breaks"
                                 className="cursor-pointer rounded-md px-3 py-2 text-left text-sm text-primary outline-none data-[focused]:bg-secondary"
                               >
                                 Create with ads
