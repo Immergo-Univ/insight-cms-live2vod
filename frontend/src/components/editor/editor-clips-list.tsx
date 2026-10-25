@@ -1512,18 +1512,20 @@ export function EditorClipsList({
                               <MenuItem
                                 id="create-no-ads"
                                 isDisabled={encodeActive}
-                                title="Encode the clip without inserting any ad breaks"
                                 className="cursor-pointer rounded-md px-3 py-2 text-left text-sm text-primary outline-none data-[focused]:bg-secondary"
                               >
-                                Create without ads
+                                <span title="Encode the clip without inserting any ad breaks">
+                                  Create without ads
+                                </span>
                               </MenuItem>
                               <MenuItem
                                 id="create-with-ads"
                                 isDisabled={encodeActive}
-                                title="Encode the clip and insert the configured ad breaks"
                                 className="cursor-pointer rounded-md px-3 py-2 text-left text-sm text-primary outline-none data-[focused]:bg-secondary"
                               >
-                                Create with ads
+                                <span title="Encode the clip and insert the configured ad breaks">
+                                  Create with ads
+                                </span>
                               </MenuItem>
                             </>
                           ) : (
