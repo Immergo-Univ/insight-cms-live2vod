@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ModalOverlay, Modal, Dialog } from "@/components/application/modals/modal";
 import { CloseButton } from "@/components/base/buttons/close-button";
 import { AppSelect } from "@/components/base/select/app-select";
@@ -38,9 +38,16 @@ export function EditorSubtitleBurnModal({
   const [burnOn, setBurnOn] = useState(burnInEnabled);
   const [lang, setLang] = useState(burnInLanguage);
   const [draft, setDraft] = useState(() => normalizeEditorSubtitleSettings(settings));
+  const wasOpenRef = useRef(false);
 
+  // Initialize drafts only on the closed -> open transition. The parent rebuilds
+  // `settings`/`subtitleLocales` (and therefore `selectedCodes`) on every render
+  // and re-renders periodically, so a plain dependency-based effect would re-run
+  // on every render and clobber the user's in-modal edits before they hit Apply.
   useEffect(() => {
-    if (!isOpen) return;
+    const justOpened = isOpen && !wasOpenRef.current;
+    wasOpenRef.current = isOpen;
+    if (!justOpened) return;
     setBurnOn(burnInEnabled);
     setDraft(normalizeEditorSubtitleSettings(settings));
     const fallback = selectedCodes.includes(burnInLanguage) ? burnInLanguage : (selectedCodes[0] ?? "en");

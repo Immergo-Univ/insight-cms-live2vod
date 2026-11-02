@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ModalOverlay, Modal, Dialog } from "@/components/application/modals/modal";
 import { CloseButton } from "@/components/base/buttons/close-button";
 import { Checkbox } from "@/components/base/checkbox/checkbox";
@@ -29,9 +29,17 @@ export function EditorSubtitleGenerateModal({
 }: EditorSubtitleGenerateModalProps) {
   const [localesDraft, setLocalesDraft] = useState<Record<string, boolean>>({});
   const [generationOn, setGenerationOn] = useState(generateEnabled);
+  const wasOpenRef = useRef(false);
 
+  // Initialize the draft only when the modal transitions from closed to open.
+  // The parent rebuilds `subtitleLocales`/`availableLanguages` on every render
+  // (new object identity) and re-renders periodically (realtime tick), so a
+  // plain dependency-based effect would re-run on every render and overwrite the
+  // user's in-modal selections with the clip's persisted state before Apply.
   useEffect(() => {
-    if (!isOpen) return;
+    const justOpened = isOpen && !wasOpenRef.current;
+    wasOpenRef.current = isOpen;
+    if (!justOpened) return;
     setGenerationOn(generateEnabled);
     const next: Record<string, boolean> = {};
     for (const code of availableLanguages) {
