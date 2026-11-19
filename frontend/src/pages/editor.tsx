@@ -1891,6 +1891,8 @@ export function EditorPage() {
                   onScrub={handleRealtimeScrub}
                   onGoLive={handleRealtimeGoLive}
                   timeZone={clientTimeZone}
+                  clipUrl={clipState.sourceM3u8?.trim() || clipState.clipUrl}
+                  channelId={clipState.channelId}
                 />
               </div>
             )}
