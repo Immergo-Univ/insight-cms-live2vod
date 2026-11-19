@@ -7,6 +7,7 @@ import { Live2VodPage } from "@/pages/live2vod";
 import { NotFound } from "@/pages/not-found";
 import { ProcessingClipsPage } from "@/pages/processing-clips";
 import { VodByGuidPage } from "@/pages/vod-by-guid";
+import { SyndicationSettingsPage } from "@/pages/syndication-settings";
 import { AdminApp } from "@/admin/admin-app";
 import { TenantSettingsProvider } from "@/providers/tenant-settings-provider";
 import { RouteProvider } from "@/providers/router-provider";
@@ -34,6 +35,7 @@ createRoot(document.getElementById("root")!).render(
                                 <Route path="/vod-editor" element={<VodEditorPage />} />
                                 <Route path="/vod/:vod_guid" element={<VodByGuidPage />} />
                                 <Route path="/processing-clips" element={<ProcessingClipsPage />} />
+                                <Route path="/social-media" element={<SyndicationSettingsPage />} />
                                 <Route path="/admin/*" element={<AdminApp />} />
                                 <Route path="*" element={<NotFound />} />
                             </Routes>
