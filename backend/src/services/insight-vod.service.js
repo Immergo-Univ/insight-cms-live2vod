@@ -63,10 +63,12 @@ function anyWhisperSubtitlesEnabled(spec) {
  * Social syndication must download THIS URL: the raw, CMS-derived S3 path can point at a private
  * origin (403), whereas insight-api stores the resolved public CDN URL.
  *
- * @param {{ tenantId: string, vodGuid: string }} opts
+ * `prefer: "lightest"` returns the lowest-resolution MP4 instead (audio-only consumers).
+ *
+ * @param {{ tenantId: string, vodGuid: string, prefer?: "best" | "lightest" }} opts
  * @returns {Promise<string | null>}
  */
-export async function fetchInsightVodBestMp4Url({ tenantId, vodGuid }) {
+export async function fetchInsightVodBestMp4Url({ tenantId, vodGuid, prefer = "best" }) {
   const tid = String(tenantId || "").trim();
   const guid = String(vodGuid || "").trim();
   if (!tid || !guid) return null;
@@ -84,6 +86,20 @@ export async function fetchInsightVodBestMp4Url({ tenantId, vodGuid }) {
       (item) => Array.isArray(item?.assetTypes) && item.assetTypes.includes("mp4"),
     );
     if (!mp4s.length) return null;
+
+    const widthOf = (item) => {
+      const width = parseInt(String(item?.resolution ?? "").split("x")[0], 10);
+      return Number.isFinite(width) ? width : 0;
+    };
+    if (prefer === "lightest") {
+      // Audio-only consumers: the smallest rendition carries the same audio with far less download.
+      const usable = mp4s.filter((item) => /^https?:\/\//i.test(String(item?.downloadUrl || "").trim()));
+      const ranked = usable
+        .filter((item) => widthOf(item) > 0)
+        .sort((a, b) => widthOf(a) - widthOf(b));
+      const lightest = ranked[0] || usable[0];
+      if (lightest) return String(lightest.downloadUrl).trim();
+    }
 
     let best = mp4s.find((item) => item?.typeName === "uploadedMp4");
     if (!best) {

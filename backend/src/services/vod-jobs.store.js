@@ -13,6 +13,7 @@ import {
   pgCountActiveJobsForTenant,
   pgFindJobByVodGuid,
   pgListAiRunJobsForVod,
+  pgListStaleLocalAiRunJobs,
   pgUpdateJob,
   pgMergeEditorSpec,
 } from "./vod-jobs-pg.repository.js";
@@ -143,6 +144,23 @@ export async function listAiRunJobsForVod(tenantId, vodGuid, limit = 20) {
   }
   list.sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
   return list.slice(0, limit);
+}
+
+/**
+ * Active AI-page runs executed in-process by this backend that have not been updated since `beforeIso`
+ * (their runner died, e.g. on a restart/deploy).
+ * @param {string} beforeIso
+ * @returns {Promise<VodJob[]>}
+ */
+export async function listStaleLocalAiRunJobs(beforeIso) {
+  if (usePg()) return /** @type {Promise<VodJob[]>} */ (pgListStaleLocalAiRunJobs(beforeIso));
+  const list = [];
+  for (const job of jobsById.values()) {
+    if (job.status !== "queued" && job.status !== "processing" && job.status !== "uploading") continue;
+    if (job.editorSpec?.__aiRun?.executor !== "local") continue;
+    if (String(job.updatedAt || job.createdAt) < beforeIso) list.push(job);
+  }
+  return list;
 }
 
 /**

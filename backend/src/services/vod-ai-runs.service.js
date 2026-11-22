@@ -1,8 +1,9 @@
 /**
  * AI page "Run" actions on an existing Insight VOD (Speech-to-text, News article, Subtitles).
  *
- * Each run is a transcribe-only encoder job (`realtimeTranscribeOnly`) over the VOD source,
- * tagged with `editorSpec.__aiRun`. The job intentionally has no `vodGuid` column so it never
+ * Each run is a transcribe-only job (`realtimeTranscribeOnly`) over the VOD source, tagged with
+ * `editorSpec.__aiRun`, executed in-process by vod-ai-local-runner (or by the external encoder
+ * when AI_RUNS_EXECUTOR=encoder). The job intentionally has no `vodGuid` column so it never
  * replaces the VOD's encode job. On completion:
  *   - stt / article merge into transcript[] / news[]
  *   - subtitles turn the timed (and, when a target language was requested, translated) cues
@@ -14,6 +15,7 @@ import { getTenantCreditState } from "./tenant-credits.service.js";
 import { aiServiceCreditsPerMinute, estimateAiActionCredits } from "./credits-pricing.service.js";
 import { resolveTenant } from "./auth.service.js";
 import { startBackgroundVodJob } from "./vod-encode-runner.service.js";
+import { startLocalAiRunJob } from "./vod-ai-local-runner.service.js";
 import { listAiRunJobsForVod, mergeJobEditorSpec } from "./vod-jobs.store.js";
 import { resolveTenantS3 } from "./tenant-storage.service.js";
 import { putTenantTranscodedObject } from "./vod-tenant-s3.service.js";
@@ -34,6 +36,12 @@ export const NEWS_LOCALES = ["en", "es", "he"];
 /** Used when the VOD duration is unknown; ffmpeg stops at end of input. */
 const FALLBACK_MAX_DURATION_SEC = 4 * 3600;
 const ACTIVE_STATUSES = new Set(["queued", "processing", "uploading"]);
+/**
+ * Who executes AI-page runs. "local" (default): this backend (vod-ai-local-runner).
+ * "encoder": dispatch to the external encoder service as a transcribe-only job.
+ * Env: AI_RUNS_EXECUTOR
+ */
+const AI_RUNS_EXECUTOR = (process.env.AI_RUNS_EXECUTOR || "local").trim().toLowerCase() === "encoder" ? "encoder" : "local";
 
 /**
  * @param {number} status
@@ -199,7 +207,8 @@ export async function startAiRun({ tenantId, vodGuid, service, languages }) {
     throw httpError(402, "Not enough credits for this AI action", "NO_CREDITS");
   }
 
-  const sourceUrl = (await fetchInsightVodBestMp4Url({ tenantId, vodGuid })) || resolveVodHlsUrl(vod);
+  const sourceUrl =
+    (await fetchInsightVodBestMp4Url({ tenantId, vodGuid, prefer: "lightest" })) || resolveVodHlsUrl(vod);
   if (!sourceUrl) throw httpError(422, "This VOD has no playable source (MP4 or HLS)", "NO_SOURCE");
 
   const endTime = durationSec > 0 ? durationSec : FALLBACK_MAX_DURATION_SEC;
@@ -246,11 +255,19 @@ export async function startAiRun({ tenantId, vodGuid, service, languages }) {
         requestedAt: new Date().toISOString(),
       },
     };
-    const jobId = await startBackgroundVodJob({ tenantId, spec, clipUrlPreview: sourceUrl });
+    const jobId =
+      AI_RUNS_EXECUTOR === "local"
+        ? await startLocalAiRunJob({
+            tenantId,
+            spec,
+            clipUrlPreview: sourceUrl,
+            onCompleted: trySyncAiRunJobToInsightVod,
+          })
+        : await startBackgroundVodJob({ tenantId, spec, clipUrlPreview: sourceUrl });
     jobIds.push(jobId);
   }
   console.log(
-    `[vod-ai-runs] started service=${service} langs=[${requested.join(",")}] guid=${vodGuid} tenant=${tenantId} jobs=${jobIds.join(",")}`,
+    `[vod-ai-runs] started executor=${AI_RUNS_EXECUTOR} service=${service} langs=[${requested.join(",")}] guid=${vodGuid} tenant=${tenantId} source=${sourceUrl} jobs=${jobIds.join(",")}`,
   );
   return { jobIds, estimatedCredits: estimatedTotal };
 }

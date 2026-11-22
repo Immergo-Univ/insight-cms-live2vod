@@ -193,6 +193,27 @@ export async function pgListAiRunJobsForVod(tenantId, vodGuid, limit = 20) {
 }
 
 /**
+ * Active AI-page runs executed in-process (`editorSpec.__aiRun.executor = 'local'`) not updated since `beforeIso`.
+ * @param {string} beforeIso
+ * @param {number} [limit]
+ */
+export async function pgListStaleLocalAiRunJobs(beforeIso, limit = 50) {
+  const VodJob = getVodJobModel();
+  const sequelize = VodJob.sequelize;
+  if (!sequelize) return [];
+  const rows = await VodJob.findAll({
+    where: {
+      status: { [Op.in]: ["queued", "processing", "uploading"] },
+      updatedAt: { [Op.lt]: new Date(beforeIso) },
+      [Op.and]: [sequelize.literal(`editor_spec->'__aiRun'->>'executor' = 'local'`)],
+    },
+    order: [["updatedAt", "ASC"]],
+    limit,
+  });
+  return rows.map((r) => modelToJob(r));
+}
+
+/**
  * @param {string} tenantId
  */
 export async function pgCountActiveJobsForTenant(tenantId) {

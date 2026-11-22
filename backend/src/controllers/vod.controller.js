@@ -8,6 +8,7 @@ import {
   findJobByVodGuid,
 } from "../services/vod-jobs.store.js";
 import { startBackgroundVodJob, requestCancelJob, anyDubbingEnabled } from "../services/vod-encode-runner.service.js";
+import { cancelLocalAiRunJob } from "../services/vod-ai-local-runner.service.js";
 import { listTenantVodMp4s } from "../services/vod-s3.service.js";
 import { backfillWhisperTranscriptByJobId } from "../services/whisper-transcript-backfill.service.js";
 import {
@@ -428,7 +429,7 @@ vodRouter.post("/jobs/:jobId/cancel", async (req, res) => {
     if (job.status === "completed" || job.status === "failed" || job.status === "cancelled") {
       return res.json({ ok: true, job });
     }
-    requestCancelJob(jobId);
+    if (!cancelLocalAiRunJob(jobId)) requestCancelJob(jobId);
     await updateJob(jobId, {
       message: "Cancelling…",
       phase: "cancelling",

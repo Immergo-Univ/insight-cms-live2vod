@@ -32,6 +32,7 @@ import { resolveTenant } from "./services/auth.service.js";
 import { decodeTenantMiddleware } from "./middleware/decode-tenant.middleware.js";
 import { decodeTenantId } from "./utils/tenant-cipher.js";
 import { initVodJobsPersistence, subscribeTenant, unsubscribeTenant } from "./services/vod-jobs.store.js";
+import { ensureLocalAiRunWatchdog } from "./services/vod-ai-local-runner.service.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -196,6 +197,7 @@ initVodJobsPersistence()
         syncChannelAdsSnapshotsFromS3OnStartup().catch((e) => console.warn("[channel-ads-s3] startup:", e.message));
       }
       startAdRecognitionService();
+      ensureLocalAiRunWatchdog();
     });
   })
   .catch((err) => {

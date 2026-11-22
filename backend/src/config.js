@@ -71,6 +71,15 @@ export const config = {
 
   backendRoot,
 
+  /** OpenAI API key (STT + optional news) for in-process AI runs. Env: OPENAI_API_KEY */
+  openaiApiKey: (process.env.OPENAI_API_KEY || "").trim(),
+  /** Audio STT model (OpenAI). Env: OPENAI_STT_MODEL (default gpt-4o-transcribe-diarize for speaker diarization). */
+  openaiSttModel: (process.env.OPENAI_STT_MODEL || "gpt-4o-transcribe-diarize").trim(),
+  /** Chat model for news articles after STT. Env: OPENAI_NEWS_MODEL (default gpt-4o-mini). */
+  openaiNewsModel: (process.env.OPENAI_NEWS_MODEL || "gpt-4o-mini").trim(),
+  /** Request timeout for OpenAI news step (ms). Env: OPENAI_NEWS_TIMEOUT_MS */
+  openaiNewsTimeoutMs: Math.max(30_000, parseInt(process.env.OPENAI_NEWS_TIMEOUT_MS || "120000", 10) || 120_000),
+
   /** Per-channel timeline snapshots (ads, live probe fields). */
   channelsDataDir: path.join(backendRoot, "data", "channels"),
 
