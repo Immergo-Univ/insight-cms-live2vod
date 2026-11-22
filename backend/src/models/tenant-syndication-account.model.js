@@ -17,6 +17,8 @@ export function registerTenantSyndicationAccountModel(sequelize) {
       externalAccountId: { type: DataTypes.STRING(128), allowNull: false },
       displayName: { type: DataTypes.STRING(255), allowNull: true },
       credentials: { type: DataTypes.JSONB, allowNull: false, defaultValue: {} },
+      /** Platform publish defaults. YouTube stores the videos.insert metadata. */
+      settings: { type: DataTypes.JSONB, allowNull: false, defaultValue: {} },
       status: { type: DataTypes.STRING(32), allowNull: false, defaultValue: "active" },
     },
     {

@@ -5,6 +5,7 @@ import { registerAdminModels } from "../models/register-admin-models.js";
 import { registerTenantModel } from "../models/tenant.model.js";
 import { registerTenantSyndicationAccountModel } from "../models/tenant-syndication-account.model.js";
 import { registerTenantCreditLedgerModel } from "../models/tenant-credit-ledger.model.js";
+import { registerCreditPurchaseOrderModel } from "../models/credit-purchase-order.model.js";
 import { registerAppSettingModel } from "../models/app-setting.model.js";
 import { registerAdRecognitionScanModel } from "../models/ad-recognition-scan.model.js";
 import { registerAdRecognitionConfigModel } from "../models/ad-recognition-config.model.js";
@@ -47,6 +48,7 @@ export function registerAllModels(sq) {
   registerTenantModel(sq);
   registerTenantSyndicationAccountModel(sq);
   registerTenantCreditLedgerModel(sq);
+  registerCreditPurchaseOrderModel(sq);
   registerAppSettingModel(sq);
   registerAdRecognitionScanModel(sq);
   registerAdRecognitionConfigModel(sq);

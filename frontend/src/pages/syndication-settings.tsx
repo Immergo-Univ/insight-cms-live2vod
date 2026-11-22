@@ -1,10 +1,12 @@
-import { useCallback, useEffect, useMemo, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { useLocation } from "react-router";
 import { toast } from "sonner";
 import { useTenantSettings } from "@/providers/tenant-settings-provider";
 import {
   fetchTenantSyndicationStatus,
   fetchTenantSyndicationYoutubeAuthUrl,
+  fetchSyndicationAccountSettings,
+  saveSyndicationAccountSettings,
   postTenantSyndicationYoutubeMockAuthorize,
   fetchTenantSyndicationTwitterAuthUrl,
   postTenantSyndicationTwitterMockAuthorize,
@@ -21,7 +23,6 @@ import {
   SyndicationDuplicateAccountError,
   type TenantSyndicationStatus,
 } from "@/services/tenant-syndication.service";
-import { loadAccountDefaults, saveAccountDefaults } from "@/services/syndication-defaults-store";
 import {
   buildAccountCards,
   collectDefaults,
@@ -29,6 +30,8 @@ import {
   SYNDICATION_PLATFORM_ORDER,
   type SyndCard,
   type SyndField,
+  draftToSettings,
+  settingsToDraft,
   type SyndicationAccountLike,
   type SyndicationPlatform,
 } from "@/components/syndication/syndication-settings-model";
@@ -142,6 +145,8 @@ export function SyndicationSettingsPage() {
 
   const [draft, setDraft] = useState<Record<string, unknown>>({});
   const [dirty, setDirty] = useState(false);
+  const [savingDefaults, setSavingDefaults] = useState(false);
+  const savedDraftRef = useRef<Record<string, unknown>>({});
 
   const [selectOpen, setSelectOpen] = useState(false);
   const [selectBusy, setSelectBusy] = useState(false);
@@ -228,10 +233,27 @@ export function SyndicationSettingsPage() {
       setDirty(false);
       return;
     }
-    const base = collectDefaults([...cards.left, ...cards.right]);
-    const stored = loadAccountDefaults(tenantId, selectedAccount.platform, selectedAccount.id);
-    setDraft({ ...base, ...(stored ?? {}) });
+    const allCards = [...cards.left, ...cards.right];
+    const base = collectDefaults(allCards);
+    let cancelled = false;
+    savedDraftRef.current = base;
+    setDraft(base);
     setDirty(false);
+    void fetchSyndicationAccountSettings(tenantId, selectedAccount.platform, selectedAccount.id)
+      .then((settings) => {
+        if (cancelled) return;
+        const next = settingsToDraft(allCards, settings);
+        savedDraftRef.current = next;
+        setDraft(next);
+        setDirty(false);
+      })
+      .catch((e) => {
+        if (cancelled) return;
+        toast.error(e instanceof Error ? e.message : "Failed to load account settings");
+      });
+    return () => {
+      cancelled = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedKey]);
 
@@ -351,19 +373,32 @@ export function SyndicationSettingsPage() {
   }, []);
 
   const resetDraft = useCallback(() => {
-    if (!selectedAccount) return;
-    const base = collectDefaults([...cards.left, ...cards.right]);
-    const stored = loadAccountDefaults(tenantId, selectedAccount.platform, selectedAccount.id);
-    setDraft({ ...base, ...(stored ?? {}) });
+    setDraft(savedDraftRef.current);
     setDirty(false);
-  }, [selectedAccount, cards, tenantId]);
+  }, []);
 
   const handleSaveDefaults = useCallback(() => {
-    if (!selectedAccount) return;
-    saveAccountDefaults(tenantId, selectedAccount.platform, selectedAccount.id, draft);
-    setDirty(false);
-    toast.success("Default settings saved");
-  }, [selectedAccount, tenantId, draft]);
+    if (!selectedAccount || savingDefaults) return;
+    const allCards = [...cards.left, ...cards.right];
+    setSavingDefaults(true);
+    void saveSyndicationAccountSettings(
+      tenantId,
+      selectedAccount.platform,
+      selectedAccount.id,
+      draftToSettings(allCards, draft),
+    )
+      .then((saved) => {
+        const next = settingsToDraft(allCards, saved);
+        savedDraftRef.current = next;
+        setDraft(next);
+        setDirty(false);
+        toast.success(`${SYNDICATION_PLATFORM_META[selectedAccount.platform].label} settings saved`);
+      })
+      .catch((e) => {
+        toast.error(e instanceof Error ? e.message : "Failed to save account settings");
+      })
+      .finally(() => setSavingDefaults(false));
+  }, [selectedAccount, tenantId, draft, cards, savingDefaults]);
 
   if (!tenantId.trim()) {
     return (
@@ -510,6 +545,7 @@ export function SyndicationSettingsPage() {
                 onFieldChange={updateField}
                 onSave={handleSaveDefaults}
                 onCancel={resetDraft}
+                saving={savingDefaults}
                 onReconnect={() => void handleAuthorize(selectedAccount.platform)}
                 onFinishSetup={() =>
                   void openSelectTarget(
@@ -709,6 +745,7 @@ function AccountDetail({
   onReconnect,
   onFinishSetup,
   authBusy,
+  saving = false,
 }: {
   account: FlatAccount;
   cards: { left: SyndCard[]; right: SyndCard[] };
@@ -720,6 +757,7 @@ function AccountDetail({
   onReconnect: () => void;
   onFinishSetup: () => void;
   authBusy: boolean;
+  saving?: boolean;
 }) {
   const meta = SYNDICATION_PLATFORM_META[account.platform];
   const st = STATUS_STYLE[account.status];
@@ -827,13 +865,13 @@ function AccountDetail({
       {/* Footer */}
       <div style={{ ...CARD, padding: "14px 20px", display: "flex", flexWrap: "wrap", alignItems: "center", gap: 12 }}>
         <span style={{ flex: 1, minWidth: 260, fontSize: 13, color: "#6b7079" }}>
-          Changes apply to new posts. Posts that are already scheduled keep the settings they were made with.
+          These values are sent with the next post from this account. A value saved on an individual clip overrides them.
         </span>
-        <button type="button" onClick={onCancel} disabled={!dirty} style={{ ...BTN_GHOST, opacity: dirty ? 1 : 0.5, cursor: dirty ? "pointer" : "not-allowed" }}>
+        <button type="button" onClick={onCancel} disabled={!dirty || saving} style={{ ...BTN_GHOST, opacity: dirty && !saving ? 1 : 0.5, cursor: dirty && !saving ? "pointer" : "not-allowed" }}>
           Cancel
         </button>
-        <button type="button" onClick={onSave} disabled={!dirty} style={{ ...BTN_PRIMARY, opacity: dirty ? 1 : 0.5, cursor: dirty ? "pointer" : "not-allowed" }}>
-          Save changes
+        <button type="button" onClick={onSave} disabled={!dirty || saving} style={{ ...BTN_PRIMARY, opacity: dirty && !saving ? 1 : 0.5, cursor: dirty && !saving ? "pointer" : "not-allowed" }}>
+          {saving ? "Saving…" : "Save changes"}
         </button>
       </div>
     </>
@@ -905,7 +943,12 @@ function FieldRow({
         ) : null}
       </div>
       <div style={{ minWidth: 0 }}>
-        <SyndicationFieldControl field={field} value={value} onChange={onChange} />
+        <SyndicationFieldControl
+          field={field}
+          value={value}
+          disabled={field.kind === "select" ? field.disabled : undefined}
+          onChange={onChange}
+        />
       </div>
     </div>
   );

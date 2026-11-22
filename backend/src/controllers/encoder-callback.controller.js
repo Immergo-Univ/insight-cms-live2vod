@@ -11,6 +11,7 @@ import { tryTiktokSyndicationAfterJobCompleted } from "../services/tiktok-syndic
 import { resolveJobMasterOutputUrl } from "../services/encoder-output-url.service.js";
 import { anyDubbingEnabled } from "../services/vod-encode-runner.service.js";
 import { reconcileJobCredits } from "../services/tenant-credits.service.js";
+import { trySyncAiRunJobToInsightVod } from "../services/vod-ai-runs.service.js";
 
 /** Fields the encoder service may update on a job (defense in depth). */
 const ENCODER_PATCH_KEYS = new Set([
@@ -125,6 +126,9 @@ encoderCallbackRouter.patch("/jobs/:jobId", requireEncoderSecret, async (req, re
     }
   }
   const updatedJob = await updateJob(jobId, patch);
+  if (updatedJob?.editorSpec?.__aiRun && patch.status === "completed") {
+    void trySyncAiRunJobToInsightVod(updatedJob);
+  }
   if (updatedJob) {
     if (patch.transcriptText || patch.status === "completed") {
       void trySyncInsightVodWhisperSubtitleLabels(updatedJob);

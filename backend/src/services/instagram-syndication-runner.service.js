@@ -2,6 +2,7 @@ import { getSequelize } from "../db/sequelize.js";
 import { isVodJobsPostgresEnabled } from "./vod-jobs-pg.repository.js";
 import { getJob, mergeJobEditorSpec } from "./vod-jobs.store.js";
 import { uploadVideoToInstagram } from "./tenant-syndication.service.js";
+import { resolveInstagramPublishOptions } from "./social-account-settings.service.js";
 import { getActiveAccountsForPublish } from "./tenant-syndication-accounts.service.js";
 import { resolveJobSyndicationMp4Url } from "./encoder-output-url.service.js";
 import { vodEncodeStdout } from "../utils/vod-encode-log.js";
@@ -86,16 +87,7 @@ export async function tryInstagramSyndicationAfterJobCompleted(jobId) {
   const titleFromMeta = typeof meta.title === "string" ? meta.title.trim() : "";
   const descFromMeta = typeof meta.description === "string" ? meta.description.trim() : "";
   const opt = ig.options && typeof ig.options === "object" && !Array.isArray(ig.options) ? ig.options : {};
-  const captionOverride = typeof opt.captionOverride === "string" ? opt.captionOverride.trim() : "";
-  const mediaTypeRaw = typeof opt.mediaType === "string" ? opt.mediaType.trim().toLowerCase() : "reels";
-  const mediaType = mediaTypeRaw === "feed" ? "feed" : "reels";
-  const captionParts = [];
-  if (captionOverride) captionParts.push(captionOverride);
-  else {
-    if (titleFromMeta) captionParts.push(titleFromMeta);
-    if (descFromMeta) captionParts.push(descFromMeta);
-  }
-  const caption = captionParts.join("\n\n").trim() || " ";
+  const clipMeta = { title: titleFromMeta, description: descFromMeta };
   const uploadsMap =
     ig.uploads && typeof ig.uploads === "object" && !Array.isArray(ig.uploads) ? ig.uploads : {};
 
@@ -108,6 +100,9 @@ export async function tryInstagramSyndicationAfterJobCompleted(jobId) {
           ? ig.upload
           : {};
     if (prevUp.state === "published" || prevUp.state === "uploading") continue;
+
+    const publish = resolveInstagramPublishOptions(account.get("settings"), opt, clipMeta);
+    const mediaType = publish.mediaType;
 
     await mergeJobEditorSpec(jobId, (prev) =>
       specWithInstagramUploadPatch(prev, job.editorClipId || "", accountId, {
@@ -122,8 +117,9 @@ export async function tryInstagramSyndicationAfterJobCompleted(jobId) {
         tenantId: job.tenantId,
         accountId,
         videoUrl,
-        caption,
+        caption: publish.caption,
         mediaType,
+        shareToFeed: publish.shareToFeed,
       });
       await mergeJobEditorSpec(jobId, (prev) =>
         specWithInstagramUploadPatch(prev, job.editorClipId || "", accountId, {

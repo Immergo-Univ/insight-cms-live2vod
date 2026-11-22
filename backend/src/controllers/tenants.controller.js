@@ -23,6 +23,10 @@ import {
   completeTiktokOAuthCallback,
   queryTiktokCreatorInfoForTenant,
 } from "../services/tenant-syndication.service.js";
+import {
+  getSyndicationAccountSettings,
+  saveSyndicationAccountSettings,
+} from "../services/syndication-account-settings.service.js";
 import { config } from "../config.js";
 
 function mapSyndicationRouteError(e) {
@@ -333,6 +337,31 @@ tenantsRouter.get("/:tenantId/syndication/youtube/auth-url", async (req, res) =>
     const out = mapSyndicationRouteError(e);
     const body = out.code ? { error: out.message, code: out.code } : { error: out.message };
     res.status(out.status).json(body);
+  }
+});
+
+tenantsRouter.get("/:tenantId/syndication/:platform/accounts/:accountId/settings", async (req, res) => {
+  try {
+    const settings = await getSyndicationAccountSettings(req.params.tenantId, req.params.platform, req.params.accountId);
+    res.json(settings);
+  } catch (e) {
+    const status = e && typeof e === "object" && "statusCode" in e ? Number(e.statusCode) : 400;
+    res.status(status || 400).json({ error: e instanceof Error ? e.message : String(e) });
+  }
+});
+
+tenantsRouter.put("/:tenantId/syndication/:platform/accounts/:accountId/settings", async (req, res) => {
+  try {
+    const settings = await saveSyndicationAccountSettings(
+      req.params.tenantId,
+      req.params.platform,
+      req.params.accountId,
+      req.body,
+    );
+    res.json(settings);
+  } catch (e) {
+    const status = e && typeof e === "object" && "statusCode" in e ? Number(e.statusCode) : 400;
+    res.status(status || 400).json({ error: e instanceof Error ? e.message : String(e) });
   }
 });
 

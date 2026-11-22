@@ -6,7 +6,7 @@ sociales disponibles para el tenant (solo las plataformas habilitadas por admin)
 
 - Ruta frontend: `/social-media?tenantId=<id>` (registrada en `src/main.tsx`).
 - Solo arma la page central; el topnav y el sidebar los aporta el CMS legacy.
-- Trabajo aislado: solo frontend. No se agregó nada de backend.
+- Los defaults por cuenta se guardan en backend (ver pendiente 1, ya implementado).
 
 ## Archivos agregados (frontend)
 
@@ -20,9 +20,6 @@ sociales disponibles para el tenant (solo las plataformas habilitadas por admin)
   account" (elegir plataforma + permisos OAuth + CTA).
 - `src/components/syndication/syndication-select-target-modal.tsx` — selector de
   Facebook Page / cuenta de Instagram cuando queda pendiente de selección.
-- `src/services/syndication-defaults-store.ts` — persistencia local temporal de
-  los defaults por cuenta (ver pendientes).
-
 ## Qué ya funciona con el backend actual
 
 Reutiliza `src/services/tenant-syndication.service.ts` y sus endpoints:
@@ -43,15 +40,23 @@ TikTok. Solo se muestran las habilitadas por admin para el tenant
 Estos puntos del diseño NO tienen soporte backend hoy. En la UI quedan como
 controles deshabilitados, acciones con aviso, o persistencia local temporal.
 
-1. **Defaults de posteo por cuenta (nivel tenant).**
-   El diseño define valores por defecto por cuenta (General, Video e imagen,
-   Post template y ajustes específicos de cada red: visibility, category, "post
-   as", "who can watch", etc.). Hoy esos defaults solo existen a nivel clip en el
-   editor. Faltan endpoints para leer/guardar defaults por cuenta, por ejemplo:
-   - `GET  /api/tenants/:id/syndication/:platform/accounts/:accountId/defaults`
-   - `PUT  /api/tenants/:id/syndication/:platform/accounts/:accountId/defaults`
-   Mientras tanto, "Save changes" persiste en `localStorage`
-   (`syndication-defaults-store.ts`). Reemplazar por llamadas reales cuando exista.
+1. **Defaults de posteo por cuenta — implementado.**
+   Se guardan en `tenant_syndication_accounts.settings` (JSONB) vía
+   `GET/PUT /api/tenants/:id/syndication/:platform/accounts/:accountId/settings`.
+   Los runners combinan esos defaults con lo que el editor guarde por clip (el clip
+   gana solo si guardó el campo). El formulario solo muestra campos que la API de
+   cada red recibe:
+   - YouTube: visibility, category, audience, idioma, license, notify, embed,
+     estadísticas públicas, título/descripción/tags.
+   - Facebook: título, descripción, hashtags.
+   - Instagram: Reel o feed, "share to feed" de Reels, caption, hashtags.
+   - X: quién puede responder (`reply_settings`), texto, hashtags.
+   - TikTok: privacidad, comentarios/Duet/Stitch, disclosure, etiqueta de IA
+     (`is_aigc`), caption, hashtags.
+   Se quitaron General, Video e imagen, link/UTM, playlist, comentarios de YouTube,
+   Shorts, países/edad/crosspost de Facebook, Stories/colaboradores/ubicación de
+   Instagram, hilos/link en reply/contenido sensible de X y borradores de TikTok:
+   el upload actual no los envía.
 
 2. **Desconectar / eliminar una cuenta conectada.**
    No hay endpoint de disconnect/remove. El botón "Disconnect" está deshabilitado.
@@ -67,12 +72,14 @@ controles deshabilitados, acciones con aviso, o persistencia local temporal.
    `pending_selection`. Faltan en la respuesta de status: `connectedAs`,
    `lastPostAt`, y un `health`/`expiresAt` para los banners de reconexión.
 
-5. **Editar el display name / idioma por cuenta.**
-   El campo "Name in the CMS" y "Account language" se editan en la UI pero no hay
-   endpoint para persistirlos a nivel cuenta (quedan en el store local de defaults).
+5. **Display name, idioma y grupos que pueden postear.**
+   Quitados del formulario. Requieren persistencia propia y un catálogo de user
+   groups del tenant.
 
-6. **Grupos de usuarios que pueden postear ("Who can post").**
-   Requiere un catálogo de user groups del tenant y persistencia de la asignación.
+6. **YouTube: "Add to playlist".**
+   Quitado del formulario. Necesita listar las playlists del canal
+   (`playlists.list`) y una llamada extra `playlistItems.insert` después del upload,
+   además del scope OAuth `youtube` (hoy solo se pide `youtube.upload`).
 
 ## Fuera de alcance (del mockup original)
 

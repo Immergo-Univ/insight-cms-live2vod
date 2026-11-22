@@ -1,5 +1,5 @@
 /** @type {readonly string[]} */
-export const ADMIN_ENTITIES = ["users", "roles", "permissions", "clips", "tenants", "settings"];
+export const ADMIN_ENTITIES = ["users", "roles", "permissions", "clips", "tenants", "settings", "credits"];
 
 /** @type {readonly string[]} */
 export const ADMIN_ACTIONS = ["view", "create", "edit", "view_item", "delete", "edit_own", "delete_own"];

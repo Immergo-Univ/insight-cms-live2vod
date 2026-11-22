@@ -135,6 +135,42 @@ export async function fetchTenantSyndicationStatus(tenantId: string): Promise<Te
   return normalizeStatus(data);
 }
 
+type SyndicationSettingsPlatform = "youtube" | "facebook" | "instagram" | "twitter" | "tiktok";
+
+/** Per-account publish defaults; the backend normalizes and validates every field. */
+export type SyndicationAccountSettings = Record<string, unknown>;
+
+function accountSettingsUrl(tenantId: string, platform: SyndicationSettingsPlatform, accountId: string): string {
+  return `/api/tenants/${encodeURIComponent(tenantId.trim())}/syndication/${platform}/accounts/${encodeURIComponent(accountId)}/settings`;
+}
+
+export async function fetchSyndicationAccountSettings(
+  tenantId: string,
+  platform: SyndicationSettingsPlatform,
+  accountId: string,
+): Promise<SyndicationAccountSettings> {
+  const res = await fetch(accountSettingsUrl(tenantId, platform, accountId));
+  const data = (await res.json()) as SyndicationAccountSettings & { error?: string };
+  if (!res.ok) throw new Error(data.error || res.statusText);
+  return data;
+}
+
+export async function saveSyndicationAccountSettings(
+  tenantId: string,
+  platform: SyndicationSettingsPlatform,
+  accountId: string,
+  settings: SyndicationAccountSettings,
+): Promise<SyndicationAccountSettings> {
+  const res = await fetch(accountSettingsUrl(tenantId, platform, accountId), {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(settings),
+  });
+  const data = (await res.json()) as SyndicationAccountSettings & { error?: string };
+  if (!res.ok) throw new Error(data.error || res.statusText);
+  return data;
+}
+
 export async function fetchTenantSyndicationYoutubeAuthUrl(tenantId: string): Promise<string> {
   const id = tenantId.trim();
   const res = await fetch(`/api/tenants/${encodeURIComponent(id)}/syndication/youtube/auth-url`);

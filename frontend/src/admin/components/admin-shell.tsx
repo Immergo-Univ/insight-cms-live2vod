@@ -11,6 +11,7 @@ import {
   VideoCameraOutlined,
   ApartmentOutlined,
   ToolOutlined,
+  DollarOutlined,
 } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import { useAdminAuth } from "@/admin/admin-auth-context";
@@ -39,6 +40,13 @@ export function AdminShell() {
         key: "/admin/tenants",
         label: <Link to="/admin/tenants">{t("nav.tenants")}</Link>,
         icon: <ApartmentOutlined />,
+      });
+    }
+    if (can("credits", "view")) {
+      items.push({
+        key: "/admin/credit-orders",
+        label: <Link to="/admin/credit-orders">{t("nav.creditOrders")}</Link>,
+        icon: <DollarOutlined />,
       });
     }
     if (can("settings", "view")) {
@@ -92,6 +100,7 @@ export function AdminShell() {
     const p = location.pathname;
     if (p.startsWith("/admin/clips")) return ["/admin/clips"];
     if (p.startsWith("/admin/tenants")) return ["/admin/tenants"];
+    if (p.startsWith("/admin/credit-orders")) return ["/admin/credit-orders"];
     if (p.startsWith("/admin/users")) return ["/admin/users"];
     if (p.startsWith("/admin/roles")) return ["/admin/roles"];
     if (p.startsWith("/admin/permissions")) return ["/admin/permissions"];

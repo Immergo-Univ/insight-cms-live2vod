@@ -183,6 +183,39 @@ export function buildCreditMinutesByUseTable(opts = {}) {
 }
 
 /**
+ * Estimated credits per minute of video (per language) for each AI action on the AI page.
+ * The news article re-runs speech-to-text on the clip, so its rate includes the STT pass.
+ *
+ * @returns {{ stt: number, article: number, subtitles: number, dubbing: number }}
+ */
+export function aiServiceCreditsPerMinute() {
+  const anchor = usdPerCredit();
+  const stt = parsePositiveUsdEnv("AI_USD_PER_MIN_STT", DEFAULT_AI_USD_PER_MIN_STT);
+  const news = parsePositiveUsdEnv("AI_USD_PER_MIN_LLM_NEWS", DEFAULT_AI_USD_PER_MIN_LLM_NEWS);
+  const vtt = parsePositiveUsdEnv("AI_USD_PER_MIN_VTT_PER_LANG", DEFAULT_AI_USD_PER_MIN_VTT_PER_LANG);
+  const dub = parsePositiveUsdEnv("AI_USD_PER_MIN_DUBBING_PER_LANG", DEFAULT_AI_USD_PER_MIN_DUBBING_PER_LANG);
+  const perMin = (usd) => Math.round((usd / anchor) * 100) / 100;
+  return {
+    stt: perMin(stt),
+    article: perMin(stt + news),
+    subtitles: perMin(stt + vtt),
+    dubbing: perMin(stt + dub),
+  };
+}
+
+/**
+ * Whole credits for one language of an AI action over `durationSec` of video.
+ *
+ * @param {number} creditsPerMinute
+ * @param {number} durationSec
+ * @returns {number}
+ */
+export function estimateAiActionCredits(creditsPerMinute, durationSec) {
+  const minutes = Math.max(0, safeNumber(durationSec)) / 60;
+  return ceilCredits(safeNumber(creditsPerMinute) * minutes);
+}
+
+/**
  * @param {number} characters
  * @returns {number}
  */

@@ -45,12 +45,23 @@ Parámetro opcional común:
 | Live2VOD (dashboard principal) | `/` | `tenantId` (req), `tz` (opt) | `app-new-live2vod` (`NewLive2vodComponent`) |
 | Editor Live2VOD (clipping con marcadores de ADs) | `/editor` | `tenantId` (req), `tz` (opt) | navegación interna desde `/` |
 | VOD Editor (clipping sin ADs, sobre un VOD existente) | `/vod-editor` | `tenantId` (req), `src` (req), `tz` (opt) | `app-vod-editor-iframe` (`VodEditorIframeComponent`) |
-| VOD por GUID | `/vod/:vod_guid` | `tenantId` (req) en query; `:vod_guid` en path | — (acceso directo / deep link) |
+| VOD por GUID (AI Content: "AI on this clip") | `/vod/:vod_guid` | `tenantId` (req) en query; `:vod_guid` en path; `lang` (opt, `en`/`es`) | — (acceso directo / deep link) |
 | Processing Clips (estado de encodes) | `/processing-clips` | `tenantId` (req), `tz` (opt) | navegación interna |
 | Social Media (sindicación) | `/social-media` | `tenantId` (req), `tz` (opt) | vista nueva (ver `docs/syndication_new_design.md`) |
 
 > La consola de administración vive en `/admin/*` pero es una app standalone
 > aparte (no es una vista embebida por entidad), por eso no se lista arriba.
+
+### AI Content (`/vod/:vod_guid`) y órdenes de créditos
+
+- Speech-to-text y News article se ejecutan sobre el VOD existente
+  (`POST /api/vod/by-guid/:vodGuid/ai-runs`); el resultado se mergea en Insight al completar.
+  Subtitles y Audio dubbing muestran resultados existentes (Run "Coming soon").
+- "Buy credits" crea una **orden de compra pendiente** (`POST /api/ai-credits/orders`).
+  Los créditos se otorgan solo cuando un admin la aprueba en `/admin/credit-orders`
+  (permiso `credits.*`).
+- Variables de entorno opcionales (backend): `CREDIT_PACKS_JSON`, `CREDIT_SALE_USD_VALUE`
+  (default `0.005`), `CREDIT_CUSTOM_MIN` (default `20000`), `CREDIT_SALES_EMAIL`.
 
 ### Detalle del parámetro `src` (solo `/vod-editor`)
 

@@ -728,9 +728,10 @@ export async function getTwitterAccessTokenForTenant(tenantId) {
  * @param {string} opts.tenantId
  * @param {string} opts.videoUrl HTTP(S) URL to MP4
  * @param {string} opts.text Tweet text (max 280 chars for legacy length)
+ * @param {"following"|"mentionedUsers"} [opts.replySettings] Omit to let everyone reply
  */
 export async function uploadVideoToTwitter(opts) {
-  const { tenantId, accountId, videoUrl, text } = opts;
+  const { tenantId, accountId, videoUrl, text, replySettings } = opts;
   const aid = accountId
     ? String(accountId).trim()
     : (await getActiveAccountsForPublish(tenantId, "twitter"))[0]?.get("id");
@@ -834,7 +835,11 @@ export async function uploadVideoToTwitter(opts) {
       "Content-Type": "application/json",
       Authorization: `Bearer ${access}`,
     },
-    body: JSON.stringify({ text: tweetText, media: { media_ids: [String(mediaId)] } }),
+    body: JSON.stringify({
+      text: tweetText,
+      media: { media_ids: [String(mediaId)] },
+      ...(replySettings === "following" || replySettings === "mentionedUsers" ? { reply_settings: replySettings } : {}),
+    }),
   });
   const twJson = await twRes.json().catch(() => ({}));
   if (!twRes.ok) {
@@ -1674,9 +1679,10 @@ async function waitForInstagramContainerReady(creationId, pageAccessToken) {
  * @param {string} opts.videoUrl HTTP(S) URL to MP4 (must be reachable by Meta)
  * @param {string} opts.caption
  * @param {"reels"|"feed"} opts.mediaType
+ * @param {boolean} [opts.shareToFeed] Reels only: also show the Reel in the profile grid
  */
 export async function uploadVideoToInstagram(opts) {
-  const { tenantId, accountId, videoUrl, caption, mediaType = "reels" } = opts;
+  const { tenantId, accountId, videoUrl, caption, mediaType = "reels", shareToFeed = true } = opts;
   const aid = accountId
     ? String(accountId).trim()
     : (await getActiveAccountsForPublish(tenantId, "instagram"))[0]?.get("id");
@@ -1699,7 +1705,7 @@ export async function uploadVideoToInstagram(opts) {
   });
   if (mt === "reels") {
     body.set("media_type", "REELS");
-    body.set("share_to_feed", "true");
+    body.set("share_to_feed", shareToFeed === false ? "false" : "true");
   } else {
     body.set("media_type", "VIDEO");
   }
@@ -2112,6 +2118,7 @@ async function waitForTiktokPublishComplete(publishId, accessToken) {
  * @param {boolean} [opts.disableStitch]
  * @param {boolean} [opts.brandContentToggle]
  * @param {boolean} [opts.brandOrganicToggle]
+ * @param {boolean} [opts.isAigc] Label the post as AI-generated content
  */
 export async function uploadVideoToTiktok(opts) {
   const {
@@ -2126,6 +2133,7 @@ export async function uploadVideoToTiktok(opts) {
     disableStitch = false,
     brandContentToggle = false,
     brandOrganicToggle = false,
+    isAigc = false,
   } = opts;
 
   const aid = accountId
@@ -2169,6 +2177,7 @@ export async function uploadVideoToTiktok(opts) {
       disable_stitch: strictMode ? true : Boolean(disableStitch) || creator.stitch_disabled === true,
       brand_content_toggle: strictMode ? false : Boolean(brandContentToggle),
       brand_organic_toggle: strictMode ? false : Boolean(brandOrganicToggle),
+      ...(isAigc ? { is_aigc: true } : {}),
     },
     source_info: {
       source: "PULL_FROM_URL",

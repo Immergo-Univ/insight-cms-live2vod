@@ -12,6 +12,7 @@ import {
   pgListJobsForTenant,
   pgCountActiveJobsForTenant,
   pgFindJobByVodGuid,
+  pgListAiRunJobsForVod,
   pgUpdateJob,
   pgMergeEditorSpec,
 } from "./vod-jobs-pg.repository.js";
@@ -121,6 +122,27 @@ export async function findJobByVodGuid(tenantId, vodGuid) {
     if (!best || job.createdAt > best.createdAt) best = job;
   }
   return best;
+}
+
+/**
+ * Newest AI-page runs for a VOD (jobs whose editorSpec.__aiRun.vodGuid matches).
+ * @param {string} tenantId
+ * @param {string} vodGuid
+ * @param {number} [limit]
+ * @returns {Promise<VodJob[]>}
+ */
+export async function listAiRunJobsForVod(tenantId, vodGuid, limit = 20) {
+  const guid = String(vodGuid || "").trim();
+  if (!tenantId || !guid) return [];
+  if (usePg()) return /** @type {Promise<VodJob[]>} */ (pgListAiRunJobsForVod(tenantId, guid, limit));
+  const list = [];
+  for (const job of jobsById.values()) {
+    if (job.tenantId !== tenantId) continue;
+    const run = job.editorSpec && typeof job.editorSpec === "object" ? job.editorSpec.__aiRun : null;
+    if (run && typeof run === "object" && String(run.vodGuid || "") === guid) list.push(job);
+  }
+  list.sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
+  return list.slice(0, limit);
 }
 
 /**

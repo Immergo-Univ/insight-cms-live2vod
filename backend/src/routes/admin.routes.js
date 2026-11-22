@@ -11,6 +11,7 @@ import * as adminTenants from "../services/admin-tenant.service.js";
 import * as adminStreams from "../services/admin-stream.service.js";
 import * as appSettings from "../services/admin-settings.service.js";
 import * as adRecognitionConfig from "../services/ad-recognition-config.service.js";
+import * as creditOrders from "../services/credit-purchase-orders.service.js";
 import { purgeChannelAdMarkers } from "../services/ad-recognition.service.js";
 import { isSequelizeReady } from "../db/sequelize.js";
 
@@ -491,6 +492,105 @@ adminSecured.get("/clips/:id", requireAdminPermission("clips", "view"), async (r
     res.json(row);
   } catch (e) {
     res.status(500).json({ error: e instanceof Error ? e.message : String(e) });
+  }
+});
+
+// ---- Credit purchase orders (requested from the AI page, granted on approval) -------------
+/**
+ * @param {import("express").Response} res
+ * @param {unknown} e
+ * @param {number} [fallback]
+ */
+function sendCreditOrderError(res, e, fallback = 400) {
+  const status = e && typeof e === "object" && "status" in e ? Number(/** @type {{ status?: number }} */ (e).status) : 0;
+  const code = e && typeof e === "object" && "code" in e ? String(/** @type {{ code?: string }} */ (e).code || "") : "";
+  res.status(status || fallback).json({
+    error: e instanceof Error ? e.message : String(e),
+    ...(code ? { code } : {}),
+  });
+}
+
+adminSecured.get("/credit-orders", requireAdminPermission("credits", "view"), async (req, res) => {
+  try {
+    res.json(
+      await creditOrders.adminListOrders({
+        status: String(req.query.status || "").trim() || undefined,
+        kind: String(req.query.kind || "").trim() || undefined,
+        tenantId: String(req.query.tenantId || "").trim() || undefined,
+        page: parseInt(String(req.query.page || "1"), 10),
+        pageSize: parseInt(String(req.query.pageSize || "20"), 10),
+      }),
+    );
+  } catch (e) {
+    sendCreditOrderError(res, e, 500);
+  }
+});
+
+adminSecured.get("/credit-orders/catalog", requireAdminPermission("credits", "view"), async (_req, res) => {
+  try {
+    res.json(creditOrders.getCreditCatalog());
+  } catch (e) {
+    sendCreditOrderError(res, e, 500);
+  }
+});
+
+adminSecured.get("/credit-orders/:id", requireAdminPermission("credits", "view"), async (req, res) => {
+  try {
+    const row = await creditOrders.adminGetOrder(req.params.id);
+    if (!row) return res.status(404).json({ error: "Not found" });
+    res.json(row);
+  } catch (e) {
+    sendCreditOrderError(res, e, 500);
+  }
+});
+
+adminSecured.post("/credit-orders", requireAdminPermission("credits", "create"), async (req, res) => {
+  try {
+    res.status(201).json(await creditOrders.adminCreateOrder(req.body || {}, req.adminUserId));
+  } catch (e) {
+    sendCreditOrderError(res, e);
+  }
+});
+
+adminSecured.patch("/credit-orders/:id", requireAdminPermission("credits", "edit"), async (req, res) => {
+  try {
+    const row = await creditOrders.adminUpdateOrder(req.params.id, req.body || {});
+    if (!row) return res.status(404).json({ error: "Not found" });
+    res.json(row);
+  } catch (e) {
+    sendCreditOrderError(res, e);
+  }
+});
+
+adminSecured.post("/credit-orders/:id/approve", requireAdminPermission("credits", "edit"), async (req, res) => {
+  try {
+    const row = await creditOrders.adminApproveOrder(req.params.id, req.adminUserId, {
+      adminNotes: req.body?.adminNotes,
+    });
+    if (!row) return res.status(404).json({ error: "Not found" });
+    res.json(row);
+  } catch (e) {
+    sendCreditOrderError(res, e);
+  }
+});
+
+adminSecured.post("/credit-orders/:id/reject", requireAdminPermission("credits", "edit"), async (req, res) => {
+  try {
+    const row = await creditOrders.adminRejectOrder(req.params.id, req.adminUserId, { reason: req.body?.reason });
+    if (!row) return res.status(404).json({ error: "Not found" });
+    res.json(row);
+  } catch (e) {
+    sendCreditOrderError(res, e);
+  }
+});
+
+adminSecured.delete("/credit-orders/:id", requireAdminPermission("credits", "delete"), async (req, res) => {
+  try {
+    const ok = await creditOrders.adminDeleteOrder(req.params.id);
+    if (!ok) return res.status(404).json({ error: "Not found" });
+    res.json({ ok: true });
+  } catch (e) {
+    sendCreditOrderError(res, e);
   }
 });
 

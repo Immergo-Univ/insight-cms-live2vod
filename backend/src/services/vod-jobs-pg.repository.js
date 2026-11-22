@@ -168,6 +168,31 @@ export async function pgFindJobByVodGuid(tenantId, vodGuid) {
 }
 
 /**
+ * Newest AI-page runs (transcribe-only jobs tagged with editor_spec.__aiRun.vodGuid) for a VOD.
+ *
+ * @param {string} tenantId
+ * @param {string} vodGuid
+ * @param {number} [limit]
+ * @returns {Promise<object[]>}
+ */
+export async function pgListAiRunJobsForVod(tenantId, vodGuid, limit = 20) {
+  const guid = String(vodGuid || "").trim();
+  if (!tenantId || !guid) return [];
+  const VodJob = getVodJobModel();
+  const sequelize = VodJob.sequelize;
+  if (!sequelize) return [];
+  const rows = await VodJob.findAll({
+    where: {
+      tenantId,
+      [Op.and]: [sequelize.literal(`editor_spec->'__aiRun'->>'vodGuid' = ${sequelize.escape(guid)}`)],
+    },
+    order: [["createdAt", "DESC"]],
+    limit,
+  });
+  return rows.map((r) => modelToJob(r));
+}
+
+/**
  * @param {string} tenantId
  */
 export async function pgCountActiveJobsForTenant(tenantId) {

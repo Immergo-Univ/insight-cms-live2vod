@@ -34,7 +34,7 @@ export const SYNDICATION_PLATFORM_META: Record<SyndicationPlatform, PlatformMeta
     glyph: "▶",
     iconBg: "#e1251b",
     connectDescription: "Channel, with Content ID if linked to a CMS",
-    permissions: ["Upload videos and thumbnails", "Add captions and playlists", "Read channel details"],
+    permissions: ["Upload videos to the channel"],
   },
   facebook: {
     label: "Facebook",
@@ -42,7 +42,7 @@ export const SYNDICATION_PLATFORM_META: Record<SyndicationPlatform, PlatformMeta
     glyph: "f",
     iconBg: "#1877f2",
     connectDescription: "Pages you manage",
-    permissions: ["Post videos and Reels to your pages", "Read page names and pictures"],
+    permissions: ["Post videos to your pages", "Read page names and pictures"],
   },
   instagram: {
     label: "Instagram",
@@ -50,7 +50,7 @@ export const SYNDICATION_PLATFORM_META: Record<SyndicationPlatform, PlatformMeta
     glyph: "IG",
     iconBg: "#c1358a",
     connectDescription: "Business or creator accounts linked to a page",
-    permissions: ["Post Reels and Stories to linked Instagram accounts", "Read account details"],
+    permissions: ["Post Reels and feed videos to linked Instagram accounts", "Read account details"],
   },
   twitter: {
     label: "X (Twitter)",
@@ -58,7 +58,7 @@ export const SYNDICATION_PLATFORM_META: Record<SyndicationPlatform, PlatformMeta
     glyph: "X",
     iconBg: "#14171a",
     connectDescription: "One X account per connection",
-    permissions: ["Post and reply for this account", "Upload videos", "Read profile details"],
+    permissions: ["Post for this account", "Upload videos", "Read profile details"],
   },
   tiktok: {
     label: "TikTok",
@@ -66,15 +66,36 @@ export const SYNDICATION_PLATFORM_META: Record<SyndicationPlatform, PlatformMeta
     glyph: "TT",
     iconBg: "#111111",
     connectDescription: "Business or creator accounts",
-    permissions: ["Post videos or send drafts to the app", "Read profile details"],
+    permissions: ["Post videos directly to the account", "Read profile details"],
   },
 };
 
-/** A single configurable field inside a settings card. */
+/**
+ * A single configurable field inside a settings card. The field `id` is the key stored by the
+ * backend. For `select` / `segment`, `values[i]` is the stored value for `options[i]`; without
+ * `values` the option label itself is stored.
+ */
 export type SyndField =
   | { kind: "info"; label: string; value: string; help?: string }
-  | { kind: "select"; id: string; label: string; options: string[]; default: string; help?: string }
-  | { kind: "segment"; id: string; label: string; options: string[]; default: string; help?: string }
+  | {
+      kind: "select";
+      id: string;
+      label: string;
+      options: string[];
+      values?: (string | boolean)[];
+      default: string;
+      help?: string;
+      disabled?: boolean;
+    }
+  | {
+      kind: "segment";
+      id: string;
+      label: string;
+      options: string[];
+      values?: (string | boolean)[];
+      default: string;
+      help?: string;
+    }
   | { kind: "toggle"; id: string; label: string; default: boolean; help?: string }
   | { kind: "text"; id: string; label: string; default: string; help?: string; placeholder?: string }
   | { kind: "textarea"; id: string; label: string; default: string; help?: string; tokens?: string[] }
@@ -94,305 +115,194 @@ export type SyndicationAccountLike = {
   id: string;
   displayName: string;
   platform: SyndicationPlatform;
-  /** Best-effort language hint; defaults to "All languages". */
-  language?: string;
 };
 
-const LANGS = ["Arabic", "English", "Hebrew", "French", "Spanish"];
+const TEMPLATE_TOKENS = ["{title}", "{short_description}", "{long_description}"];
+const TOKEN_HELP = "{title} and {short_description} are filled from the clip.";
 
-function generalCard(account: SyndicationAccountLike): SyndCard {
+function textTemplateField(id: string, label: string, defaultValue: string, help?: string): SyndField {
   return {
-    id: "general",
-    title: "General",
-    subtitle: "Who can post here and how it shows in the CMS",
-    fields: [
-      {
-        kind: "text",
-        id: "display",
-        label: "Name in the CMS",
-        default: account.displayName,
-        help: "What editors see in the Syndication tab",
-      },
-      {
-        kind: "select",
-        id: "lang",
-        label: "Account language",
-        options: [...LANGS, "All languages"],
-        default: account.language || "All languages",
-        help: "Suggests this account for clips in this language",
-      },
-      {
-        kind: "chips",
-        id: "who",
-        label: "Who can post",
-        default: [],
-        help: "User groups that can choose this account",
-        placeholder: "Add group…",
-      },
-      {
-        kind: "toggle",
-        id: "approval",
-        label: "Approval before posting",
-        default: account.platform === "youtube",
-        help: "Posts wait in “Pending approval” until an editor approves them",
-      },
-      { kind: "toggle", id: "active", label: "Show in the Syndication tab", default: true },
-      { kind: "toggle", id: "alerts", label: "Email the team if a post fails", default: true },
-    ],
-  };
-}
-
-function mediaCard(account: SyndicationAccountLike): SyndCard {
-  const k = account.platform;
-  const ratioOpts: Record<SyndicationPlatform, string[]> = {
-    youtube: ["Keep original", "16:9", "9:16 (Shorts)"],
-    facebook: ["Keep original", "4:5", "1:1", "9:16"],
-    instagram: ["Keep original", "4:5", "1:1", "9:16"],
-    twitter: ["Keep original", "16:9", "1:1"],
-    tiktok: ["9:16", "Keep original"],
-  };
-  const ratioDef =
-    k === "facebook" || k === "instagram" ? "4:5" : k === "tiktok" ? "9:16" : "Keep original";
-  const subOpts =
-    k === "tiktok"
-      ? ["Burn into the video", "Don’t add"]
-      : ["Upload as a captions file", "Burn into the video", "Don’t add"];
-  const subLang = [`Same as the account (${account.language || "account"})`, ...LANGS];
-
-  return {
-    id: "media",
-    title: "Video and image",
-    subtitle: "What we send with every post",
-    fields: [
-      {
-        kind: "select",
-        id: "video",
-        label: "Video to send",
-        options: ["Default video element", "Highest-quality MP4", "Choose in every post"],
-        default: "Default video element",
-      },
-      { kind: "segment", id: "ratio", label: "Aspect ratio", options: ratioOpts[k], default: ratioDef },
-      {
-        kind: "select",
-        id: "crop",
-        label: "If the clip has another ratio",
-        options: ["Smart crop (keeps faces in frame)", "Center crop", "Add blurred bars"],
-        default: "Smart crop (keeps faces in frame)",
-      },
-      { kind: "select", id: "subs", label: "Subtitles", options: subOpts, default: subOpts[0] },
-      { kind: "select", id: "subLang", label: "Subtitle language", options: subLang, default: subLang[0] },
-      {
-        kind: "select",
-        id: "logo",
-        label: "Logo on the video",
-        options: ["No logo", "Logo · top right", "Logo · bottom left"],
-        default: k === "tiktok" ? "Logo · top right" : "No logo",
-      },
-      {
-        kind: "select",
-        id: "thumb",
-        label: k === "tiktok" ? "Cover" : "Thumbnail",
-        options:
-          k === "tiktok"
-            ? ["Frame at 1 second", "Choose a frame in every post"]
-            : ["Clip default image", "Choose in every post"],
-        default: k === "tiktok" ? "Frame at 1 second" : "Clip default image",
-      },
-    ],
-  };
-}
-
-function templateCard(account: SyndicationAccountLike): SyndCard {
-  const k = account.platform;
-  const tokens = ["{title}", "{short_description}", "{long_description}", "{program}", "{link}"];
-  const fields: SyndField[] = [];
-  if (k === "youtube" || k === "facebook" || k === "instagram") {
-    fields.push({
-      kind: "textarea",
-      id: "tTitle",
-      label: "Title",
-      default: "{title}",
-      help: "Used where the platform has a title field",
-      tokens: tokens.slice(0, 2),
-    });
-  }
-  fields.push({
     kind: "textarea",
-    id: "tMsg",
-    label: k === "youtube" ? "Description" : k === "twitter" ? "Post text" : "Caption",
-    default: k === "twitter" ? "{title}\n{link}" : "{short_description}\n\n{link}",
-    help: "Filled in automatically. Editors can change it per post.",
-    tokens,
-  });
-  fields.push({
-    kind: "chips",
-    id: "tags",
-    label: k === "youtube" ? "Tags" : "Hashtags",
-    default: k === "youtube" ? ["News"] : ["#News"],
-    help: k === "youtube" ? "Added to every upload" : "Added at the end of the text",
-    placeholder: "Add…",
-  });
-  fields.push({
-    kind: "toggle",
-    id: "link",
-    label: "Add a link to the clip page",
-    default: k !== "tiktok",
-    help: k === "tiktok" ? "TikTok doesn’t make links in captions clickable" : undefined,
-  });
-  fields.push({
-    kind: "text",
-    id: "utm",
-    label: "Link tracking (UTM)",
-    default: "utm_source={network}&utm_medium=social",
-    help: "Added to every link",
-  });
-  return { id: "template", title: "Post template", subtitle: "The default text of every post", fields };
+    id,
+    label,
+    default: defaultValue,
+    help: help ? `${help} ${TOKEN_HELP}` : TOKEN_HELP,
+    tokens: TEMPLATE_TOKENS,
+  };
 }
 
-function platformCards(account: SyndicationAccountLike): SyndCard[] {
-  const k = account.platform;
-  if (k === "youtube") {
-    return [
-      {
-        id: "yt",
-        title: "YouTube settings",
-        subtitle: `Channel: ${account.displayName}`,
-        platform: "youtube",
-        fields: [
-          { kind: "segment", id: "privacy", label: "Visibility", options: ["Public", "Unlisted", "Private"], default: "Private" },
-          {
-            kind: "select",
-            id: "category",
-            label: "Category",
-            options: ["News & Politics", "Entertainment", "Education", "Sports", "People & Blogs"],
-            default: "News & Politics",
-          },
-          {
-            kind: "segment",
-            id: "kids",
-            label: "Audience",
-            options: ["Not made for kids", "Made for kids"],
-            default: "Not made for kids",
-            help: "Required by YouTube for every video",
-          },
-          { kind: "select", id: "vlang", label: "Video language", options: LANGS, default: account.language || LANGS[0] },
-          {
-            kind: "select",
-            id: "license",
-            label: "License",
-            options: ["Standard YouTube License", "Creative Commons – Attribution"],
-            default: "Standard YouTube License",
-          },
-          {
-            kind: "select",
-            id: "comments",
-            label: "Comments",
-            options: ["Allow all", "Hold possibly inappropriate for review", "Hold all for review", "Off"],
-            default: "Hold possibly inappropriate for review",
-          },
-          { kind: "toggle", id: "notify", label: "Notify subscribers", default: true },
-          { kind: "toggle", id: "embed", label: "Allow embedding", default: true },
-          {
-            kind: "toggle",
-            id: "shorts",
-            label: "Vertical clips as Shorts",
-            default: true,
-            help: "Vertical clips up to 3 minutes go out as Shorts",
-          },
-        ],
-      },
-    ];
-  }
-  if (k === "facebook") {
-    return [
-      {
-        id: "fb",
-        title: "Facebook settings",
-        subtitle: `Page: ${account.displayName}`,
-        platform: "facebook",
-        fields: [
-          {
-            kind: "segment",
-            id: "fbAs",
-            label: "Post as",
-            options: ["Video", "Reel", "Choose by ratio"],
-            default: "Choose by ratio",
-            help: "Vertical clips go out as Reels, others as videos",
-          },
-          {
-            kind: "select",
-            id: "geo",
-            label: "Countries",
-            options: ["Everyone", "Only selected countries", "Everyone except selected countries"],
-            default: "Everyone",
-          },
-          { kind: "select", id: "age", label: "Age limit", options: ["None", "17+", "18+", "21+"], default: "None" },
-          { kind: "toggle", id: "fbComments", label: "Allow comments", default: true },
-          { kind: "toggle", id: "crosspost", label: "Let other pages crosspost", default: true },
-          { kind: "toggle", id: "fbEmbed", label: "Allow embedding", default: true },
-        ],
-      },
-    ];
-  }
-  if (k === "instagram") {
-    return [
-      {
-        id: "ig",
-        title: "Instagram settings",
-        subtitle: `Account: ${account.displayName}`,
-        platform: "instagram",
-        fields: [
-          { kind: "segment", id: "igAs", label: "Post as", options: ["Reel", "Story"], default: "Reel" },
-          { kind: "toggle", id: "igFeed", label: "Show the Reel in the profile grid", default: true },
-          {
-            kind: "chips",
-            id: "collab",
-            label: "Collaborators",
-            default: [],
-            help: "Up to 3 accounts, they must accept",
-            placeholder: "Add account…",
-          },
-          { kind: "text", id: "loc", label: "Location tag", default: "", placeholder: "No location" },
-          { kind: "toggle", id: "igComments", label: "Allow comments", default: true },
-        ],
-      },
-    ];
-  }
-  if (k === "twitter") {
-    return [
-      {
-        id: "x",
-        title: "X settings",
-        subtitle: `Account: ${account.displayName}`,
-        platform: "twitter",
-        fields: [
-          {
-            kind: "segment",
-            id: "reply",
-            label: "Who can reply",
-            options: ["Everyone", "Accounts we follow", "Only mentioned", "Verified"],
-            default: "Everyone",
-          },
-          {
-            kind: "segment",
-            id: "long",
-            label: "Text over 280 characters",
-            options: ["Cut with …", "Continue in a thread", "Don’t post"],
-            default: "Continue in a thread",
-          },
-          {
-            kind: "toggle",
-            id: "linkReply",
-            label: "Put the link in the first reply",
-            default: false,
-            help: "Posts with a link in the text often reach fewer people",
-          },
-          { kind: "toggle", id: "sensitive", label: "Mark media as sensitive", default: false },
-        ],
-      },
-    ];
-  }
-  // tiktok
+function hashtagsField(): SyndField {
+  return {
+    kind: "chips",
+    id: "hashtags",
+    label: "Hashtags",
+    default: [],
+    help: "Added at the end of the text",
+    placeholder: "Add…",
+  };
+}
+
+function youtubeCards(account: SyndicationAccountLike): SyndCard[] {
+  return [
+    {
+      id: "yt",
+      title: "YouTube settings",
+      subtitle: `Channel: ${account.displayName}`,
+      platform: "youtube",
+      fields: [
+        {
+          kind: "segment",
+          id: "privacyStatus",
+          label: "Visibility",
+          options: ["Public", "Unlisted", "Private"],
+          values: ["public", "unlisted", "private"],
+          default: "Private",
+        },
+        {
+          kind: "select",
+          id: "categoryId",
+          label: "Category",
+          options: ["News & Politics", "Entertainment", "Education", "Sports", "People & Blogs"],
+          values: ["25", "24", "27", "17", "22"],
+          default: "News & Politics",
+        },
+        {
+          kind: "segment",
+          id: "selfDeclaredMadeForKids",
+          label: "Audience",
+          options: ["Not made for kids", "Made for kids"],
+          values: [false, true],
+          default: "Not made for kids",
+          help: "Required by YouTube for every video",
+        },
+        {
+          kind: "select",
+          id: "defaultLanguage",
+          label: "Video language",
+          options: ["Arabic", "English", "Hebrew", "French", "Spanish"],
+          values: ["ar", "en", "he", "fr", "es"],
+          default: "English",
+        },
+        {
+          kind: "select",
+          id: "license",
+          label: "License",
+          options: ["Standard YouTube License", "Creative Commons – Attribution"],
+          values: ["youtube", "creativeCommon"],
+          default: "Standard YouTube License",
+        },
+        { kind: "toggle", id: "notifySubscribers", label: "Notify subscribers", default: true },
+        { kind: "toggle", id: "embeddable", label: "Allow embedding", default: true },
+        {
+          kind: "toggle",
+          id: "publicStatsViewable",
+          label: "Public statistics",
+          default: true,
+          help: "Extended statistics on the watch page",
+        },
+      ],
+    },
+    {
+      id: "template",
+      title: "Post template",
+      subtitle: "Default title, description and tags sent with every upload",
+      fields: [
+        textTemplateField("titleTemplate", "Title", "{title}"),
+        textTemplateField("descriptionTemplate", "Description", "{short_description}"),
+        {
+          kind: "chips",
+          id: "tags",
+          label: "Tags",
+          default: ["News"],
+          help: "Added to every upload, together with the clip tags",
+          placeholder: "Add…",
+        },
+      ],
+    },
+  ];
+}
+
+function facebookCards(account: SyndicationAccountLike): SyndCard[] {
+  return [
+    {
+      id: "template",
+      title: "Post template",
+      subtitle: `Page: ${account.displayName}`,
+      platform: "facebook",
+      fields: [
+        textTemplateField("titleTemplate", "Title", "{title}"),
+        textTemplateField("descriptionTemplate", "Description", "{short_description}"),
+        hashtagsField(),
+      ],
+    },
+  ];
+}
+
+function instagramCards(account: SyndicationAccountLike): SyndCard[] {
+  return [
+    {
+      id: "ig",
+      title: "Instagram settings",
+      subtitle: `Account: ${account.displayName}`,
+      platform: "instagram",
+      fields: [
+        {
+          kind: "segment",
+          id: "mediaType",
+          label: "Post as",
+          options: ["Reel", "Feed video"],
+          values: ["reels", "feed"],
+          default: "Reel",
+        },
+        {
+          kind: "toggle",
+          id: "shareToFeed",
+          label: "Show the Reel in the profile grid",
+          default: true,
+          help: "Only applies to Reels",
+        },
+      ],
+    },
+    {
+      id: "template",
+      title: "Post template",
+      subtitle: "Default caption of every post",
+      fields: [textTemplateField("captionTemplate", "Caption", "{title}\n\n{short_description}"), hashtagsField()],
+    },
+  ];
+}
+
+function twitterCards(account: SyndicationAccountLike): SyndCard[] {
+  return [
+    {
+      id: "x",
+      title: "X settings",
+      subtitle: `Account: ${account.displayName}`,
+      platform: "twitter",
+      fields: [
+        {
+          kind: "segment",
+          id: "replySettings",
+          label: "Who can reply",
+          options: ["Everyone", "Accounts you follow", "Only mentioned accounts"],
+          values: ["everyone", "following", "mentionedUsers"],
+          default: "Everyone",
+        },
+      ],
+    },
+    {
+      id: "template",
+      title: "Post template",
+      subtitle: "Default text of every post",
+      fields: [
+        textTemplateField("textTemplate", "Post text", "{title}", "Cut to 280 characters."),
+        hashtagsField(),
+      ],
+    },
+  ];
+}
+
+function tiktokCards(account: SyndicationAccountLike): SyndCard[] {
   return [
     {
       id: "tt",
@@ -402,59 +312,57 @@ function platformCards(account: SyndicationAccountLike): SyndCard[] {
       fields: [
         {
           kind: "segment",
-          id: "ttMode",
-          label: "Send as",
-          options: ["Post directly", "Draft in the TikTok app"],
-          default: "Post directly",
-          help: "A draft waits in the TikTok inbox to be finished on the phone",
-        },
-        {
-          kind: "segment",
-          id: "ttPriv",
+          id: "privacyLevel",
           label: "Who can watch",
           options: ["Everyone", "Followers", "Friends", "Only me"],
+          values: ["PUBLIC_TO_EVERYONE", "FOLLOWER_OF_CREATOR", "MUTUAL_FOLLOW_FRIENDS", "SELF_ONLY"],
           default: "Only me",
+          help: "Unaudited TikTok apps can only post as Only me",
         },
-        { kind: "toggle", id: "ttComments", label: "Allow comments", default: true },
-        { kind: "toggle", id: "duet", label: "Allow Duet", default: true },
-        { kind: "toggle", id: "stitch", label: "Allow Stitch", default: true },
+        { kind: "toggle", id: "allowComments", label: "Allow comments", default: true },
+        { kind: "toggle", id: "allowDuet", label: "Allow Duet", default: true },
+        { kind: "toggle", id: "allowStitch", label: "Allow Stitch", default: true },
         {
           kind: "segment",
-          id: "disclose",
+          id: "disclosure",
           label: "Content disclosure",
           options: ["None", "Your brand", "Branded content"],
+          values: ["none", "your_brand", "branded_content"],
           default: "None",
           help: "Required by TikTok for promotional posts",
         },
         {
           kind: "toggle",
-          id: "aiLabel",
+          id: "aiGenerated",
           label: "AI-generated content label",
           default: false,
           help: "Turn on for posts with AI dubbing",
         },
       ],
     },
+    {
+      id: "template",
+      title: "Post template",
+      subtitle: "Default caption of every post",
+      fields: [textTemplateField("captionTemplate", "Caption", "{title}\n\n{short_description}"), hashtagsField()],
+    },
   ];
 }
 
-function limitsCard(platform: SyndicationPlatform): SyndCard | null {
-  const LIM: Partial<Record<SyndicationPlatform, [string, string][]>> = {
+function limitsCard(platform: SyndicationPlatform): SyndCard {
+  const LIM: Record<SyndicationPlatform, [string, string][]> = {
     youtube: [
       ["Video", "Up to 256 GB or 12 hours"],
       ["Title", "100 characters"],
       ["Description", "5,000 characters"],
-      ["Shorts", "Vertical, up to 3 minutes"],
     ],
     facebook: [
-      ["Facebook text", "63,206 characters"],
-      ["Facebook Reels", "3 to 90 seconds"],
-      ["Best ratio", "4:5 feed, 9:16 Reels"],
+      ["Title", "255 characters"],
+      ["Description", "5,000 characters"],
     ],
     instagram: [
-      ["Instagram caption", "2,200 characters, 30 hashtags"],
-      ["Instagram Reels", "3 seconds to 15 minutes"],
-      ["Best ratio", "9:16 Reels"],
+      ["Caption", "2,200 characters, 30 hashtags"],
+      ["Reels", "3 seconds to 15 minutes"],
     ],
     twitter: [
       ["Text", "280 characters"],
@@ -463,35 +371,67 @@ function limitsCard(platform: SyndicationPlatform): SyndCard | null {
     tiktok: [
       ["Caption", "2,200 characters"],
       ["Video", "3 seconds to 10 minutes"],
-      ["Best ratio", "9:16"],
     ],
   };
-  const rows = LIM[platform];
-  if (!rows) return null;
   return {
     id: "limits",
     title: "Platform limits",
-    subtitle: "We check these before posting",
+    subtitle: "Longer text is cut before posting",
     note: "Limits come from each platform and can change.",
-    fields: rows.map(([label, value]) => ({ kind: "info", label, value }) as SyndField),
+    fields: LIM[platform].map(([label, value]) => ({ kind: "info", label, value }) as SyndField),
   };
 }
 
 /** Build the two-column card layout for an account's default settings. */
 export function buildAccountCards(account: SyndicationAccountLike): { left: SyndCard[]; right: SyndCard[] } {
-  const left: SyndCard[] = [...platformCards(account), templateCard(account)];
-  const limits = limitsCard(account.platform);
-  const right: SyndCard[] = [generalCard(account), mediaCard(account), ...(limits ? [limits] : [])];
-  return { left, right };
+  const builders: Record<SyndicationPlatform, (a: SyndicationAccountLike) => SyndCard[]> = {
+    youtube: youtubeCards,
+    facebook: facebookCards,
+    instagram: instagramCards,
+    twitter: twitterCards,
+    tiktok: tiktokCards,
+  };
+  return { left: builders[account.platform](account), right: [limitsCard(account.platform)] };
+}
+
+function editableFields(cards: SyndCard[]): Exclude<SyndField, { kind: "info" }>[] {
+  return cards.flatMap((card) => card.fields).filter((f): f is Exclude<SyndField, { kind: "info" }> => f.kind !== "info");
 }
 
 /** Collect default values for all fields in a layout, keyed by field id. */
 export function collectDefaults(cards: SyndCard[]): Record<string, unknown> {
   const out: Record<string, unknown> = {};
-  for (const card of cards) {
-    for (const f of card.fields) {
-      if (f.kind === "info") continue;
+  for (const f of editableFields(cards)) out[f.id] = f.default;
+  return out;
+}
+
+/** Form draft (option labels) → settings payload stored by the backend. */
+export function draftToSettings(cards: SyndCard[], draft: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const f of editableFields(cards)) {
+    const value = draft[f.id] ?? f.default;
+    if ((f.kind === "select" || f.kind === "segment") && f.values) {
+      const index = f.options.indexOf(String(value));
+      out[f.id] = f.values[index >= 0 ? index : f.options.indexOf(f.default)];
+    } else {
+      out[f.id] = value;
+    }
+  }
+  return out;
+}
+
+/** Settings payload from the backend → form draft (option labels). */
+export function settingsToDraft(cards: SyndCard[], settings: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const f of editableFields(cards)) {
+    const stored = settings[f.id];
+    if ((f.kind === "select" || f.kind === "segment") && f.values) {
+      const index = f.values.indexOf(stored as string | boolean);
+      out[f.id] = index >= 0 ? f.options[index] : f.default;
+    } else if (stored === undefined) {
       out[f.id] = f.default;
+    } else {
+      out[f.id] = stored;
     }
   }
   return out;

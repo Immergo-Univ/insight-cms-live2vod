@@ -2,6 +2,7 @@ import { getSequelize } from "../db/sequelize.js";
 import { isVodJobsPostgresEnabled } from "./vod-jobs-pg.repository.js";
 import { getJob, mergeJobEditorSpec } from "./vod-jobs.store.js";
 import { uploadVideoToYoutube } from "./tenant-syndication.service.js";
+import { resolveYoutubePublishOptions } from "./youtube-account-settings.service.js";
 import { getActiveAccountsForPublish } from "./tenant-syndication-accounts.service.js";
 import { resolveJobSyndicationMp4Url } from "./encoder-output-url.service.js";
 import { vodEncodeStdout } from "../utils/vod-encode-log.js";
@@ -104,13 +105,7 @@ export async function tryYoutubeSyndicationAfterJobCompleted(jobId) {
   const tagsFromMeta = Array.isArray(meta.tags) ? meta.tags.map((x) => String(x)) : [];
 
   const opt = yt.options && typeof yt.options === "object" && !Array.isArray(yt.options) ? yt.options : {};
-  const title = typeof opt.titleOverride === "string" && opt.titleOverride.trim() ? opt.titleOverride.trim() : titleFromMeta;
-  const description =
-    typeof opt.descriptionOverride === "string" && opt.descriptionOverride.trim()
-      ? opt.descriptionOverride.trim()
-      : descFromMeta;
-  const tagsExtra = Array.isArray(opt.tagsExtra) ? opt.tagsExtra.map((x) => String(x)) : [];
-  const tags = [...new Set([...tagsFromMeta, ...tagsExtra])].slice(0, 30);
+  const clipMeta = { title: titleFromMeta, description: descFromMeta, tags: tagsFromMeta };
 
   const uploadsMap =
     yt.uploads && typeof yt.uploads === "object" && !Array.isArray(yt.uploads) ? yt.uploads : {};
@@ -135,26 +130,14 @@ export async function tryYoutubeSyndicationAfterJobCompleted(jobId) {
     );
 
     try {
+      const publish = resolveYoutubePublishOptions(account.get("settings"), opt, clipMeta);
       const result = await uploadVideoToYoutube({
         tenantId: job.tenantId,
         accountId,
         videoUrl,
-        snippet: {
-          title: title || "Immergo clip",
-          description: description || "",
-          tags,
-          categoryId: opt.categoryId != null ? String(opt.categoryId) : "22",
-          defaultLanguage: opt.defaultLanguage ? String(opt.defaultLanguage) : undefined,
-          defaultAudioLanguage: opt.defaultAudioLanguage ? String(opt.defaultAudioLanguage) : undefined,
-        },
-        status: {
-          privacyStatus: opt.privacyStatus === "public" || opt.privacyStatus === "unlisted" ? opt.privacyStatus : "private",
-          embeddable: opt.embeddable !== false,
-          license: opt.license === "creativeCommon" ? "creativeCommon" : "youtube",
-          publicStatsViewable: opt.publicStatsViewable !== false,
-          selfDeclaredMadeForKids: Boolean(opt.selfDeclaredMadeForKids),
-        },
-        notifySubscribers: Boolean(opt.notifySubscribers),
+        snippet: publish.snippet,
+        status: publish.status,
+        notifySubscribers: publish.notifySubscribers,
       });
 
       await mergeJobEditorSpec(jobId, (prev) =>

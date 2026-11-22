@@ -18,6 +18,7 @@ import {
   mapInsightTranscriptToJobFields,
 } from "../services/insight-vod.service.js";
 import { assertTenantHasCredits } from "../services/tenant-credits.service.js";
+import { getAiRunOptions, listAiRunsForVod, startAiRun } from "../services/vod-ai-runs.service.js";
 import { getRequestTenantId } from "../utils/tenant-cipher.js";
 
 export const vodRouter = Router();
@@ -235,6 +236,62 @@ vodRouter.patch("/by-guid/:vodGuid", async (req, res) => {
     const message = e instanceof Error ? e.message : String(e);
     const status = /not found/i.test(message) ? 404 : 400;
     res.status(status).json({ error: message });
+  }
+});
+
+/**
+ * AI runs (Speech-to-text / News article) on this VOD + language options and rates.
+ * GET /api/vod/by-guid/:vodGuid/ai-runs
+ */
+vodRouter.get("/by-guid/:vodGuid/ai-runs", async (req, res) => {
+  try {
+    const tenantId = getTenantId(req);
+    if (!tenantId) {
+      return res.status(400).json({ error: "Missing tenantId (query or x-tenant-id header)" });
+    }
+    await resolveTenant(tenantId);
+    const vodGuid = String(req.params.vodGuid || "").trim();
+    if (!vodGuid) return res.status(400).json({ error: "Missing vodGuid" });
+    const vod = await findInsightVodByGuid(tenantId, vodGuid);
+    if (!vod) return res.status(404).json({ error: "VOD not found" });
+    const [runs, options] = await Promise.all([
+      listAiRunsForVod(tenantId, vodGuid),
+      getAiRunOptions(tenantId, vod),
+    ]);
+    res.json({ runs, options });
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    res.status(400).json({ error: message });
+  }
+});
+
+/**
+ * Start an AI run on this VOD.
+ * POST /api/vod/by-guid/:vodGuid/ai-runs  body: { service: 'stt'|'article', languages: string[] }
+ */
+vodRouter.post("/by-guid/:vodGuid/ai-runs", async (req, res) => {
+  try {
+    const tenantId = getTenantId(req);
+    if (!tenantId) {
+      return res.status(400).json({ error: "Missing tenantId (query or x-tenant-id header)" });
+    }
+    await resolveTenant(tenantId);
+    const vodGuid = String(req.params.vodGuid || "").trim();
+    if (!vodGuid) return res.status(400).json({ error: "Missing vodGuid" });
+    const body = req.body && typeof req.body === "object" ? req.body : {};
+    const result = await startAiRun({
+      tenantId,
+      vodGuid,
+      service: String(body.service || ""),
+      languages: Array.isArray(body.languages) ? body.languages : [],
+    });
+    const runs = await listAiRunsForVod(tenantId, vodGuid);
+    res.status(202).json({ ...result, runs });
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    const status = e && typeof e === "object" && "status" in e ? Number(/** @type {{ status?: number }} */ (e).status) || 400 : 400;
+    const code = e && typeof e === "object" && "code" in e ? String(/** @type {{ code?: string }} */ (e).code || "") : "";
+    res.status(status).json({ error: message, ...(code ? { code } : {}) });
   }
 });
 

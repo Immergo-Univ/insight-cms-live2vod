@@ -2,6 +2,7 @@ import { getSequelize } from "../db/sequelize.js";
 import { isVodJobsPostgresEnabled } from "./vod-jobs-pg.repository.js";
 import { getJob, mergeJobEditorSpec } from "./vod-jobs.store.js";
 import { uploadVideoToFacebook } from "./tenant-syndication.service.js";
+import { resolveFacebookPublishOptions } from "./social-account-settings.service.js";
 import { getActiveAccountsForPublish } from "./tenant-syndication-accounts.service.js";
 import { resolveJobSyndicationMp4Url } from "./encoder-output-url.service.js";
 import { vodEncodeStdout } from "../utils/vod-encode-log.js";
@@ -86,10 +87,7 @@ export async function tryFacebookSyndicationAfterJobCompleted(jobId) {
   const titleFromMeta = typeof meta.title === "string" ? meta.title.trim() : "";
   const descFromMeta = typeof meta.description === "string" ? meta.description.trim() : "";
   const opt = fb.options && typeof fb.options === "object" && !Array.isArray(fb.options) ? fb.options : {};
-  const titleOverride = typeof opt.titleOverride === "string" ? opt.titleOverride.trim() : "";
-  const descriptionOverride = typeof opt.descriptionOverride === "string" ? opt.descriptionOverride.trim() : "";
-  const videoTitle = titleOverride || titleFromMeta || "Untitled";
-  const videoDescription = descriptionOverride || descFromMeta || "";
+  const clipMeta = { title: titleFromMeta, description: descFromMeta };
   const uploadsMap =
     fb.uploads && typeof fb.uploads === "object" && !Array.isArray(fb.uploads) ? fb.uploads : {};
 
@@ -112,12 +110,13 @@ export async function tryFacebookSyndicationAfterJobCompleted(jobId) {
     );
 
     try {
+      const publish = resolveFacebookPublishOptions(account.get("settings"), opt, clipMeta);
       const result = await uploadVideoToFacebook({
         tenantId: job.tenantId,
         accountId,
         videoUrl,
-        title: videoTitle,
-        description: videoDescription,
+        title: publish.title,
+        description: publish.description,
       });
       await mergeJobEditorSpec(jobId, (prev) =>
         specWithFacebookUploadPatch(prev, job.editorClipId || "", accountId, {

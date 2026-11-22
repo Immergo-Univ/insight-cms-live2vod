@@ -14,6 +14,7 @@ import { AdminProfilePage } from "@/admin/pages/admin-profile-page";
 import { AdminTenantsPage } from "@/admin/pages/admin-tenants-page";
 import { AdminTenantSettingsPage } from "@/admin/pages/admin-tenant-settings-page";
 import { AdminSettingsPage } from "@/admin/pages/admin-settings-page";
+import { AdminCreditOrdersPage } from "@/admin/pages/admin-credit-orders-page";
 import "@/admin/admin-theme.css";
 
 export function AdminApp() {
@@ -44,6 +45,7 @@ export function AdminApp() {
                     <Route path="clips" element={<AdminClipsPage />} />
                     <Route path="tenants" element={<AdminTenantsPage />} />
                     <Route path="tenants/:tenantId" element={<AdminTenantSettingsPage />} />
+                    <Route path="credit-orders" element={<AdminCreditOrdersPage />} />
                     <Route path="users" element={<AdminUsersPage />} />
                     <Route path="roles" element={<AdminRolesPage />} />
                     <Route path="permissions" element={<AdminPermissionsPage />} />

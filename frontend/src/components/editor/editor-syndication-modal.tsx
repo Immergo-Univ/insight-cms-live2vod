@@ -296,35 +296,31 @@ function SyndicationResultFeedback({
   );
 }
 
-function clipMetadataDefaults(clip: EditorSubClip) {
-  const title = clip.title?.trim() || `Clip ${clip.order}`;
-  const description = clip.description?.trim() || "";
-  const tags = normalizeEditorClipTagsList(clip.tags ?? []);
-  const combinedText = [title, description].filter(Boolean).join("\n\n");
-  return { title, description, tags, combinedText };
-}
+const ACCOUNT_DEFAULT_OPTION = "account_default";
 
 function defaultYoutubeBranch(
   clip: EditorSubClip,
   defaultEnabled: boolean,
 ): EditorClipYoutubeSyndication {
   const existing = clip.syndication?.youtube;
-  const defaults = clipMetadataDefaults(clip);
+  const prev = existing?.options;
+  // Leave metadata unset unless this clip already stored it. The upload then uses the
+  // YouTube integration settings for that channel.
   return {
     enabled: existing?.enabled === true || (!existing && defaultEnabled),
     options: {
-      privacyStatus: (existing?.options?.privacyStatus as EditorYoutubePrivacyStatus) || "private",
-      categoryId: existing?.options?.categoryId != null ? String(existing.options.categoryId) : "22",
-      embeddable: existing?.options?.embeddable !== false,
-      license: existing?.options?.license === "creativeCommon" ? "creativeCommon" : "youtube",
-      publicStatsViewable: existing?.options?.publicStatsViewable !== false,
-      selfDeclaredMadeForKids: Boolean(existing?.options?.selfDeclaredMadeForKids),
-      notifySubscribers: Boolean(existing?.options?.notifySubscribers),
-      titleOverride: existing?.options?.titleOverride?.trim() || defaults.title,
-      descriptionOverride: existing?.options?.descriptionOverride?.trim() || defaults.description,
-      tagsExtra: existing?.options?.tagsExtra?.length ? [...existing.options.tagsExtra] : [...defaults.tags],
-      defaultLanguage: existing?.options?.defaultLanguage ?? "",
-      defaultAudioLanguage: existing?.options?.defaultAudioLanguage ?? "",
+      privacyStatus: prev?.privacyStatus,
+      categoryId: prev?.categoryId != null && String(prev.categoryId).trim() ? String(prev.categoryId) : undefined,
+      embeddable: typeof prev?.embeddable === "boolean" ? prev.embeddable : undefined,
+      license: prev?.license,
+      publicStatsViewable: typeof prev?.publicStatsViewable === "boolean" ? prev.publicStatsViewable : undefined,
+      selfDeclaredMadeForKids: typeof prev?.selfDeclaredMadeForKids === "boolean" ? prev.selfDeclaredMadeForKids : undefined,
+      notifySubscribers: typeof prev?.notifySubscribers === "boolean" ? prev.notifySubscribers : undefined,
+      titleOverride: prev?.titleOverride?.trim() || undefined,
+      descriptionOverride: prev?.descriptionOverride?.trim() || undefined,
+      tagsExtra: prev?.tagsExtra?.length ? [...prev.tagsExtra] : undefined,
+      defaultLanguage: prev?.defaultLanguage?.trim() || undefined,
+      defaultAudioLanguage: prev?.defaultAudioLanguage?.trim() || undefined,
     },
     upload: existing?.upload ? { ...existing.upload } : undefined,
     uploads: existing?.uploads ? { ...existing.uploads } : undefined,
@@ -336,11 +332,11 @@ function defaultTwitterBranch(
   defaultEnabled: boolean,
 ): EditorClipTwitterSyndication {
   const existing = clip.syndication?.twitter;
-  const defaults = clipMetadataDefaults(clip);
+  // Empty overrides fall back to the account template in Integrations.
   return {
     enabled: existing?.enabled === true || (!existing && defaultEnabled),
     options: {
-      textOverride: existing?.options?.textOverride?.trim() || defaults.combinedText || defaults.title,
+      textOverride: existing?.options?.textOverride?.trim() || undefined,
     },
     upload: existing?.upload ? { ...existing.upload } : undefined,
     uploads: existing?.uploads ? { ...existing.uploads } : undefined,
@@ -352,12 +348,11 @@ function defaultFacebookBranch(
   defaultEnabled: boolean,
 ): EditorClipFacebookSyndication {
   const existing = clip.syndication?.facebook;
-  const defaults = clipMetadataDefaults(clip);
   return {
     enabled: existing?.enabled === true || (!existing && defaultEnabled),
     options: {
-      titleOverride: existing?.options?.titleOverride?.trim() || defaults.title,
-      descriptionOverride: existing?.options?.descriptionOverride?.trim() || defaults.description,
+      titleOverride: existing?.options?.titleOverride?.trim() || undefined,
+      descriptionOverride: existing?.options?.descriptionOverride?.trim() || undefined,
     },
     upload: existing?.upload ? { ...existing.upload } : undefined,
     uploads: existing?.uploads ? { ...existing.uploads } : undefined,
@@ -370,12 +365,12 @@ function defaultInstagramBranch(
 ): EditorClipInstagramSyndication {
   const existing = clip.syndication?.instagram;
   const mediaTypeRaw = existing?.options?.mediaType;
-  const mediaType: EditorInstagramMediaType = mediaTypeRaw === "feed" ? "feed" : "reels";
-  const defaults = clipMetadataDefaults(clip);
+  const mediaType: EditorInstagramMediaType | undefined =
+    mediaTypeRaw === "feed" || mediaTypeRaw === "reels" ? mediaTypeRaw : undefined;
   return {
     enabled: existing?.enabled === true || (!existing && defaultEnabled),
     options: {
-      captionOverride: existing?.options?.captionOverride?.trim() || defaults.combinedText || defaults.title,
+      captionOverride: existing?.options?.captionOverride?.trim() || undefined,
       mediaType,
     },
     upload: existing?.upload ? { ...existing.upload } : undefined,
@@ -388,11 +383,10 @@ function defaultTiktokBranch(
   defaultEnabled: boolean,
 ): EditorClipTiktokSyndication {
   const existing = clip.syndication?.tiktok;
-  const defaults = clipMetadataDefaults(clip);
   return {
     enabled: existing?.enabled === true || (!existing && defaultEnabled),
     options: {
-      captionOverride: existing?.options?.captionOverride?.trim() || defaults.combinedText || defaults.title,
+      captionOverride: existing?.options?.captionOverride?.trim() || undefined,
       privacyLevel: existing?.options?.privacyLevel ?? "",
       disableDuet: existing?.options?.disableDuet === true,
       disableComment: existing?.options?.disableComment === true,
@@ -614,21 +608,13 @@ export function EditorSyndicationModal({
     try {
       const info = await fetchTenantSyndicationTiktokCreatorInfo(id);
       setTiktokCreatorInfo(info);
-      const opts = Array.isArray(info.privacy_level_options) ? info.privacy_level_options : [];
-      if (opts.length && !ttDraft.options.privacyLevel) {
-        const preferred = opts.includes("SELF_ONLY") ? "SELF_ONLY" : opts[0];
-        setTtDraft((d) => ({
-          ...d,
-          options: { ...d.options, privacyLevel: preferred },
-        }));
-      }
     } catch (e) {
       setStatusError(e instanceof Error ? e.message : "Failed to load TikTok creator info");
       setTiktokCreatorInfo(null);
     } finally {
       setCreatorInfoBusy(false);
     }
-  }, [tenantId, tiktokAccounts.length, ttDraft.options.privacyLevel]);
+  }, [tenantId, tiktokAccounts.length]);
 
   useEffect(() => {
     if (!isOpen || tiktokAccounts.length === 0) return;
@@ -890,7 +876,7 @@ export function EditorSyndicationModal({
           tagsExtra: ytDraft.options.tagsExtra?.length
             ? normalizeEditorClipTagsList(ytDraft.options.tagsExtra)
             : undefined,
-          categoryId: ytDraft.options.categoryId?.trim() || "22",
+          categoryId: ytDraft.options.categoryId?.trim() || undefined,
           defaultLanguage: ytDraft.options.defaultLanguage?.trim() || undefined,
           defaultAudioLanguage: ytDraft.options.defaultAudioLanguage?.trim() || undefined,
         },
@@ -917,8 +903,10 @@ export function EditorSyndicationModal({
       };
     }
     if (syndicationInstagramEnabled && instagramConnected && instagramAccountSelected && igDraft.enabled) {
-      const mediaType: EditorInstagramMediaType =
-        igDraft.options.mediaType === "feed" ? "feed" : "reels";
+      const mediaType: EditorInstagramMediaType | undefined =
+        igDraft.options.mediaType === "feed" || igDraft.options.mediaType === "reels"
+          ? igDraft.options.mediaType
+          : undefined;
       next.instagram = {
         enabled: true,
         options: {
@@ -1162,7 +1150,7 @@ export function EditorSyndicationModal({
                         size="sm"
                       />
                       <Toggle
-                        isSelected={!!ytDraft.options.notifySubscribers}
+                        isSelected={ytDraft.options.notifySubscribers !== false}
                         onChange={(v) => setOpt({ notifySubscribers: v })}
                         isDisabled={readOnly || !ytDraft.enabled}
                         label="Notify subscribers when published"
@@ -1353,8 +1341,8 @@ export function EditorSyndicationModal({
                       />
                     </label>
                     <p className="text-xs text-tertiary">
-                      Default tweet text is the clip title when override is empty. X may enforce length and media
-                      limits per your developer plan.
+                      When the override is empty, the post text comes from the account template in Integrations. X
+                      may enforce length and media limits per your developer plan.
                     </p>
                     <SyndicationUploadStatusBlock
                       branch={twResultBranch}
@@ -1567,17 +1555,18 @@ export function EditorSyndicationModal({
                       Destination
                       <AppSelect
                         disabled={readOnly || !igDraft.enabled}
-                        value={igDraft.options.mediaType === "feed" ? "feed" : "reels"}
+                        value={igDraft.options.mediaType ?? ACCOUNT_DEFAULT_OPTION}
                         onChange={(value) =>
                           setIgDraft((d) => ({
                             ...d,
                             options: {
                               ...d.options,
-                              mediaType: value === "feed" ? "feed" : "reels",
+                              mediaType: value === "feed" || value === "reels" ? value : undefined,
                             },
                           }))
                         }
                         options={[
+                          { value: ACCOUNT_DEFAULT_OPTION, label: "Account default" },
                           { value: "reels", label: "Reels" },
                           { value: "feed", label: "Feed (video post)" },
                         ]}
@@ -1663,20 +1652,26 @@ export function EditorSyndicationModal({
                       Privacy
                       <AppSelect
                         disabled={readOnly || !ttDraft.enabled || creatorInfoBusy}
-                        value={ttDraft.options.privacyLevel || undefined}
+                        value={ttDraft.options.privacyLevel || ACCOUNT_DEFAULT_OPTION}
                         onChange={(value) =>
                           setTtDraft((d) => ({
                             ...d,
-                            options: { ...d.options, privacyLevel: value ?? "" },
+                            options: {
+                              ...d.options,
+                              privacyLevel: !value || value === ACCOUNT_DEFAULT_OPTION ? "" : value,
+                            },
                           }))
                         }
-                        options={(tiktokCreatorInfo?.privacy_level_options?.length
-                          ? tiktokCreatorInfo.privacy_level_options
-                          : ["SELF_ONLY"]
-                        ).map((p) => ({
-                          value: p,
-                          label: p.replace(/_/g, " ").toLowerCase(),
-                        }))}
+                        options={[
+                          { value: ACCOUNT_DEFAULT_OPTION, label: "Account default" },
+                          ...(tiktokCreatorInfo?.privacy_level_options?.length
+                            ? tiktokCreatorInfo.privacy_level_options
+                            : ["SELF_ONLY"]
+                          ).map((p) => ({
+                            value: p,
+                            label: p.replace(/_/g, " ").toLowerCase(),
+                          })),
+                        ]}
                       />
                     </label>
                     <label className="flex flex-col gap-1 text-xs font-medium text-secondary">

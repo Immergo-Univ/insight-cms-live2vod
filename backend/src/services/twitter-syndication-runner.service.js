@@ -2,6 +2,7 @@ import { getSequelize } from "../db/sequelize.js";
 import { isVodJobsPostgresEnabled } from "./vod-jobs-pg.repository.js";
 import { getJob, mergeJobEditorSpec } from "./vod-jobs.store.js";
 import { uploadVideoToTwitter } from "./tenant-syndication.service.js";
+import { resolveTwitterPublishOptions } from "./social-account-settings.service.js";
 import { getActiveAccountsForPublish } from "./tenant-syndication-accounts.service.js";
 import { resolveJobSyndicationMp4Url } from "./encoder-output-url.service.js";
 import { vodEncodeStdout } from "../utils/vod-encode-log.js";
@@ -84,9 +85,9 @@ export async function tryTwitterSyndicationAfterJobCompleted(jobId) {
 
   const meta = clip.metadata && typeof clip.metadata === "object" && !Array.isArray(clip.metadata) ? clip.metadata : {};
   const titleFromMeta = typeof meta.title === "string" ? meta.title.trim() : "";
+  const descFromMeta = typeof meta.description === "string" ? meta.description.trim() : "";
   const opt = tw.options && typeof tw.options === "object" && !Array.isArray(tw.options) ? tw.options : {};
-  const textOverride = typeof opt.textOverride === "string" ? opt.textOverride.trim() : "";
-  const tweetText = textOverride || titleFromMeta || " ";
+  const clipMeta = { title: titleFromMeta, description: descFromMeta };
   const uploadsMap =
     tw.uploads && typeof tw.uploads === "object" && !Array.isArray(tw.uploads) ? tw.uploads : {};
 
@@ -109,11 +110,13 @@ export async function tryTwitterSyndicationAfterJobCompleted(jobId) {
     );
 
     try {
+      const publish = resolveTwitterPublishOptions(account.get("settings"), opt, clipMeta);
       const result = await uploadVideoToTwitter({
         tenantId: job.tenantId,
         accountId,
         videoUrl,
-        text: tweetText,
+        text: publish.text,
+        replySettings: publish.replySettings,
       });
       await mergeJobEditorSpec(jobId, (prev) =>
         specWithTwitterUploadPatch(prev, job.editorClipId || "", accountId, {

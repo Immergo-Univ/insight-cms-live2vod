@@ -172,7 +172,7 @@ function buildDefaultClipSyndication(opts: {
   if (opts.youtubeEnabled) next.youtube = { enabled: true, options: {} };
   if (opts.twitterEnabled) next.twitter = { enabled: true, options: {} };
   if (opts.facebookEnabled) next.facebook = { enabled: true, options: {} };
-  if (opts.instagramEnabled) next.instagram = { enabled: true, options: { mediaType: "reels" } };
+  if (opts.instagramEnabled) next.instagram = { enabled: true, options: {} };
   if (opts.tiktokEnabled) next.tiktok = { enabled: true, options: {} };
   return Object.keys(next).length ? next : undefined;
 }

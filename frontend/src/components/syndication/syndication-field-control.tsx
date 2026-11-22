@@ -38,7 +38,13 @@ export function SyndicationFieldControl({ field, value, disabled, onChange }: Fi
         value={(value as string) ?? field.default}
         onChange={(e) => onChange(e.target.value)}
         aria-label={field.label}
-        style={{ ...inputStyle, padding: "0 10px" }}
+        style={{
+          ...inputStyle,
+          padding: "0 10px",
+          ...(disabled
+            ? { background: "#f1f3f6", color: "#8b9099", cursor: "not-allowed", opacity: 0.8 }
+            : null),
+        }}
       >
         {field.options.map((o) => (
           <option key={o} value={o}>

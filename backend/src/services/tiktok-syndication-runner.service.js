@@ -3,6 +3,7 @@ import { isVodJobsPostgresEnabled } from "./vod-jobs-pg.repository.js";
 import { getJob, mergeJobEditorSpec } from "./vod-jobs.store.js";
 import { uploadVideoToTiktok } from "./tenant-syndication.service.js";
 import { getTiktokSyndicationDefaults } from "./admin-settings.service.js";
+import { resolveTiktokPublishOptions } from "./social-account-settings.service.js";
 import { getActiveAccountsForPublish } from "./tenant-syndication-accounts.service.js";
 import { resolveJobSyndicationMp4Url } from "./encoder-output-url.service.js";
 import { vodEncodeStdout } from "../utils/vod-encode-log.js";
@@ -87,17 +88,8 @@ export async function tryTiktokSyndicationAfterJobCompleted(jobId) {
   const titleFromMeta = typeof meta.title === "string" ? meta.title.trim() : "";
   const descFromMeta = typeof meta.description === "string" ? meta.description.trim() : "";
   const opt = tt.options && typeof tt.options === "object" && !Array.isArray(tt.options) ? tt.options : {};
-  const captionOverride = typeof opt.captionOverride === "string" ? opt.captionOverride.trim() : "";
-  const privacyLevel = typeof opt.privacyLevel === "string" ? opt.privacyLevel.trim() : "";
   const adminDefaults = await getTiktokSyndicationDefaults();
-  const captionParts = [];
-  if (captionOverride) captionParts.push(captionOverride);
-  else {
-    if (titleFromMeta) captionParts.push(titleFromMeta);
-    if (descFromMeta) captionParts.push(descFromMeta);
-    if (!captionParts.length && adminDefaults.defaultCaption) captionParts.push(adminDefaults.defaultCaption);
-  }
-  const caption = captionParts.join("\n\n").trim() || " ";
+  const clipMeta = { title: titleFromMeta, description: descFromMeta };
   const uploadsMap =
     tt.uploads && typeof tt.uploads === "object" && !Array.isArray(tt.uploads) ? tt.uploads : {};
 
@@ -120,18 +112,20 @@ export async function tryTiktokSyndicationAfterJobCompleted(jobId) {
     );
 
     try {
+      const publish = resolveTiktokPublishOptions(account.get("settings"), opt, clipMeta, adminDefaults);
       const result = await uploadVideoToTiktok({
         tenantId: job.tenantId,
         accountId,
         jobId,
         videoUrl,
-        caption,
-        privacyLevel: privacyLevel || adminDefaults.defaultPrivacyLevel,
-        disableDuet: opt.disableDuet === true,
-        disableComment: opt.disableComment === true,
-        disableStitch: opt.disableStitch === true,
-        brandContentToggle: opt.brandContentToggle === true,
-        brandOrganicToggle: opt.brandOrganicToggle === true,
+        caption: publish.caption,
+        privacyLevel: publish.privacyLevel,
+        disableDuet: publish.disableDuet,
+        disableComment: publish.disableComment,
+        disableStitch: publish.disableStitch,
+        brandContentToggle: publish.brandContentToggle,
+        brandOrganicToggle: publish.brandOrganicToggle,
+        isAigc: publish.isAigc,
       });
       await mergeJobEditorSpec(jobId, (prev) =>
         specWithTiktokUploadPatch(prev, job.editorClipId || "", accountId, {
