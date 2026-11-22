@@ -755,6 +755,61 @@ export async function updateInsightVodAiByGuid({
 }
 
 /**
+ * Add or replace one Whisper sidecar subtitle on an existing VOD (keeps the rest of content[]).
+ *
+ * @param {object} opts
+ * @param {string} opts.tenantId
+ * @param {string} opts.vodGuid
+ * @param {string} opts.languageCode ISO-639-1
+ * @param {string} opts.downloadUrl public .vtt URL
+ * @returns {Promise<Record<string, unknown>>}
+ */
+export async function upsertInsightVodSubtitleAsset({ tenantId, vodGuid, languageCode, downloadUrl }) {
+  const guid = String(vodGuid || "").trim();
+  const iso2 = String(languageCode || "").trim().toLowerCase();
+  if (!tenantId || !guid || !iso2 || !downloadUrl) throw new Error("Missing subtitle asset fields");
+
+  const existing = await findInsightVodByGuid(tenantId, guid);
+  if (!existing?._id) throw new Error(`VOD not found for guid=${guid}`);
+
+  const lang = whisperLanguageMeta(iso2);
+  const now = Date.now();
+  const content = Array.isArray(existing.content) ? existing.content.map((item) => ({ ...item })) : [];
+  const idx = content.findIndex((item) => {
+    if (!item || !Array.isArray(item.assetTypes) || !item.assetTypes.includes("Subtitles")) return false;
+    return String(item.language || "").trim().toLowerCase() === iso2;
+  });
+  const entry = {
+    ...(idx >= 0 ? content[idx] : {}),
+    assetTypes: ["Subtitles"],
+    downloadUrl,
+    mime_type: "text/vtt",
+    format: "vtt",
+    type: "text",
+    medium: "Subtitles",
+    typeName: "Subtitles",
+    name: lang.name,
+    language: lang.iso2,
+    languageName: lang.name,
+    status: "ready",
+    updated: now,
+    ...(idx < 0 ? { created: now } : {}),
+  };
+  if (idx >= 0) content[idx] = entry;
+  else content.push(entry);
+
+  const { accountId, headers } = await insightWriteContext(tenantId);
+  await axios.post(
+    `${config.insightApiBase}/cms/entity/vods/insertOrUpdate`,
+    { _id: existing._id, accountId: existing.accountId || accountId, content },
+    { headers },
+  );
+  const refreshed = await findInsightVodByGuid(tenantId, guid);
+  if (!refreshed) throw new Error(`VOD disappeared after subtitle update guid=${guid}`);
+  return refreshed;
+}
+
+/**
  * Map Insight news[] into Postgres transcriptNewsBundle (+ legacy plain fields).
  *
  * @param {unknown} newsArr

@@ -2,7 +2,7 @@
 export type AiServiceKey = "stt" | "subtitles" | "article" | "dubbing";
 
 /** Services that can be run on an existing VOD today. */
-export type AiRunServiceKey = "stt" | "article";
+export type AiRunServiceKey = "stt" | "article" | "subtitles";
 
 export type AiCreditsPerMinute = Record<AiServiceKey, number>;
 

@@ -83,6 +83,7 @@ function getTenantS3Client(s3) {
  * @param {string} opts.fileName e.g. poster.jpg
  * @param {Buffer} opts.body
  * @param {string} opts.contentType
+ * @param {string} [opts.cacheControl]
  * @returns {Promise<{ key: string }>}
  */
 export async function putTenantTranscodedObject({
@@ -92,6 +93,7 @@ export async function putTenantTranscodedObject({
   fileName,
   body,
   contentType,
+  cacheControl,
 }) {
   if (!s3?.bucket || !s3?.key || !s3?.secret) {
     throw new Error("putTenantTranscodedObject: missing tenant S3 credentials");
@@ -112,7 +114,7 @@ export async function putTenantTranscodedObject({
       Body: body,
       ContentType: contentType,
       ACL: "public-read",
-      CacheControl: "public, max-age=31536000, immutable",
+      CacheControl: cacheControl || "public, max-age=31536000, immutable",
     }),
   );
   return { key };

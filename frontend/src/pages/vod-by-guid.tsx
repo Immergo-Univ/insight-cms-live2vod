@@ -15,7 +15,7 @@ import {
 } from "@/services/ai-credits.service";
 import { httpClient } from "@/services/http-client";
 import { fetchVodAiByGuid, patchVodAiByGuid } from "@/services/vod.service";
-import type { AiCreditsResponse, AiRun, AiRunOptions, CreditOrder } from "@/types/ai-credits";
+import type { AiCreditsResponse, AiRun, AiRunOptions, AiRunServiceKey, CreditOrder } from "@/types/ai-credits";
 import type {
   InsightVodDocument,
   InsightVodNewsEntry,
@@ -161,7 +161,7 @@ function VodByGuidContent() {
   const posterUrl = useMemo(() => (vod ? resolveInsightVodPosterUrl(vod) : null), [vod]);
 
   const handleRun = useCallback(
-    async (service: "stt" | "article", languages: string[]) => {
+    async (service: AiRunServiceKey, languages: string[]) => {
       const serviceName = t(`services.${service}.name`);
       try {
         const res = await startVodAiRun(vodGuid, service, languages);

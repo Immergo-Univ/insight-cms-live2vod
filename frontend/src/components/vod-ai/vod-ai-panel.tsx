@@ -1,7 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
 import { Trans, useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import type { AiRun, AiRunOptions, AiServiceKey, CreditOrder, TenantCreditState } from "@/types/ai-credits";
+import type {
+  AiRun,
+  AiRunOptions,
+  AiRunServiceKey,
+  AiServiceKey,
+  CreditOrder,
+  TenantCreditState,
+} from "@/types/ai-credits";
 import type { InsightVodContentItem, InsightVodDocument } from "@/types/insight-vod";
 import { whisperLanguageLabel } from "@/types/editor-whisper-languages";
 import { rebuildTranscriptPreviewText } from "@/utils/transcript-diarization";
@@ -25,7 +32,7 @@ export interface VodAiPanelProps {
   options: AiRunOptions | null;
   credits: TenantCreditState | null;
   orders: CreditOrder[];
-  onRun: (service: "stt" | "article", languages: string[]) => Promise<boolean>;
+  onRun: (service: AiRunServiceKey, languages: string[]) => Promise<boolean>;
   onOpenEditor: (kind: VodAiEditorKind, locale: string) => void;
   onBuyCredits: (neededCredits: number, serviceName: string) => void;
   onCancelOrder: (order: CreditOrder) => void;
@@ -205,8 +212,8 @@ export function VodAiPanel({
 
       <div className="grid grid-cols-1 content-start gap-3 p-[18px] lg:grid-cols-2">
         {SERVICES.map((service) => {
-          const supported = service === "stt" || service === "article";
-          const runService = service as "stt" | "article";
+          const supported = service === "stt" || service === "article" || service === "subtitles";
+          const runService = service as AiRunServiceKey;
           const name = t(`services.${service}.name`);
           const done = doneLangs[service];
           const serviceRuns = runs.filter((r) => r.service === service);

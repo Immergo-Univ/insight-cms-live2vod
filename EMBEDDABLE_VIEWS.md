@@ -54,9 +54,10 @@ Parámetro opcional común:
 
 ### AI Content (`/vod/:vod_guid`) y órdenes de créditos
 
-- Speech-to-text y News article se ejecutan sobre el VOD existente
-  (`POST /api/vod/by-guid/:vodGuid/ai-runs`); el resultado se mergea en Insight al completar.
-  Subtitles y Audio dubbing muestran resultados existentes (Run "Coming soon").
+- Speech-to-text, News article y Subtitles se ejecutan sobre el VOD existente
+  (`POST /api/vod/by-guid/:vodGuid/ai-runs`); el resultado se mergea en Insight al completar
+  (transcript, news, o un `.vtt` en `content[]`). Audio dubbing muestra resultados existentes
+  (Run "Coming soon").
 - "Buy credits" crea una **orden de compra pendiente** (`POST /api/ai-credits/orders`).
   Los créditos se otorgan solo cuando un admin la aprueba en `/admin/credit-orders`
   (permiso `credits.*`).
