@@ -327,6 +327,11 @@ export async function startBackgroundVodJob(opts) {
             jobId,
             editorClipId,
           });
+      vodEncodeStdout(
+        `dispatch start job=${jobId} tenant=${tenantId} url=${dispatchUrl}/encoder/jobs encoderType=new ` +
+          `realtimeTranscribeOnly=${spec?.realtimeTranscribeOnly === true} aiRun=${spec?.__aiRun ? spec.__aiRun.service : "no"} ` +
+          `vodGuid=${vodGuid || "-"} callbackBase=${config.cmsCallbackBaseUrl || "-"}`,
+      );
       const res = await fetch(`${dispatchUrl}/encoder/jobs`, {
         method: "POST",
         headers: {
@@ -349,6 +354,9 @@ export async function startBackgroundVodJob(opts) {
         }),
       });
       if (res.ok) {
+        // Log the encoder's answer: it reveals WHICH encoder handled the job (immergo api vs encoder-lite).
+        const okBody = await res.text().catch(() => "");
+        vodEncodeStdout(`dispatch accepted job=${jobId} status=${res.status} body=${okBody.slice(0, 400)}`);
         await updateJob(jobId, {
           status: "processing",
           progress: 1,

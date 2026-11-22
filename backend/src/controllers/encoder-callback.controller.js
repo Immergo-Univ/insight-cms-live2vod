@@ -70,19 +70,48 @@ function readBearerToken(req) {
 function requireEncoderSecret(req, res, next) {
   const expected = config.encoder.secret;
   if (!expected) {
+    console.error(`[encoder-callback] rejected job=${req.params?.jobId}: SECRET is not configured on backend`);
     return res.status(503).json({ error: "SECRET is not configured on backend" });
   }
   if (readBearerToken(req) !== expected) {
+    console.error(
+      `[encoder-callback] rejected job=${req.params?.jobId}: 401 bearer secret mismatch (encoder SECRET != backend SECRET) from=${req.ip}`,
+    );
     return res.status(401).json({ error: "Unauthorized" });
   }
   next();
+}
+
+/** Last `status|phase` logged per job, so progress ticks do not flood the debug log. */
+const lastLoggedPatchState = new Map();
+
+/**
+ * Log encoder callbacks only when status/phase changes (or on failure).
+ * @param {string} jobId
+ * @param {Record<string, unknown>} patch
+ */
+function logEncoderPatch(jobId, patch) {
+  const stateKey = `${patch.status ?? ""}|${patch.phase ?? ""}`;
+  if (lastLoggedPatchState.get(jobId) === stateKey && patch.status !== "failed" && !patch.error) return;
+  lastLoggedPatchState.set(jobId, stateKey);
+  if (lastLoggedPatchState.size > 500) {
+    lastLoggedPatchState.delete(lastLoggedPatchState.keys().next().value);
+  }
+  console.log(
+    `[encoder-callback] job=${jobId} status=${patch.status ?? "-"} progress=${patch.progress ?? "-"} phase=${patch.phase ?? "-"}` +
+      ` message=${String(patch.message ?? "").slice(0, 200)}` +
+      (patch.error ? ` error=${String(patch.error).slice(0, 500)}` : ""),
+  );
 }
 
 encoderCallbackRouter.patch("/jobs/:jobId", requireEncoderSecret, async (req, res) => {
   const { jobId } = req.params;
   if (!jobId) return res.status(400).json({ error: "Missing jobId" });
   const job = await getJob(jobId);
-  if (!job) return res.status(404).json({ error: "Job not found" });
+  if (!job) {
+    console.error(`[encoder-callback] job=${jobId} not found (404) body.status=${req.body?.status ?? "-"}`);
+    return res.status(404).json({ error: "Job not found" });
+  }
 
   const body = req.body && typeof req.body === "object" ? req.body : {};
   /** @type {Record<string, unknown>} */
@@ -95,6 +124,7 @@ encoderCallbackRouter.patch("/jobs/:jobId", requireEncoderSecret, async (req, re
   if (Object.keys(patch).length === 0) {
     return res.status(400).json({ error: "No valid fields to patch" });
   }
+  logEncoderPatch(jobId, patch);
   if (patch.status === "completed") {
     // Dubbing jobs run on encoder-lite, which already reports its own multi-audio HLS master
     // (with selectable audio languages). Do NOT override it with the immergo VOD master URL,

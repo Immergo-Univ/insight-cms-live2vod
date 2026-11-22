@@ -1,3 +1,5 @@
+// Must stay the FIRST import: hooks stdout/stderr so every other module's logs are captured.
+import "./services/debug-log-capture.service.js";
 import { createServer } from "http";
 import { URL } from "url";
 import express from "express";
@@ -19,6 +21,7 @@ import { publicTiktokMediaRouter } from "./controllers/public-tiktok-media.contr
 import { encoderCallbackRouter } from "./controllers/encoder-callback.controller.js";
 import { tenantsRouter } from "./controllers/tenants.controller.js";
 import { aiCreditsRouter } from "./controllers/ai-credits.controller.js";
+import { debugLogsRouter } from "./controllers/debug-logs.controller.js";
 import { adminRouter } from "./routes/admin.routes.js";
 import { config } from "./config.js";
 import { startAdRecognitionService } from "./services/ad-recognition.service.js";
@@ -128,6 +131,7 @@ app.use("/api/public", publicTranscriptNewsRouter);
 app.use("/tiktok", publicTiktokMediaRouter);
 app.use("/api/encoder", encoderCallbackRouter);
 app.use("/api/admin", adminRouter);
+app.use("/api/debug", debugLogsRouter);
 
 const frontendBuildPath = path.join(__dirname, "../../frontend/dist");
 app.use(express.static(frontendBuildPath));

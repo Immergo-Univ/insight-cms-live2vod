@@ -28,3 +28,5 @@ backend/data/channels/*.json
 
 backend/.env*
 *.env*
+# Debug stdout capture (capped at 10 MB, rotated at runtime)
+backend/data/debug-logs/
